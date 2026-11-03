@@ -1696,12 +1696,571 @@ class MetaRowsCompanion extends UpdateCompanion<MetaRow> {
   }
 }
 
+class $RecordRowsTable extends RecordRows
+    with TableInfo<$RecordRowsTable, RecordRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RecordRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jsonMeta = const VerificationMeta('json');
+  @override
+  late final GeneratedColumn<String> json = GeneratedColumn<String>(
+    'json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [kind, id, json, dirty, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'record_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RecordRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('json')) {
+      context.handle(
+        _jsonMeta,
+        json.isAcceptableOrUnknown(data['json']!, _jsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jsonMeta);
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {kind, id};
+  @override
+  RecordRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RecordRow(
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      json: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}json'],
+      )!,
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $RecordRowsTable createAlias(String alias) {
+    return $RecordRowsTable(attachedDatabase, alias);
+  }
+}
+
+class RecordRow extends DataClass implements Insertable<RecordRow> {
+  final String kind;
+  final String id;
+  final String json;
+  final bool dirty;
+  final int updatedAt;
+  const RecordRow({
+    required this.kind,
+    required this.id,
+    required this.json,
+    required this.dirty,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['kind'] = Variable<String>(kind);
+    map['id'] = Variable<String>(id);
+    map['json'] = Variable<String>(json);
+    map['dirty'] = Variable<bool>(dirty);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  RecordRowsCompanion toCompanion(bool nullToAbsent) {
+    return RecordRowsCompanion(
+      kind: Value(kind),
+      id: Value(id),
+      json: Value(json),
+      dirty: Value(dirty),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory RecordRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RecordRow(
+      kind: serializer.fromJson<String>(json['kind']),
+      id: serializer.fromJson<String>(json['id']),
+      json: serializer.fromJson<String>(json['json']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'kind': serializer.toJson<String>(kind),
+      'id': serializer.toJson<String>(id),
+      'json': serializer.toJson<String>(json),
+      'dirty': serializer.toJson<bool>(dirty),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  RecordRow copyWith({
+    String? kind,
+    String? id,
+    String? json,
+    bool? dirty,
+    int? updatedAt,
+  }) => RecordRow(
+    kind: kind ?? this.kind,
+    id: id ?? this.id,
+    json: json ?? this.json,
+    dirty: dirty ?? this.dirty,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  RecordRow copyWithCompanion(RecordRowsCompanion data) {
+    return RecordRow(
+      kind: data.kind.present ? data.kind.value : this.kind,
+      id: data.id.present ? data.id.value : this.id,
+      json: data.json.present ? data.json.value : this.json,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecordRow(')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('json: $json, ')
+          ..write('dirty: $dirty, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(kind, id, json, dirty, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RecordRow &&
+          other.kind == this.kind &&
+          other.id == this.id &&
+          other.json == this.json &&
+          other.dirty == this.dirty &&
+          other.updatedAt == this.updatedAt);
+}
+
+class RecordRowsCompanion extends UpdateCompanion<RecordRow> {
+  final Value<String> kind;
+  final Value<String> id;
+  final Value<String> json;
+  final Value<bool> dirty;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const RecordRowsCompanion({
+    this.kind = const Value.absent(),
+    this.id = const Value.absent(),
+    this.json = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RecordRowsCompanion.insert({
+    required String kind,
+    required String id,
+    required String json,
+    this.dirty = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : kind = Value(kind),
+       id = Value(id),
+       json = Value(json);
+  static Insertable<RecordRow> custom({
+    Expression<String>? kind,
+    Expression<String>? id,
+    Expression<String>? json,
+    Expression<bool>? dirty,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (kind != null) 'kind': kind,
+      if (id != null) 'id': id,
+      if (json != null) 'json': json,
+      if (dirty != null) 'dirty': dirty,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RecordRowsCompanion copyWith({
+    Value<String>? kind,
+    Value<String>? id,
+    Value<String>? json,
+    Value<bool>? dirty,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return RecordRowsCompanion(
+      kind: kind ?? this.kind,
+      id: id ?? this.id,
+      json: json ?? this.json,
+      dirty: dirty ?? this.dirty,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (json.present) {
+      map['json'] = Variable<String>(json.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecordRowsCompanion(')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('json: $json, ')
+          ..write('dirty: $dirty, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $DriveFileRowsTable extends DriveFileRows
+    with TableInfo<$DriveFileRowsTable, DriveFileRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DriveFileRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileIdMeta = const VerificationMeta('fileId');
+  @override
+  late final GeneratedColumn<String> fileId = GeneratedColumn<String>(
+    'file_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [name, fileId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'drive_file_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DriveFileRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('file_id')) {
+      context.handle(
+        _fileIdMeta,
+        fileId.isAcceptableOrUnknown(data['file_id']!, _fileIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {name};
+  @override
+  DriveFileRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DriveFileRow(
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      fileId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_id'],
+      )!,
+    );
+  }
+
+  @override
+  $DriveFileRowsTable createAlias(String alias) {
+    return $DriveFileRowsTable(attachedDatabase, alias);
+  }
+}
+
+class DriveFileRow extends DataClass implements Insertable<DriveFileRow> {
+  final String name;
+  final String fileId;
+  const DriveFileRow({required this.name, required this.fileId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['name'] = Variable<String>(name);
+    map['file_id'] = Variable<String>(fileId);
+    return map;
+  }
+
+  DriveFileRowsCompanion toCompanion(bool nullToAbsent) {
+    return DriveFileRowsCompanion(name: Value(name), fileId: Value(fileId));
+  }
+
+  factory DriveFileRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DriveFileRow(
+      name: serializer.fromJson<String>(json['name']),
+      fileId: serializer.fromJson<String>(json['fileId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'name': serializer.toJson<String>(name),
+      'fileId': serializer.toJson<String>(fileId),
+    };
+  }
+
+  DriveFileRow copyWith({String? name, String? fileId}) =>
+      DriveFileRow(name: name ?? this.name, fileId: fileId ?? this.fileId);
+  DriveFileRow copyWithCompanion(DriveFileRowsCompanion data) {
+    return DriveFileRow(
+      name: data.name.present ? data.name.value : this.name,
+      fileId: data.fileId.present ? data.fileId.value : this.fileId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DriveFileRow(')
+          ..write('name: $name, ')
+          ..write('fileId: $fileId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(name, fileId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DriveFileRow &&
+          other.name == this.name &&
+          other.fileId == this.fileId);
+}
+
+class DriveFileRowsCompanion extends UpdateCompanion<DriveFileRow> {
+  final Value<String> name;
+  final Value<String> fileId;
+  final Value<int> rowid;
+  const DriveFileRowsCompanion({
+    this.name = const Value.absent(),
+    this.fileId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DriveFileRowsCompanion.insert({
+    required String name,
+    required String fileId,
+    this.rowid = const Value.absent(),
+  }) : name = Value(name),
+       fileId = Value(fileId);
+  static Insertable<DriveFileRow> custom({
+    Expression<String>? name,
+    Expression<String>? fileId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (name != null) 'name': name,
+      if (fileId != null) 'file_id': fileId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DriveFileRowsCompanion copyWith({
+    Value<String>? name,
+    Value<String>? fileId,
+    Value<int>? rowid,
+  }) {
+    return DriveFileRowsCompanion(
+      name: name ?? this.name,
+      fileId: fileId ?? this.fileId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (fileId.present) {
+      map['file_id'] = Variable<String>(fileId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DriveFileRowsCompanion(')
+          ..write('name: $name, ')
+          ..write('fileId: $fileId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $EventRowsTable eventRows = $EventRowsTable(this);
   late final $OutboxRowsTable outboxRows = $OutboxRowsTable(this);
   late final $MetaRowsTable metaRows = $MetaRowsTable(this);
+  late final $RecordRowsTable recordRows = $RecordRowsTable(this);
+  late final $DriveFileRowsTable driveFileRows = $DriveFileRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1710,6 +2269,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     eventRows,
     outboxRows,
     metaRows,
+    recordRows,
+    driveFileRows,
   ];
 }
 
@@ -2558,6 +3119,362 @@ typedef $$MetaRowsTableProcessedTableManager =
       MetaRow,
       PrefetchHooks Function()
     >;
+typedef $$RecordRowsTableCreateCompanionBuilder = RecordRowsCompanion Function({
+  required String kind,
+  required String id,
+  required String json,
+  Value<bool> dirty,
+  Value<int> updatedAt,
+  Value<int> rowid,
+});
+typedef $$RecordRowsTableUpdateCompanionBuilder = RecordRowsCompanion Function({
+  Value<String> kind,
+  Value<String> id,
+  Value<String> json,
+  Value<bool> dirty,
+  Value<int> updatedAt,
+  Value<int> rowid,
+});
+
+class $$RecordRowsTableFilterComposer
+    extends Composer<_$AppDatabase, $RecordRowsTable> {
+  $$RecordRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$RecordRowsTableOrderingComposer
+    extends Composer<_$AppDatabase, $RecordRowsTable> {
+  $$RecordRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$RecordRowsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $RecordRowsTable> {
+  $$RecordRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get json =>
+      $composableBuilder(column: $table.json, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$RecordRowsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $RecordRowsTable,
+          RecordRow,
+          $$RecordRowsTableFilterComposer,
+          $$RecordRowsTableOrderingComposer,
+          $$RecordRowsTableAnnotationComposer,
+          $$RecordRowsTableCreateCompanionBuilder,
+          $$RecordRowsTableUpdateCompanionBuilder,
+          (
+            RecordRow,
+            BaseReferences<_$AppDatabase, $RecordRowsTable, RecordRow>,
+          ),
+          RecordRow,
+          PrefetchHooks Function()
+        > {
+  $$RecordRowsTableTableManager(_$AppDatabase db, $RecordRowsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RecordRowsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$RecordRowsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$RecordRowsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> kind = const Value.absent(),
+                Value<String> id = const Value.absent(),
+                Value<String> json = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RecordRowsCompanion(
+                kind: kind,
+                id: id,
+                json: json,
+                dirty: dirty,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String kind,
+                required String id,
+                required String json,
+                Value<bool> dirty = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RecordRowsCompanion.insert(
+                kind: kind,
+                id: id,
+                json: json,
+                dirty: dirty,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$RecordRowsTable, RecordRow>(table),
+                  BaseReferences<_$AppDatabase, $RecordRowsTable, RecordRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$RecordRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $RecordRowsTable,
+      RecordRow,
+      $$RecordRowsTableFilterComposer,
+      $$RecordRowsTableOrderingComposer,
+      $$RecordRowsTableAnnotationComposer,
+      $$RecordRowsTableCreateCompanionBuilder,
+      $$RecordRowsTableUpdateCompanionBuilder,
+      (RecordRow, BaseReferences<_$AppDatabase, $RecordRowsTable, RecordRow>),
+      RecordRow,
+      PrefetchHooks Function()
+    >;
+typedef $$DriveFileRowsTableCreateCompanionBuilder =
+    DriveFileRowsCompanion Function({
+      required String name,
+      required String fileId,
+      Value<int> rowid,
+    });
+typedef $$DriveFileRowsTableUpdateCompanionBuilder =
+    DriveFileRowsCompanion Function({
+      Value<String> name,
+      Value<String> fileId,
+      Value<int> rowid,
+    });
+
+class $$DriveFileRowsTableFilterComposer
+    extends Composer<_$AppDatabase, $DriveFileRowsTable> {
+  $$DriveFileRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DriveFileRowsTableOrderingComposer
+    extends Composer<_$AppDatabase, $DriveFileRowsTable> {
+  $$DriveFileRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fileId => $composableBuilder(
+    column: $table.fileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DriveFileRowsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DriveFileRowsTable> {
+  $$DriveFileRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get fileId =>
+      $composableBuilder(column: $table.fileId, builder: (column) => column);
+}
+
+class $$DriveFileRowsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DriveFileRowsTable,
+          DriveFileRow,
+          $$DriveFileRowsTableFilterComposer,
+          $$DriveFileRowsTableOrderingComposer,
+          $$DriveFileRowsTableAnnotationComposer,
+          $$DriveFileRowsTableCreateCompanionBuilder,
+          $$DriveFileRowsTableUpdateCompanionBuilder,
+          (
+            DriveFileRow,
+            BaseReferences<_$AppDatabase, $DriveFileRowsTable, DriveFileRow>,
+          ),
+          DriveFileRow,
+          PrefetchHooks Function()
+        > {
+  $$DriveFileRowsTableTableManager(_$AppDatabase db, $DriveFileRowsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DriveFileRowsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DriveFileRowsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DriveFileRowsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> name = const Value.absent(),
+                Value<String> fileId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DriveFileRowsCompanion(
+                name: name,
+                fileId: fileId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String name,
+                required String fileId,
+                Value<int> rowid = const Value.absent(),
+              }) => DriveFileRowsCompanion.insert(
+                name: name,
+                fileId: fileId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DriveFileRowsTable, DriveFileRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $DriveFileRowsTable,
+                    DriveFileRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DriveFileRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DriveFileRowsTable,
+      DriveFileRow,
+      $$DriveFileRowsTableFilterComposer,
+      $$DriveFileRowsTableOrderingComposer,
+      $$DriveFileRowsTableAnnotationComposer,
+      $$DriveFileRowsTableCreateCompanionBuilder,
+      $$DriveFileRowsTableUpdateCompanionBuilder,
+      (
+        DriveFileRow,
+        BaseReferences<_$AppDatabase, $DriveFileRowsTable, DriveFileRow>,
+      ),
+      DriveFileRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2568,4 +3485,8 @@ class $AppDatabaseManager {
       $$OutboxRowsTableTableManager(_db, _db.outboxRows);
   $$MetaRowsTableTableManager get metaRows =>
       $$MetaRowsTableTableManager(_db, _db.metaRows);
+  $$RecordRowsTableTableManager get recordRows =>
+      $$RecordRowsTableTableManager(_db, _db.recordRows);
+  $$DriveFileRowsTableTableManager get driveFileRows =>
+      $$DriveFileRowsTableTableManager(_db, _db.driveFileRows);
 }

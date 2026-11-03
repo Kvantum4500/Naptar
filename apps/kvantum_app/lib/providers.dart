@@ -3,6 +3,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'data/db.dart';
 import 'data/event_repository.dart';
+import 'data/record_repository.dart';
 import 'ui/day_utils.dart';
 
 final dbProvider = Provider<AppDatabase>((ref) {
@@ -136,3 +137,36 @@ final monthOccurrencesProvider =
         rangeOccurrencesProvider(ref.watch(monthRangeProvider)).future,
       ),
     );
+
+final recordRepoProvider = Provider<RecordRepository>(
+  (ref) => RecordRepository(ref.watch(dbProvider)),
+);
+
+/// Open tasks first (overdue, then by due date, priority), done tasks last.
+final tasksProvider = StreamProvider<List<TaskView>>(
+  (ref) => ref.watch(recordRepoProvider).watch(kindTask).map((recs) {
+    final list = [for (final r in recs) TaskView(r)]
+        .where((t) => !t.deleted)
+        .toList();
+    list.sort((a, b) {
+      if (a.done != b.done) return a.done ? 1 : -1;
+      final da = a.due, db = b.due;
+      if (da != null && db != null && da != db) return da.compareTo(db);
+      if ((da == null) != (db == null)) return da == null ? 1 : -1;
+      if (a.priority != b.priority) return b.priority.compareTo(a.priority);
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return list;
+  }),
+);
+
+/// Newest check-in first.
+final checkInsProvider = StreamProvider<List<CheckInView>>(
+  (ref) => ref.watch(recordRepoProvider).watch(kindCheckIn).map((recs) {
+    final list = [for (final r in recs) CheckInView(r)]
+        .where((c) => !c.deleted && c.date != null)
+        .toList();
+    list.sort((a, b) => b.date!.compareTo(a.date!));
+    return list;
+  }),
+);

@@ -5,7 +5,9 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
 import '../update/update_dialog.dart';
+import 'checkin.dart';
 import 'event_editor.dart';
+import 'tasks_page.dart';
 import 'format.dart';
 import 'month_view.dart';
 import 'sync_status.dart';
@@ -165,6 +167,13 @@ class HomePage extends ConsumerWidget {
             icon: const Icon(Icons.chevron_right),
             onPressed: () => _shift(ref, 1),
           ),
+          IconButton(
+            tooltip: 'Feladatok',
+            icon: const Icon(Icons.checklist),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: (_) => const TasksPage())),
+          ),
           SyncStatusButton(
             compact: compact,
             onCheckUpdate: () => showUpdateDialog(context, ref),
@@ -177,7 +186,12 @@ class HomePage extends ConsumerWidget {
         onPressed: () => openEditor(context, ref, initialDay: sel),
         child: const Icon(Icons.add),
       ),
-      body: body,
+      body: Column(
+        children: [
+          const CheckInBanner(),
+          Expanded(child: body),
+        ],
+      ),
     );
   }
 }

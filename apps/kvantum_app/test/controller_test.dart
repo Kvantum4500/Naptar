@@ -10,6 +10,7 @@ import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import 'support/fake_drive.dart';
 import 'support/fake_remote.dart';
 
 class FakeAuth implements AuthGateway {
@@ -71,16 +72,19 @@ void main() {
   group('SyncController', () {
     late AppDatabase db;
     late FakeRemote remote;
+    late FakeDrive drive;
 
     ProviderContainer make(FakeAuth auth, {bool configured = true}) {
       db = AppDatabase(NativeDatabase.memory());
       remote = FakeRemote();
+      drive = FakeDrive();
       final c = ProviderContainer(
         overrides: [
           dbProvider.overrideWithValue(db),
           googleConfiguredProvider.overrideWithValue(configured),
           authGatewayProvider.overrideWithValue(auth),
           remoteFactoryProvider.overrideWithValue((_) => remote),
+          driveFactoryProvider.overrideWithValue((_) => drive),
         ],
       );
       addTearDown(c.dispose);
@@ -152,6 +156,66 @@ void main() {
         await db.close();
       },
     );
+
+    test(
+      'tasks and check-ins are uploaded to Drive together with the calendar',
+      () async {
+        final c = make(FakeAuth());
+        await c
+            .read(recordRepoProvider)
+            .edit(kindTask, 't1', taskFields(title: 'Edzés'));
+        await c.read(syncControllerProvider.notifier).signIn();
+        final s = c.read(syncControllerProvider);
+        expect(s.error, isNull);
+        expect(s.pending, 0);
+        expect(drive.files.values.single.name, 'task-t1.json');
+        c.read(syncControllerProvider.notifier).signOut();
+        await db.close();
+      },
+    );
+
+    test(
+      'Drive offline does not block the calendar, and the error names Drive',
+      () async {
+        final c = make(FakeAuth());
+        await EventRepoHelper(db).save(ev('a'));
+        await c
+            .read(recordRepoProvider)
+            .edit(kindTask, 't1', taskFields(title: 'x'));
+        drive.offline = true;
+        final ctl = c.read(syncControllerProvider.notifier);
+        await ctl.signIn();
+        var s = c.read(syncControllerProvider);
+        expect(remote.events.length, 1); // calendar went through
+        expect(s.error, contains('Drive'));
+        expect(s.error, isNot(contains('Naptár')));
+        expect(s.pending, 1); // the task is still queued
+        drive.offline = false;
+        await ctl.syncNow();
+        s = c.read(syncControllerProvider);
+        expect(s.error, isNull);
+        expect(s.pending, 0);
+        expect(drive.files.length, 1);
+        ctl.signOut();
+        await db.close();
+      },
+    );
+
+    test('a calendar failure does not block Drive', () async {
+      final c = make(FakeAuth());
+      await c
+          .read(recordRepoProvider)
+          .edit(kindTask, 't1', taskFields(title: 'x'));
+      await EventRepoHelper(db).save(ev('a'));
+      remote.offline = true;
+      final ctl = c.read(syncControllerProvider.notifier);
+      await ctl.signIn();
+      final s = c.read(syncControllerProvider);
+      expect(drive.files.length, 1);
+      expect(s.error, contains('Naptár'));
+      ctl.signOut();
+      await db.close();
+    });
 
     test('sign-out clears state and credentials', () async {
       final auth = FakeAuth();

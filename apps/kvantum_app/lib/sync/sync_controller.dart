@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../data/event_repository.dart';
+import '../drive/drive_remote.dart';
+import '../drive/drive_sync_engine.dart';
+import '../drive/google_drive_remote.dart';
 import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
 import '../providers.dart';
@@ -18,6 +21,10 @@ final googleConfiguredProvider = Provider<bool>(
 );
 final authGatewayProvider = Provider<AuthGateway>(
   (_) => GoogleAuthService(SecureCredentialStore()),
+);
+final driveFactoryProvider = Provider<DriveRemote Function(http.Client)>(
+  (_) =>
+      (c) => GoogleDriveRemote(c),
 );
 final remoteFactoryProvider = Provider<RemoteCalendar Function(http.Client)>(
   (_) =>
@@ -60,6 +67,7 @@ class SyncState {
 /// push (turbo mode) come later.
 class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   SyncEngine? _engine;
+  DriveSyncEngine? _drive;
   Timer? _periodic, _debounce;
 
   @override
@@ -98,6 +106,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   Future<void> signOut() async {
     _periodic?.cancel();
     _engine = null;
+    _drive = null;
     await ref.read(authGatewayProvider).signOut();
     state = state.copyWith(signedIn: false, syncing: false, clearError: true);
   }
@@ -106,6 +115,10 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     _engine = SyncEngine(
       ref.read(repoProvider),
       ref.read(remoteFactoryProvider)(client),
+    );
+    _drive = DriveSyncEngine(
+      ref.read(recordRepoProvider),
+      ref.read(driveFactoryProvider)(client),
     );
     state = state.copyWith(signedIn: true, clearError: true);
     _periodic?.cancel();
@@ -120,27 +133,53 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     _debounce = Timer(const Duration(seconds: 2), syncNow);
   }
 
+  /// Calendar and Drive data sync independently: a problem with one never
+  /// blocks the other.
   Future<void> syncNow() async {
     final engine = _engine;
     if (engine == null) return;
     state = state.copyWith(syncing: true);
+    final errors = <String>[];
+    var ok = true;
     try {
       final r = await engine.sync(syncCalendarId);
-      final pending = (await ref.read(repoProvider).pending()).length;
-      state = state.copyWith(
-        syncing: false,
-        pending: pending,
-        lastSync: r.stoppedEarly ? null : DateTime.now(),
-        error: r.stoppedEarly
-            ? 'Nincs kapcsolat vagy limit, később újrapróbálja.'
-            : (r.failed > 0
-                  ? '${r.failed} módosítást nem sikerült elküldeni.'
-                  : null),
-        clearError: !r.stoppedEarly && r.failed == 0,
-      );
+      if (r.stoppedEarly) {
+        ok = false;
+        errors.add('Naptár: nincs kapcsolat vagy limit, később újrapróbálja.');
+      } else if (r.failed > 0) {
+        errors.add('Naptár: ${r.failed} módosítást nem sikerült elküldeni.');
+      }
     } catch (e) {
-      state = state.copyWith(syncing: false, error: 'Szinkron hiba: $e');
+      ok = false;
+      errors.add('Naptár: $e');
     }
+    final drive = _drive;
+    if (drive != null) {
+      try {
+        final r = await drive.sync();
+        if (r.stoppedEarly) {
+          ok = false;
+          errors.add('Drive: nincs kapcsolat vagy limit, később újrapróbálja.');
+        } else if (r.failed > 0) {
+          errors.add('Drive: ${r.failed} elemet nem sikerült feltölteni.');
+        } else if (r.skippedCorrupt > 0) {
+          errors.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
+        }
+      } catch (e) {
+        ok = false;
+        errors.add('Drive: $e');
+      }
+    }
+    final pending =
+        (await ref.read(repoProvider).pending()).length +
+        await ref.read(recordRepoProvider).dirtyCount();
+    state = state.copyWith(
+      syncing: false,
+      pending: pending,
+      lastSync: ok ? DateTime.now() : null,
+      error: errors.isEmpty ? null : errors.join(' · '),
+      clearError: errors.isEmpty,
+    );
   }
 
   @override

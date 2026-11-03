@@ -13,7 +13,8 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 | Windows zip + Android APK építés, GitHub-kiadás (`build.yml`) | kész |
 | Nézetek (hónap/hét/nap), színek, szerkesztő teljes ismétlődéssel, szinkronállapot | kész, 109 app teszt |
 | Önfrissítés (Windows kész, Android a kulcs beállítása után) | kész, éles próba kell |
-| Drive `appDataFolder` (feladatok, check-in), Gemini hívás | következő lépés |
+| Feladatok és napi check-in a Drive `appDataFolder`-ben (mezőnkénti összefésülés, duplikáció-védelem, offline sor), felület | **kész, 150 app teszt** |
+| Gemini-asszisztens | következő lépés |
 | Turbo mód (Cloudflare Worker + FCM) | következő lépés |
 
 ## Futtatás

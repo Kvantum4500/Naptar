@@ -42,6 +42,28 @@ class OutboxRows extends Table {
   TextColumn get lastError => text().nullable()();
 }
 
+/// Synced records (tasks, check-ins) stored as their merged JSON.
+class RecordRows extends Table {
+  TextColumn get kind => text()();
+  TextColumn get id => text()();
+  TextColumn get json => text()();
+  // True while local changes have not been written to Drive yet.
+  BoolColumn get dirty => boolean().withDefault(const Constant(true))();
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {kind, id};
+}
+
+/// Drive file id per record file name (so updates go to the same file).
+class DriveFileRows extends Table {
+  TextColumn get name => text()();
+  TextColumn get fileId => text()();
+
+  @override
+  Set<Column> get primaryKey => {name};
+}
+
 class MetaRows extends Table {
   TextColumn get key => text()();
   TextColumn get value => text()();
@@ -49,13 +71,15 @@ class MetaRows extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [EventRows, OutboxRows, MetaRows])
+@DriftDatabase(
+  tables: [EventRows, OutboxRows, MetaRows, RecordRows, DriveFileRows],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
   AppDatabase.open() : super(driftDatabase(name: 'kvantum'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -76,6 +100,10 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           "DELETE FROM meta_rows WHERE key LIKE 'syncToken:%'",
         );
+      }
+      if (from < 3) {
+        await m.createTable(recordRows);
+        await m.createTable(driveFileRows);
       }
     },
   );
