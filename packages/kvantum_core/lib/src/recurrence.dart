@@ -46,6 +46,8 @@ List<Occurrence> expand(
         endUtc: wallStart.add(days),
         originalStart: original,
         allDay: true,
+        colorId: e.colorId,
+        recurring: master.isRecurring,
       );
     }
     if (isOverride) {
@@ -58,6 +60,8 @@ List<Occurrence> expand(
         allDay: e.allDay,
         tzid: e.tzid,
         isOverride: true,
+        colorId: e.colorId,
+        recurring: true,
       );
     }
     final s = resolveWallClock(master.tzid!, wallStart);
@@ -70,6 +74,8 @@ List<Occurrence> expand(
       originalStart: original,
       allDay: false,
       tzid: master.tzid,
+      colorId: e.colorId,
+      recurring: master.isRecurring,
     );
   }
 

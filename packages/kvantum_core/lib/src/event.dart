@@ -22,6 +22,8 @@ class CalEvent {
     this.googleId,
     this.etag,
     this.iCalUid,
+    this.colorId,
+    this.aiGenerated = false,
   }) : exdates = List.unmodifiable(exdates),
        assert(allDay || tzid != null, 'timed events need an IANA zone'),
        assert(start.isUtc && end.isUtc, 'start/end are floating (UTC-flagged)'),
@@ -56,6 +58,12 @@ class CalEvent {
   final String? etag;
   final String? iCalUid;
 
+  /// Google event colour id ('1'..'11'); null = calendar default.
+  final String? colorId;
+
+  /// Created by the AI assistant (stored as a private extended property).
+  final bool aiGenerated;
+
   bool get isRecurring => rrule != null && rrule!.isNotEmpty;
   bool get isException => recurringEventId != null;
 
@@ -82,6 +90,9 @@ class CalEvent {
     String? id,
     String? recurringEventId,
     DateTime? originalStart,
+    String? colorId,
+    bool clearColor = false,
+    bool? aiGenerated,
     bool bumpVersion = true,
   }) => CalEvent(
     id: id ?? this.id,
@@ -116,6 +127,8 @@ class Occurrence {
     required this.allDay,
     this.tzid,
     this.isOverride = false,
+    this.colorId,
+    this.recurring = false,
   });
   final String eventId;
   final String title;
@@ -125,6 +138,10 @@ class Occurrence {
   final bool allDay;
   final String? tzid;
   final bool isOverride;
+  final String? colorId;
+
+  /// True when this occurrence belongs to a recurring series.
+  final bool recurring;
 
   bool overlaps(DateTime from, DateTime to) =>
       endUtc.isAfter(from) && startUtc.isBefore(to);
