@@ -5,6 +5,10 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
+    # Also builds when this file itself changes (lets the feature branch be
+    # tested before the workflow exists on the default branch).
+    branches: ['claude/**']
+    paths: ['.github/workflows/build.yml']
 jobs:
   android:
     runs-on: ubuntu-latest
