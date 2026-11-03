@@ -10,7 +10,9 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 | `apps/kvantum_app` – Flutter app: helyi SQLite (drift), hónapnézet + napi lista, eseményszerkesztő (ismétlődéssel), outbox | **kész, tesztelve** |
 | Szinkronmotor (`lib/sync`): pull → reconcile → push, syncToken, teljes újraszinkron, ütközéskezelés, idempotens újrapróbálás | **kész, 9 teszt (hamis távoli naptárral)** |
 | Google Calendar adapter (`GoogleCalendarRemote`), Google belépés (OAuth, biztonságos tároló), szinkronvezérlő (60 mp + mentés után + előtérbe lépéskor) | **kész, 21 teszt hamis HTTP-vel; élő fiókkal még nem próbálva** |
-| Windows exe + Android APK építés GitHub Actionsben (`build.yml`) | kész, első futás ellenőrzendő |
+| Windows zip + Android APK építés, GitHub-kiadás (`build.yml`) | kész |
+| Nézetek (hónap/hét/nap), színek, szerkesztő teljes ismétlődéssel, szinkronállapot | kész, 109 app teszt |
+| Önfrissítés (Windows kész, Android a kulcs beállítása után) | kész, éles próba kell |
 | Drive `appDataFolder` (feladatok, check-in), Gemini hívás | következő lépés |
 | Turbo mód (Cloudflare Worker + FCM) | következő lépés |
 
@@ -31,3 +33,9 @@ Ismert korlát: egy ismétlődő esemény szerkesztése az egész sorozatra vona
 - Duplikáció: `reconcile()` sorrend: tárolt link → `appEventId` (saját írás visszhangja) → iCalUID → új.
 - AI: Gemini a kézikönyvvel; a szabad idősávokat és a kemény szabályokat **kód** ellenőrzi (`validateProposal`), az AI csak választ és indokol.
 - Titkok (API-kulcs, tokenek) soha nem kerülnek a repóba; az eszköz biztonságos tárolójában élnek.
+
+## Önfrissítés és kiadás
+- Minden `main`-re küldött változás (és a `[build]` jelű commit feature ágon) megépíti a Windows-zipet és az Android-APK-t, és létrehoz egy GitHub Release-t (`build-<szám>`), SHA-256 összeggel.
+- Az app „Frissítés keresése” menüpontja ezt a kiadást nézi meg a csak olvasási `UPDATE_TOKEN`-nel, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit.
+- Az első indításnál a Windows figyelmeztet („ismeretlen kiadó”): a ZIP tulajdonságainál jelöld be a **Feloldás** (Unblock) négyzetet kicsomagolás előtt. A frissítések már nem figyelmeztetnek.
+- Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja).

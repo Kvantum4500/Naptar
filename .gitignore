@@ -5,3 +5,4 @@ secrets*
 secrets.json
 *.keystore
 key.properties
+*.jks
