@@ -353,16 +353,227 @@ void main() {
       await GoogleCalendarRemote(none.client).delete(ev());
       expect(none.reqs.where((r) => r.method == 'DELETE'), isEmpty);
     });
+  });
 
-    test('single-instance push is rejected explicitly, not silently', () async {
-      final inst = ev().copyWith(
-        recurringEventId: 'm',
-        originalStart: floating(2026, 5, 4, 9),
-      );
+  group('Naptar calendar (find or create once)', () {
+    http.Response calList(List<Map<String, Object?>> items) =>
+        _json({'items': items});
+
+    test('creates the calendar when none carries the marker', () async {
+      final f = Fake((r) {
+        if (r.url.path.endsWith('/users/me/calendarList')) return calList([]);
+        if (r.method == 'POST' && r.url.path.endsWith('/calendars')) {
+          return _json({'id': 'newCal', 'timeZone': bp});
+        }
+        if (r.url.path.endsWith('/calendars/newCal')) {
+          return _json({'timeZone': bp});
+        }
+        return _json({'items': [], 'nextSyncToken': 'T'});
+      });
+      await GoogleCalendarRemote(f.client).pull('naptar', null);
+      final post = f.reqs.firstWhere((r) => r.method == 'POST');
+      final body = jsonDecode(post.body) as Map<String, dynamic>;
+      expect(body['summary'], 'Naptar');
+      expect(body['description'], contains(calendarMarker));
+      expect(f.reqs.last.url.path, contains('/calendars/newCal/events'));
+    });
+
+    test('reuses an existing marked calendar; several -> the same (smallest id) one', () async {
+      final f = Fake((r) {
+        if (r.url.path.endsWith('/users/me/calendarList')) {
+          return calList([
+            {
+              'id': 'zzz',
+              'accessRole': 'owner',
+              'description': 'x $calendarMarker',
+            },
+            {
+              'id': 'aaa',
+              'accessRole': 'owner',
+              'description': 'x $calendarMarker',
+            },
+            {'id': 'other', 'accessRole': 'owner', 'description': 'Munka'},
+            {'id': 'ro', 'accessRole': 'reader', 'description': calendarMarker},
+          ]);
+        }
+        if (r.url.path.endsWith('/calendars/aaa')) {
+          return _json({'timeZone': bp});
+        }
+        return _json({'items': [], 'nextSyncToken': 'T'});
+      });
+      final remote = GoogleCalendarRemote(f.client);
+      await remote.pull('naptar', null);
+      await remote.pull('naptar', 'T'); // second use does not list again
+      expect(f.reqs.where((r) => r.method == 'POST'), isEmpty);
       expect(
-        GoogleCalendarRemote(Fake((_) => _json({})).client).upsert(inst),
-        throwsUnsupportedError,
+        f.reqs
+            .where((r) => r.url.path.endsWith('/users/me/calendarList'))
+            .length,
+        1,
       );
+      expect(f.reqs.last.url.path, contains('/calendars/aaa/events'));
+    });
+
+    test('events are pushed into the Naptar calendar, never into primary', () async {
+      final f = Fake((r) {
+        if (r.url.path.endsWith('/users/me/calendarList')) {
+          return calList([
+            {'id': 'nap', 'accessRole': 'owner', 'description': calendarMarker},
+          ]);
+        }
+        if (r.method == 'GET') return _json({'items': []});
+        return _json({'id': 'g', 'etag': 'e'});
+      });
+      final logical = CalEvent(
+        id: 'L',
+        calendarId: 'naptar',
+        title: 't',
+        tzid: bp,
+        start: floating(2026, 5, 4, 9),
+        end: floating(2026, 5, 4, 10),
+      );
+      await GoogleCalendarRemote(f.client).upsert(logical);
+      expect(f.reqs.last.url.path, contains('/calendars/nap/events'));
+      expect(
+        f.reqs.any((r) => r.url.path.contains('/calendars/primary/')),
+        isFalse,
+      );
+    });
+  });
+
+  group('colours and AI flag', () {
+    test('pull maps colorId and the ai marker; push sends them back', () async {
+      final f = Fake(
+        (r) => _json({
+          'nextSyncToken': 'T',
+          'items': [
+            {
+              'id': 'a',
+              'etag': 'e',
+              'summary': 'Edzés',
+              'colorId': '11',
+              'start': {
+                'dateTime': '2026-05-04T09:00:00+02:00',
+                'timeZone': bp,
+              },
+              'end': {'dateTime': '2026-05-04T10:00:00+02:00', 'timeZone': bp},
+              'extendedProperties': {
+                'private': {'appEventId': 'L1', 'ai': '1'},
+              },
+            },
+          ],
+        }),
+      );
+      final res = await GoogleCalendarRemote(f.client).pull(cal, null);
+      final e = res.changes.single.event!;
+      expect(e.colorId, '11');
+      expect(e.aiGenerated, isTrue);
+
+      final out = Fake(
+        (r) => r.method == 'GET'
+            ? _json({'items': []})
+            : _json({'id': 'g', 'etag': 'e'}),
+      );
+      await GoogleCalendarRemote(out.client)
+          .upsert(ev().copyWith(colorId: '5', aiGenerated: true));
+      final body = jsonDecode(out.reqs.last.body) as Map<String, dynamic>;
+      expect(body['colorId'], '5');
+      expect(body['extendedProperties']['private']['ai'], '1');
+    });
+  });
+
+  group('single instances of a series', () {
+    CalEvent override({String? googleId, bool cancelled = false}) => CalEvent(
+      id: 'o1',
+      calendarId: cal,
+      title: 'Áthelyezve',
+      tzid: bp,
+      start: floating(2026, 5, 5, 15),
+      end: floating(2026, 5, 5, 16),
+      recurringEventId: 'm',
+      originalStart: floating(2026, 5, 5, 9),
+      googleId: googleId,
+      cancelled: cancelled,
+    );
+
+    test(
+      'finds the instance by its original start and patches only it',
+      () async {
+        final f = Fake((r) {
+          if (r.url.path.contains('/events/gMaster/instances')) {
+            return _json({
+              'items': [
+                {
+                  'id': 'gMaster_20260505T070000Z',
+                  'originalStartTime': {
+                    'dateTime': '2026-05-05T09:00:00+02:00',
+                    'timeZone': bp,
+                  },
+                },
+              ],
+            });
+          }
+          return _json({'id': 'gMaster_20260505T070000Z', 'etag': 'E7'});
+        });
+        final res = await GoogleCalendarRemote(f.client)
+            .upsert(override(), masterGoogleId: 'gMaster');
+        expect(res.googleId, 'gMaster_20260505T070000Z');
+        final patch = f.reqs.last;
+        expect(patch.method, 'PATCH');
+        expect(patch.url.path, endsWith('/events/gMaster_20260505T070000Z'));
+        final body = jsonDecode(patch.body) as Map<String, dynamic>;
+        expect(body['summary'], 'Áthelyezve');
+        expect(body.containsKey('recurrence'), isFalse);
+        expect(body['start']['dateTime'], '2026-05-05T13:00:00.000Z');
+      },
+    );
+
+    test('known instance id is patched directly (no lookup)', () async {
+      final f = Fake((r) => _json({'id': 'inst', 'etag': 'E'}));
+      await GoogleCalendarRemote(f.client)
+          .upsert(override(googleId: 'inst'), masterGoogleId: 'gMaster');
+      expect(f.reqs.where((r) => r.url.path.contains('/instances')), isEmpty);
+      expect(f.reqs.last.method, 'PATCH');
+    });
+
+    test('a cancelled override cancels exactly that occurrence', () async {
+      final f = Fake((r) => _json({'id': 'inst', 'etag': 'E'}));
+      await GoogleCalendarRemote(f.client).upsert(
+        override(googleId: 'inst', cancelled: true),
+        masterGoogleId: 'gMaster',
+      );
+      expect((jsonDecode(f.reqs.last.body) as Map)['status'], 'cancelled');
+    });
+
+    test(
+      'missing instance or missing series id fail loudly, never silently',
+      () async {
+        final none = Fake((r) => _json({'items': []}));
+        expect(
+          GoogleCalendarRemote(none.client)
+              .upsert(override(), masterGoogleId: 'gMaster'),
+          throwsStateError,
+        );
+        expect(
+          GoogleCalendarRemote(none.client).upsert(override()),
+          throwsStateError,
+        );
+      },
+    );
+
+    test('series push carries EXDATE lines and the converted UNTIL', () async {
+      final f = Fake(
+        (r) => r.method == 'GET'
+            ? _json({'items': []})
+            : _json({'id': 'g', 'etag': 'e'}),
+      );
+      final m = ev(rrule: 'FREQ=DAILY;UNTIL=20260510T235959Z');
+      await GoogleCalendarRemote(f.client).upsert(m);
+      final rec = ((jsonDecode(f.reqs.last.body) as Map)['recurrence'] as List)
+          .cast<String>();
+      // last occurrence 10.05 09:00 Budapest (CEST) = 07:00Z
+      expect(rec.first, 'RRULE:FREQ=DAILY;UNTIL=20260510T070000Z');
+      expect(rec[1], startsWith('EXDATE;TZID=$bp:'));
     });
   });
 

@@ -36,7 +36,9 @@ abstract class RemoteCalendar {
   /// Create or update. MUST be idempotent per `event.id` (the adapter stores it
   /// as `extendedProperties.private.appEventId`). Throws [ConflictException]
   /// when `event.etag` is stale (HTTP 412).
-  Future<PushResult> upsert(CalEvent event);
+  ///
+  /// For exception instances [masterGoogleId] is the Google id of the series.
+  Future<PushResult> upsert(CalEvent event, {String? masterGoogleId});
 
   Future<void> delete(CalEvent event);
 }

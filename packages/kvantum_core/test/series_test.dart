@@ -30,6 +30,16 @@ List<DateTime> days(
 void main() {
   setUpAll(ensureTimeZones);
 
+  test('copyWith keeps colour and AI flag, and can clear the colour', () {
+    final e = series('FREQ=DAILY').copyWith(colorId: '5', aiGenerated: true);
+    expect(e.colorId, '5');
+    expect(e.aiGenerated, isTrue);
+    final again = e.copyWith(title: 'x');
+    expect(again.colorId, '5');
+    expect(again.aiGenerated, isTrue);
+    expect(e.copyWith(clearColor: true).colorId, isNull);
+  });
+
   group('RecurrenceSpec', () {
     final start = floating(2026, 5, 4, 9); // Monday, 1st Monday of May
     String rule(RecurrenceSpec s) => s.toRrule(start);

@@ -77,7 +77,7 @@ class FakeRemote implements RemoteCalendar {
   }
 
   @override
-  Future<PushResult> upsert(CalEvent event) async {
+  Future<PushResult> upsert(CalEvent event, {String? masterGoogleId}) async {
     if (offline) throw TransientSyncError('offline');
     upsertCalls++;
     final existing = appIdToGoogle[event.id] ?? event.googleId;

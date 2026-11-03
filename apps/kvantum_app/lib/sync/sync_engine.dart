@@ -9,6 +9,7 @@ class SyncReport {
   int pulled = 0;
   int pushed = 0;
   int failed = 0;
+  int deferred = 0; // waiting for something else (e.g. the series master)
   bool fullResync = false;
   bool stoppedEarly = false; // transient error -> retry later
   /// Local edits that were kept over a newer remote version (user may review).
@@ -181,7 +182,21 @@ class SyncEngine {
           await remote.delete(item.event);
           await repo.markPushed(item);
         } else {
-          final r = await remote.upsert(item.event);
+          String? masterGoogleId;
+          if (item.event.isException) {
+            final master = await repo.byId(item.event.recurringEventId!);
+            masterGoogleId = master?.googleId;
+            if (masterGoogleId == null) {
+              // The series is not in Google yet; its own queued push comes
+              // first, so this instance simply waits for the next run.
+              report.deferred++;
+              continue;
+            }
+          }
+          final r = await remote.upsert(
+            item.event,
+            masterGoogleId: masterGoogleId,
+          );
           await repo.markPushed(item, googleId: r.googleId, etag: r.etag);
         }
         report.pushed++;

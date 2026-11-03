@@ -24,6 +24,8 @@ class EventRows extends Table {
   TextColumn get googleId => text().nullable()();
   TextColumn get etag => text().nullable()();
   TextColumn get iCalUid => text().nullable()();
+  TextColumn get colorId => text().nullable()();
+  BoolColumn get aiGenerated => boolean().withDefault(const Constant(false))();
   // Tombstone: kept until the deletion has been pushed to Google.
   BoolColumn get deleted => boolean().withDefault(const Constant(false))();
 
@@ -53,5 +55,28 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.open() : super(driftDatabase(name: 'kvantum'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.addColumn(eventRows, eventRows.colorId);
+        await m.addColumn(eventRows, eventRows.aiGenerated);
+        // The app now only shows its own "Naptar" calendar. Rows that
+        // came from the user's primary calendar are dropped locally
+        // (nothing is deleted in Google).
+        await customStatement(
+          "DELETE FROM outbox_rows WHERE event_id IN (SELECT id FROM event_rows WHERE calendar_id <> 'naptar')",
+        );
+        await customStatement(
+          "DELETE FROM event_rows WHERE calendar_id <> 'naptar'",
+        );
+        await customStatement(
+          "DELETE FROM meta_rows WHERE key LIKE 'syncToken:%'",
+        );
+      }
+    },
+  );
 }

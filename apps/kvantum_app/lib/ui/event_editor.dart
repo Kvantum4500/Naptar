@@ -4,11 +4,12 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
+import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'day_utils.dart';
 
-const calendarIdLocal = 'primary';
+const calendarIdLocal = kNaptarCalendar;
 
 enum Repeat { none, daily, weekly, monthly, yearly }
 

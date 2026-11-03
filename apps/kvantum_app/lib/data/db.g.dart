@@ -205,6 +205,32 @@ class $EventRowsTable extends EventRows
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _colorIdMeta = const VerificationMeta(
+    'colorId',
+  );
+  @override
+  late final GeneratedColumn<String> colorId = GeneratedColumn<String>(
+    'color_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _aiGeneratedMeta = const VerificationMeta(
+    'aiGenerated',
+  );
+  @override
+  late final GeneratedColumn<bool> aiGenerated = GeneratedColumn<bool>(
+    'ai_generated',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("ai_generated" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _deletedMeta = const VerificationMeta(
     'deleted',
   );
@@ -240,6 +266,8 @@ class $EventRowsTable extends EventRows
     googleId,
     etag,
     iCalUid,
+    colorId,
+    aiGenerated,
     deleted,
   ];
   @override
@@ -375,6 +403,21 @@ class $EventRowsTable extends EventRows
         iCalUid.isAcceptableOrUnknown(data['i_cal_uid']!, _iCalUidMeta),
       );
     }
+    if (data.containsKey('color_id')) {
+      context.handle(
+        _colorIdMeta,
+        colorId.isAcceptableOrUnknown(data['color_id']!, _colorIdMeta),
+      );
+    }
+    if (data.containsKey('ai_generated')) {
+      context.handle(
+        _aiGeneratedMeta,
+        aiGenerated.isAcceptableOrUnknown(
+          data['ai_generated']!,
+          _aiGeneratedMeta,
+        ),
+      );
+    }
     if (data.containsKey('deleted')) {
       context.handle(
         _deletedMeta,
@@ -462,6 +505,14 @@ class $EventRowsTable extends EventRows
         DriftSqlType.string,
         data['${effectivePrefix}i_cal_uid'],
       ),
+      colorId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}color_id'],
+      ),
+      aiGenerated: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}ai_generated'],
+      )!,
       deleted: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}deleted'],
@@ -494,6 +545,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
   final String? googleId;
   final String? etag;
   final String? iCalUid;
+  final String? colorId;
+  final bool aiGenerated;
   final bool deleted;
   const EventRow({
     required this.id,
@@ -514,6 +567,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
     this.googleId,
     this.etag,
     this.iCalUid,
+    this.colorId,
+    required this.aiGenerated,
     required this.deleted,
   });
   @override
@@ -551,6 +606,10 @@ class EventRow extends DataClass implements Insertable<EventRow> {
     if (!nullToAbsent || iCalUid != null) {
       map['i_cal_uid'] = Variable<String>(iCalUid);
     }
+    if (!nullToAbsent || colorId != null) {
+      map['color_id'] = Variable<String>(colorId);
+    }
+    map['ai_generated'] = Variable<bool>(aiGenerated);
     map['deleted'] = Variable<bool>(deleted);
     return map;
   }
@@ -585,6 +644,10 @@ class EventRow extends DataClass implements Insertable<EventRow> {
       iCalUid: iCalUid == null && nullToAbsent
           ? const Value.absent()
           : Value(iCalUid),
+      colorId: colorId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(colorId),
+      aiGenerated: Value(aiGenerated),
       deleted: Value(deleted),
     );
   }
@@ -613,6 +676,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
       googleId: serializer.fromJson<String?>(json['googleId']),
       etag: serializer.fromJson<String?>(json['etag']),
       iCalUid: serializer.fromJson<String?>(json['iCalUid']),
+      colorId: serializer.fromJson<String?>(json['colorId']),
+      aiGenerated: serializer.fromJson<bool>(json['aiGenerated']),
       deleted: serializer.fromJson<bool>(json['deleted']),
     );
   }
@@ -638,6 +703,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
       'googleId': serializer.toJson<String?>(googleId),
       'etag': serializer.toJson<String?>(etag),
       'iCalUid': serializer.toJson<String?>(iCalUid),
+      'colorId': serializer.toJson<String?>(colorId),
+      'aiGenerated': serializer.toJson<bool>(aiGenerated),
       'deleted': serializer.toJson<bool>(deleted),
     };
   }
@@ -661,6 +728,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
     Value<String?> googleId = const Value.absent(),
     Value<String?> etag = const Value.absent(),
     Value<String?> iCalUid = const Value.absent(),
+    Value<String?> colorId = const Value.absent(),
+    bool? aiGenerated,
     bool? deleted,
   }) => EventRow(
     id: id ?? this.id,
@@ -685,6 +754,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
     googleId: googleId.present ? googleId.value : this.googleId,
     etag: etag.present ? etag.value : this.etag,
     iCalUid: iCalUid.present ? iCalUid.value : this.iCalUid,
+    colorId: colorId.present ? colorId.value : this.colorId,
+    aiGenerated: aiGenerated ?? this.aiGenerated,
     deleted: deleted ?? this.deleted,
   );
   EventRow copyWithCompanion(EventRowsCompanion data) {
@@ -713,6 +784,10 @@ class EventRow extends DataClass implements Insertable<EventRow> {
       googleId: data.googleId.present ? data.googleId.value : this.googleId,
       etag: data.etag.present ? data.etag.value : this.etag,
       iCalUid: data.iCalUid.present ? data.iCalUid.value : this.iCalUid,
+      colorId: data.colorId.present ? data.colorId.value : this.colorId,
+      aiGenerated: data.aiGenerated.present
+          ? data.aiGenerated.value
+          : this.aiGenerated,
       deleted: data.deleted.present ? data.deleted.value : this.deleted,
     );
   }
@@ -738,13 +813,15 @@ class EventRow extends DataClass implements Insertable<EventRow> {
           ..write('googleId: $googleId, ')
           ..write('etag: $etag, ')
           ..write('iCalUid: $iCalUid, ')
+          ..write('colorId: $colorId, ')
+          ..write('aiGenerated: $aiGenerated, ')
           ..write('deleted: $deleted')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     calendarId,
     title,
@@ -763,8 +840,10 @@ class EventRow extends DataClass implements Insertable<EventRow> {
     googleId,
     etag,
     iCalUid,
+    colorId,
+    aiGenerated,
     deleted,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -787,6 +866,8 @@ class EventRow extends DataClass implements Insertable<EventRow> {
           other.googleId == this.googleId &&
           other.etag == this.etag &&
           other.iCalUid == this.iCalUid &&
+          other.colorId == this.colorId &&
+          other.aiGenerated == this.aiGenerated &&
           other.deleted == this.deleted);
 }
 
@@ -809,6 +890,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
   final Value<String?> googleId;
   final Value<String?> etag;
   final Value<String?> iCalUid;
+  final Value<String?> colorId;
+  final Value<bool> aiGenerated;
   final Value<bool> deleted;
   final Value<int> rowid;
   const EventRowsCompanion({
@@ -830,6 +913,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
     this.googleId = const Value.absent(),
     this.etag = const Value.absent(),
     this.iCalUid = const Value.absent(),
+    this.colorId = const Value.absent(),
+    this.aiGenerated = const Value.absent(),
     this.deleted = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -852,6 +937,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
     this.googleId = const Value.absent(),
     this.etag = const Value.absent(),
     this.iCalUid = const Value.absent(),
+    this.colorId = const Value.absent(),
+    this.aiGenerated = const Value.absent(),
     this.deleted = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -878,6 +965,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
     Expression<String>? googleId,
     Expression<String>? etag,
     Expression<String>? iCalUid,
+    Expression<String>? colorId,
+    Expression<bool>? aiGenerated,
     Expression<bool>? deleted,
     Expression<int>? rowid,
   }) {
@@ -900,6 +989,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
       if (googleId != null) 'google_id': googleId,
       if (etag != null) 'etag': etag,
       if (iCalUid != null) 'i_cal_uid': iCalUid,
+      if (colorId != null) 'color_id': colorId,
+      if (aiGenerated != null) 'ai_generated': aiGenerated,
       if (deleted != null) 'deleted': deleted,
       if (rowid != null) 'rowid': rowid,
     });
@@ -924,6 +1015,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
     Value<String?>? googleId,
     Value<String?>? etag,
     Value<String?>? iCalUid,
+    Value<String?>? colorId,
+    Value<bool>? aiGenerated,
     Value<bool>? deleted,
     Value<int>? rowid,
   }) {
@@ -946,6 +1039,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
       googleId: googleId ?? this.googleId,
       etag: etag ?? this.etag,
       iCalUid: iCalUid ?? this.iCalUid,
+      colorId: colorId ?? this.colorId,
+      aiGenerated: aiGenerated ?? this.aiGenerated,
       deleted: deleted ?? this.deleted,
       rowid: rowid ?? this.rowid,
     );
@@ -1008,6 +1103,12 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
     if (iCalUid.present) {
       map['i_cal_uid'] = Variable<String>(iCalUid.value);
     }
+    if (colorId.present) {
+      map['color_id'] = Variable<String>(colorId.value);
+    }
+    if (aiGenerated.present) {
+      map['ai_generated'] = Variable<bool>(aiGenerated.value);
+    }
     if (deleted.present) {
       map['deleted'] = Variable<bool>(deleted.value);
     }
@@ -1038,6 +1139,8 @@ class EventRowsCompanion extends UpdateCompanion<EventRow> {
           ..write('googleId: $googleId, ')
           ..write('etag: $etag, ')
           ..write('iCalUid: $iCalUid, ')
+          ..write('colorId: $colorId, ')
+          ..write('aiGenerated: $aiGenerated, ')
           ..write('deleted: $deleted, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -1629,6 +1732,8 @@ typedef $$EventRowsTableCreateCompanionBuilder = EventRowsCompanion Function({
   Value<String?> googleId,
   Value<String?> etag,
   Value<String?> iCalUid,
+  Value<String?> colorId,
+  Value<bool> aiGenerated,
   Value<bool> deleted,
   Value<int> rowid,
 });
@@ -1651,6 +1756,8 @@ typedef $$EventRowsTableUpdateCompanionBuilder = EventRowsCompanion Function({
   Value<String?> googleId,
   Value<String?> etag,
   Value<String?> iCalUid,
+  Value<String?> colorId,
+  Value<bool> aiGenerated,
   Value<bool> deleted,
   Value<int> rowid,
 });
@@ -1751,6 +1858,16 @@ class $$EventRowsTableFilterComposer
 
   ColumnFilters<String> get iCalUid => $composableBuilder(
     column: $table.iCalUid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get colorId => $composableBuilder(
+    column: $table.colorId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get aiGenerated => $composableBuilder(
+    column: $table.aiGenerated,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1859,6 +1976,16 @@ class $$EventRowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get colorId => $composableBuilder(
+    column: $table.colorId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get aiGenerated => $composableBuilder(
+    column: $table.aiGenerated,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get deleted => $composableBuilder(
     column: $table.deleted,
     builder: (column) => ColumnOrderings(column),
@@ -1934,6 +2061,14 @@ class $$EventRowsTableAnnotationComposer
   GeneratedColumn<String> get iCalUid =>
       $composableBuilder(column: $table.iCalUid, builder: (column) => column);
 
+  GeneratedColumn<String> get colorId =>
+      $composableBuilder(column: $table.colorId, builder: (column) => column);
+
+  GeneratedColumn<bool> get aiGenerated => $composableBuilder(
+    column: $table.aiGenerated,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<bool> get deleted =>
       $composableBuilder(column: $table.deleted, builder: (column) => column);
 }
@@ -1984,6 +2119,8 @@ class $$EventRowsTableTableManager
                 Value<String?> googleId = const Value.absent(),
                 Value<String?> etag = const Value.absent(),
                 Value<String?> iCalUid = const Value.absent(),
+                Value<String?> colorId = const Value.absent(),
+                Value<bool> aiGenerated = const Value.absent(),
                 Value<bool> deleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EventRowsCompanion(
@@ -2005,6 +2142,8 @@ class $$EventRowsTableTableManager
                 googleId: googleId,
                 etag: etag,
                 iCalUid: iCalUid,
+                colorId: colorId,
+                aiGenerated: aiGenerated,
                 deleted: deleted,
                 rowid: rowid,
               ),
@@ -2028,6 +2167,8 @@ class $$EventRowsTableTableManager
                 Value<String?> googleId = const Value.absent(),
                 Value<String?> etag = const Value.absent(),
                 Value<String?> iCalUid = const Value.absent(),
+                Value<String?> colorId = const Value.absent(),
+                Value<bool> aiGenerated = const Value.absent(),
                 Value<bool> deleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => EventRowsCompanion.insert(
@@ -2049,6 +2190,8 @@ class $$EventRowsTableTableManager
                 googleId: googleId,
                 etag: etag,
                 iCalUid: iCalUid,
+                colorId: colorId,
+                aiGenerated: aiGenerated,
                 deleted: deleted,
                 rowid: rowid,
               ),

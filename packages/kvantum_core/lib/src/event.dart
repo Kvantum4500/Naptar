@@ -113,6 +113,8 @@ class CalEvent {
     googleId: googleId ?? this.googleId,
     etag: etag ?? this.etag,
     iCalUid: iCalUid ?? this.iCalUid,
+    colorId: clearColor ? null : (colorId ?? this.colorId),
+    aiGenerated: aiGenerated ?? this.aiGenerated,
   );
 }
 

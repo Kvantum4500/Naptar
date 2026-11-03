@@ -4,13 +4,14 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../data/event_repository.dart';
 import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
 import '../providers.dart';
 import 'remote.dart';
 import 'sync_engine.dart';
 
-const syncCalendarId = 'primary';
+const syncCalendarId = kNaptarCalendar;
 
 final googleConfiguredProvider = Provider<bool>(
   (_) => GoogleConfig.isConfigured,

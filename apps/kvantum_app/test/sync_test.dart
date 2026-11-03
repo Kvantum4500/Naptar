@@ -7,7 +7,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_remote.dart';
 
-const cal = 'primary';
+const cal = 'naptar';
 const bp = 'Europe/Budapest';
 
 CalEvent ev(String id, String title, {int day = 4, int hour = 9}) => CalEvent(

@@ -31,7 +31,7 @@ class FakeAuth implements AuthGateway {
 
 CalEvent ev(String id) => CalEvent(
   id: id,
-  calendarId: 'primary',
+  calendarId: 'naptar',
   title: 't',
   tzid: 'Europe/Budapest',
   start: floating(2026, 5, 4, 9),

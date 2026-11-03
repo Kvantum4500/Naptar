@@ -7,6 +7,11 @@ String _wall(DateTime d) =>
     d.toIso8601String().replaceAll('Z', '').split('.').first;
 DateTime _parseWall(String s) => DateTime.parse('${s}Z');
 
+/// Local (logical) id of the app's own Google calendar. The Google adapter
+/// maps it to the real calendar id, so offline-created events do not depend
+/// on the account.
+const kNaptarCalendar = 'naptar';
+
 CalEvent _fromRow(EventRow r) => CalEvent(
   id: r.id,
   calendarId: r.calendarId,
@@ -28,6 +33,8 @@ CalEvent _fromRow(EventRow r) => CalEvent(
   googleId: r.googleId,
   etag: r.etag,
   iCalUid: r.iCalUid,
+  colorId: r.colorId,
+  aiGenerated: r.aiGenerated,
 );
 
 EventRowsCompanion _toRow(CalEvent e, {bool deleted = false}) =>
@@ -52,6 +59,8 @@ EventRowsCompanion _toRow(CalEvent e, {bool deleted = false}) =>
       googleId: Value(e.googleId),
       etag: Value(e.etag),
       iCalUid: Value(e.iCalUid),
+      colorId: Value(e.colorId),
+      aiGenerated: Value(e.aiGenerated),
       deleted: Value(deleted),
     );
 
@@ -78,6 +87,17 @@ class EventRepository {
       (db.select(db.eventRows)..where((t) => t.deleted.equals(false)))
           .watch()
           .map((rows) => rows.map(_fromRow).toList());
+
+  /// Exception instances belonging to a series master.
+  Future<List<CalEvent>> overridesOf(String masterId) async {
+    final rows =
+        await (db.select(db.eventRows)..where(
+              (t) =>
+                  t.recurringEventId.equals(masterId) & t.deleted.equals(false),
+            ))
+            .get();
+    return rows.map(_fromRow).toList();
+  }
 
   Future<CalEvent?> byId(String id) async {
     final r = await (db.select(
