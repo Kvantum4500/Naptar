@@ -414,31 +414,38 @@ void main() {
       expect(f.reqs.last.url.path, contains('/calendars/aaa/events'));
     });
 
-    test('events are pushed into the Naptar calendar, never into primary', () async {
-      final f = Fake((r) {
-        if (r.url.path.endsWith('/users/me/calendarList')) {
-          return calList([
-            {'id': 'nap', 'accessRole': 'owner', 'description': calendarMarker},
-          ]);
-        }
-        if (r.method == 'GET') return _json({'items': []});
-        return _json({'id': 'g', 'etag': 'e'});
-      });
-      final logical = CalEvent(
-        id: 'L',
-        calendarId: 'naptar',
-        title: 't',
-        tzid: bp,
-        start: floating(2026, 5, 4, 9),
-        end: floating(2026, 5, 4, 10),
-      );
-      await GoogleCalendarRemote(f.client).upsert(logical);
-      expect(f.reqs.last.url.path, contains('/calendars/nap/events'));
-      expect(
-        f.reqs.any((r) => r.url.path.contains('/calendars/primary/')),
-        isFalse,
-      );
-    });
+    test(
+      'events are pushed into the Naptar calendar, never into primary',
+      () async {
+        final f = Fake((r) {
+          if (r.url.path.endsWith('/users/me/calendarList')) {
+            return calList([
+              {
+                'id': 'nap',
+                'accessRole': 'owner',
+                'description': calendarMarker,
+              },
+            ]);
+          }
+          if (r.method == 'GET') return _json({'items': []});
+          return _json({'id': 'g', 'etag': 'e'});
+        });
+        final logical = CalEvent(
+          id: 'L',
+          calendarId: 'naptar',
+          title: 't',
+          tzid: bp,
+          start: floating(2026, 5, 4, 9),
+          end: floating(2026, 5, 4, 10),
+        );
+        await GoogleCalendarRemote(f.client).upsert(logical);
+        expect(f.reqs.last.url.path, contains('/calendars/nap/events'));
+        expect(
+          f.reqs.any((r) => r.url.path.contains('/calendars/primary/')),
+          isFalse,
+        );
+      },
+    );
   });
 
   group('colours and AI flag', () {

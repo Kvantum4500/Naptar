@@ -17,8 +17,12 @@ final repoProvider = Provider<EventRepository>(
 
 /// Emits whenever any event changes; views re-query occurrences from it.
 final eventsTickProvider = StreamProvider<int>(
-  (ref) =>
-      ref.watch(repoProvider).watchAll().map((e) => e.length * 31 + e.hashCode),
+  (ref) => ref
+      .watch(repoProvider)
+      .watchAll()
+      .map(
+        (e) => Object.hashAll(e.map((x) => '${x.id}:${x.version}:${x.etag}')),
+      ),
 );
 
 DateTime _today() {
@@ -29,7 +33,7 @@ DateTime _today() {
 class SelectedDay extends Notifier<DateTime> {
   @override
   DateTime build() => _today();
-  void set(DateTime d) => state = d;
+  void set(DateTime d) => state = DateTime.utc(d.year, d.month, d.day);
 }
 
 class VisibleMonth extends Notifier<DateTime> {
@@ -49,16 +53,54 @@ final visibleMonthProvider = NotifierProvider<VisibleMonth, DateTime>(
   VisibleMonth.new,
 );
 
-/// Occurrences for the 6-week grid of the visible month, grouped by day.
-final monthOccurrencesProvider =
-    FutureProvider<Map<DateTime, List<Occurrence>>>((ref) async {
+enum CalView { month, week, day }
+
+/// Month is the start view; the choice is remembered between runs.
+class ViewMode extends Notifier<CalView> {
+  static const _key = 'calView';
+
+  @override
+  CalView build() {
+    Future.microtask(_load);
+    return CalView.month;
+  }
+
+  Future<void> _load() async {
+    final saved = await ref.read(repoProvider).meta(_key);
+    final v = CalView.values.where((e) => e.name == saved).firstOrNull;
+    if (v != null && v != state) state = v;
+  }
+
+  void set(CalView v) {
+    state = v;
+    ref.read(repoProvider).setMeta(_key, v.name);
+  }
+}
+
+final viewModeProvider = NotifierProvider<ViewMode, CalView>(ViewMode.new);
+
+/// Inclusive first day .. exclusive end day (floating dates).
+class DayRange {
+  const DayRange(this.first, this.endExclusive);
+  final DateTime first;
+  final DateTime endExclusive;
+  @override
+  bool operator ==(Object other) =>
+      other is DayRange &&
+      other.first == first &&
+      other.endExclusive == endExclusive;
+  @override
+  int get hashCode => Object.hash(first, endExclusive);
+}
+
+/// Occurrences overlapping [range], grouped by every day they touch.
+final rangeOccurrencesProvider =
+    FutureProvider.family<Map<DateTime, List<Occurrence>>, DayRange>((
+      ref,
+      range,
+    ) async {
       ref.watch(eventsTickProvider);
-      final month = ref.watch(visibleMonthProvider);
-      final grid = monthGrid(month);
-      final (from, to) = windowOf(
-        grid.first,
-        grid.last.add(const Duration(days: 1)),
-      );
+      final (from, to) = windowOf(range.first, range.endExclusive);
       final occ = await ref.watch(repoProvider).occurrences(from, to);
       final map = <DateTime, List<Occurrence>>{};
       for (final o in occ) {
@@ -68,3 +110,29 @@ final monthOccurrencesProvider =
       }
       return map;
     });
+
+/// The 6-week grid of the visible month.
+final monthRangeProvider = Provider<DayRange>((ref) {
+  final grid = monthGrid(ref.watch(visibleMonthProvider));
+  return DayRange(grid.first, grid.last.add(const Duration(days: 1)));
+});
+
+/// Week (Mon..Sun) around the selected day, or just the day in day view.
+final weekRangeProvider = Provider<DayRange>((ref) {
+  final d = ref.watch(selectedDayProvider);
+  final first = startOfWeek(d);
+  return DayRange(first, first.add(const Duration(days: 7)));
+});
+
+final dayRangeProvider = Provider<DayRange>((ref) {
+  final d = ref.watch(selectedDayProvider);
+  return DayRange(d, d.add(const Duration(days: 1)));
+});
+
+/// Occurrences for whichever range the active view needs.
+final monthOccurrencesProvider =
+    FutureProvider<Map<DateTime, List<Occurrence>>>(
+      (ref) => ref.watch(
+        rangeOccurrencesProvider(ref.watch(monthRangeProvider)).future,
+      ),
+    );

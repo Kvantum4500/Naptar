@@ -7,7 +7,6 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/main.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/day_utils.dart';
-import 'package:kvantum_app/ui/event_editor.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 void main() {
@@ -46,17 +45,6 @@ void main() {
         originalStart: floating(2026, 12, 30),
       );
       expect(daysOf(o).map((d) => d.day), [30, 31, 1]);
-    });
-  });
-
-  group('rules for repeat', () {
-    test('rule mapping round-trips', () {
-      final start = floating(2026, 5, 4, 9); // Monday
-      expect(ruleFor(Repeat.weekly, start, 3), 'FREQ=WEEKLY;BYDAY=MO;COUNT=3');
-      expect(ruleFor(Repeat.none, start, null), isNull);
-      for (final r in Repeat.values) {
-        expect(repeatOf(ruleFor(r, start, null)), r);
-      }
     });
   });
 

@@ -7,6 +7,9 @@ environment:
   sdk: ^3.13.7
 
 dependencies:
+  archive: ^4.6.0
+  convert: ^3.1.2
+  crypto: ^3.0.8
   drift: ^2.35.3
   drift_flutter: ^0.3.1
   flutter:
@@ -21,6 +24,10 @@ dependencies:
   intl: ^0.20.3
   kvantum_core:
     path: ../../packages/kvantum_core
+  open_filex: ^5.0.0
+  package_info_plus: ^10.2.2
+  path: ^1.9.1
+  path_provider: ^2.1.6
   url_launcher: ^6.3.3
   uuid: ^4.6.0
 
