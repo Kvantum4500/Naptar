@@ -2,3 +2,6 @@
 build/
 *.env
 secrets*
+secrets.json
+*.keystore
+key.properties

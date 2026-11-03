@@ -5,6 +5,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../providers.dart';
+import '../sync/sync_controller.dart';
 import 'day_utils.dart';
 
 const calendarIdLocal = 'primary';
@@ -169,6 +170,7 @@ class _EventEditorState extends ConsumerState<EventEditor> {
       iCalUid: old?.iCalUid,
     );
     await ref.read(repoProvider).saveLocal(ev);
+    ref.read(syncControllerProvider.notifier).requestSync();
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -197,6 +199,7 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     );
     if (ok != true) return;
     await ref.read(repoProvider).deleteLocal(e.id);
+    ref.read(syncControllerProvider.notifier).requestSync();
     if (mounted) Navigator.of(context).pop(true);
   }
 

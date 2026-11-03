@@ -9,7 +9,8 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 | `handbook/` – Gemini kézikönyv | **első verzió** |
 | `apps/kvantum_app` – Flutter app: helyi SQLite (drift), hónapnézet + napi lista, eseményszerkesztő (ismétlődéssel), outbox | **kész, tesztelve** |
 | Szinkronmotor (`lib/sync`): pull → reconcile → push, syncToken, teljes újraszinkron, ütközéskezelés, idempotens újrapróbálás | **kész, 9 teszt (hamis távoli naptárral)** |
-| Valódi Google Calendar adapter (`RemoteCalendar` implementáció), Google belépés | következő lépés (Google Cloud OAuth-kliens kell hozzá) |
+| Google Calendar adapter (`GoogleCalendarRemote`), Google belépés (OAuth, biztonságos tároló), szinkronvezérlő (60 mp + mentés után + előtérbe lépéskor) | **kész, 21 teszt hamis HTTP-vel; élő fiókkal még nem próbálva** |
+| Windows exe + Android APK építés GitHub Actionsben (`build.yml`) | kész, első futás ellenőrzendő |
 | Drive `appDataFolder` (feladatok, check-in), Gemini hívás | következő lépés |
 | Turbo mód (Cloudflare Worker + FCM) | következő lépés |
 
@@ -19,7 +20,8 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 cd packages/kvantum_core && dart pub get && dart analyze && dart test
 # app (Flutter 3.47+)
 cd apps/kvantum_app && flutter pub get && dart run build_runner build && flutter analyze && flutter test
-flutter run -d windows     # vagy -d <android-eszköz>
+cp secrets.example.json secrets.json   # töltsd ki (git kizárja)
+flutter run -d windows --dart-define-from-file=secrets.json   # vagy -d <android-eszköz>
 ```
 Ismert korlát: egy ismétlődő esemény szerkesztése az egész sorozatra vonatkozik (az „csak ez a példány” szerkesztés a következő lépés; a mag már támogatja).
 

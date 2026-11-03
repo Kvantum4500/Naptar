@@ -127,6 +127,9 @@ class SyncEngine {
                         l.calendarId == e.calendarId,
                   )
                   .firstOrNull;
+        // An instance whose series we do not have (e.g. outside the sync
+        // window) cannot be placed; skip it instead of storing an orphan.
+        if (ch.masterGoogleId != null && masterLocal == null) return;
         await repo.saveFromRemote(
           e.copyWith(
             id: ch.ref.appEventId ?? _uuid.v4(),

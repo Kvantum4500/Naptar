@@ -1,0 +1,54 @@
+name: Build apps
+# Manual or on version tags. Needs repository secrets GOOGLE_CLIENT_ID and
+# GOOGLE_CLIENT_SECRET (Settings > Secrets and variables > Actions).
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: apps/kvantum_app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - name: Write local config
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" \
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s}' > secrets.json
+      - run: flutter build apk --release --dart-define-from-file=secrets.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naptar-android-apk
+          path: apps/kvantum_app/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+  windows:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: apps/kvantum_app, shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - name: Write local config
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" \
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s}' > secrets.json
+      - run: flutter build windows --release --dart-define-from-file=secrets.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naptar-windows
+          path: apps/kvantum_app/build/windows/x64/runner/Release
+          retention-days: 14

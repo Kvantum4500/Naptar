@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
+import '../sync/sync_controller.dart';
 import 'day_utils.dart';
 import 'event_editor.dart';
 
@@ -32,6 +33,7 @@ class HomePage extends ConsumerWidget {
       appBar: AppBar(
         title: Text(DateFormat.yMMMM('hu').format(month)),
         actions: [
+          const _SyncButton(),
           IconButton(
             tooltip: 'Előző hónap',
             icon: const Icon(Icons.chevron_left),
@@ -249,6 +251,70 @@ class _DayList extends ConsumerWidget {
                   },
                 ),
         ),
+      ],
+    );
+  }
+}
+
+class _SyncButton extends ConsumerWidget {
+  const _SyncButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(syncControllerProvider);
+    final ctl = ref.read(syncControllerProvider.notifier);
+    if (!s.configured) {
+      return IconButton(
+        tooltip: 'Google nincs beállítva',
+        icon: const Icon(Icons.cloud_off_outlined),
+        onPressed: () => showDialog<void>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Google nincs beállítva'),
+            content: const Text(
+              'Add meg a GOOGLE_CLIENT_ID és GOOGLE_CLIENT_SECRET értéket '
+              'a secrets.json fájlban, és indítsd így:\n'
+              'flutter run --dart-define-from-file=secrets.json',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Rendben'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (!s.signedIn) {
+      return TextButton.icon(
+        onPressed: ctl.signIn,
+        icon: const Icon(Icons.login),
+        label: const Text('Belépés Google-lal'),
+      );
+    }
+    if (s.syncing) {
+      return const Padding(
+        padding: EdgeInsets.all(14),
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    final last = s.lastSync == null
+        ? 'még nem szinkronizált'
+        : 'utoljára ${DateFormat.Hm('hu').format(s.lastSync!)}';
+    return PopupMenuButton<String>(
+      tooltip:
+          s.error ??
+          'Szinkron: $last${s.pending > 0 ? ', ${s.pending} függőben' : ''}',
+      icon: Icon(s.error == null ? Icons.sync : Icons.sync_problem),
+      onSelected: (v) => v == 'sync' ? ctl.syncNow() : ctl.signOut(),
+      itemBuilder: (c) => [
+        PopupMenuItem(value: 'sync', child: Text('Szinkron most ($last)')),
+        const PopupMenuItem(value: 'out', child: Text('Kilépés')),
       ],
     );
   }
