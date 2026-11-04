@@ -23,18 +23,18 @@ import 'support/harness.dart';
 class FakeGemini extends FakeLlm {
   FakeGemini(
     super.script, {
-    this.models = const [
+    this.available = const [
       LlmModel('gemini-2.5-flash', 'Flash'),
       LlmModel('gemini-2.5-pro', 'Pro'),
     ],
     this.listError,
   });
-  final List<LlmModel> models;
+  final List<LlmModel> available;
   final LlmException? listError;
   @override
   Future<List<LlmModel>> listModels() async {
     if (listError != null) throw listError!;
-    return models;
+    return available;
   }
 }
 
@@ -392,7 +392,10 @@ void main() {
         await tester.enterText(find.byType(TextField), 'edzés');
         await tester.tap(find.byTooltip('Küldés'));
         await tester.pumpAndSettle();
-        expect(find.text('Elfogyott az ingyenes keret.'), findsOneWidget);
+        expect(
+          find.textContaining('Elfogyott az ingyenes keret.'),
+          findsOneWidget,
+        );
         await tester.tap(find.text('Újrapróbál'));
         await tester.pumpAndSettle();
         expect(find.text('Futás'), findsOneWidget);
@@ -424,10 +427,118 @@ void main() {
       expect(find.text('Rendben, mikor?'), findsOneWidget);
       expect(
         llm.requests.first.turns.first.parts.whereType<LlmText>().single.text,
-        'Tervezz edzést a jövő hétre',
+        startsWith('Tervezz edzést a jövő hétre'),
       );
       await shutdown(tester, db);
     });
+
+    testWidgets(
+      'a model without free quota is replaced by another one, the switch is remembered and explained',
+      (tester) async {
+        final llm = FakeGemini(
+          [
+            (_) => const LlmRateLimit(
+              'nincs keret',
+              quotaZero: true,
+              model: 'gemini-2.5-flash',
+            ),
+            (_) => plan([
+              item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            ]),
+          ],
+          available: const [
+            LlmModel('gemini-2.5-flash', 'Flash'),
+            LlmModel('gemini-2.5-flash-lite', 'Lite'),
+          ],
+        );
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.enterText(find.byType(TextField), 'edzés');
+        await tester.tap(find.byTooltip('Küldés'));
+        await tester.pumpAndSettle();
+
+        expect(llm.models, ['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+        expect(find.text('Futás'), findsOneWidget);
+        expect(
+          find.textContaining(
+            'Átváltottam a(z) gemini-2.5-flash-lite modellre',
+          ),
+          findsOneWidget,
+        );
+        final s = await tester.runAsync(
+          () => ref0(tester).read(aiSettingsStoreProvider).load(),
+        );
+        expect(s!.model, 'gemini-2.5-flash-lite');
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'when no other model works, the precise reason and the service detail are shown',
+      (tester) async {
+        final limit = const LlmRateLimit(
+          'A(z) gemini-2.5-flash modellhez ennél a kulcsnál nincs ingyenes keret (limit: 0).',
+          quotaZero: true,
+          detail: 'Quota exceeded for metric ..., limit: 0, model: gemini-2.5-flash',
+        );
+        final llm = FakeGemini(
+          [(_) => limit, (_) => limit],
+          available: const [
+            LlmModel('gemini-2.5-flash', 'Flash'),
+            LlmModel('gemini-2.0-flash', 'Flash 2'),
+          ],
+        );
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.enterText(find.byType(TextField), 'edzés');
+        await tester.tap(find.byTooltip('Küldés'));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('nincs ingyenes keret (limit: 0)'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('engedélyezd a számlázást'), findsOneWidget);
+        expect(
+          find.widgetWithText(FilledButton, 'Beállítások'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Részletek'));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Quota exceeded for metric'),
+          findsOneWidget,
+        );
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'a short per-minute limit gives a "wait and retry" message without a settings button',
+      (tester) async {
+        final llm = FakeGemini([
+          for (var i = 0; i < 3; i++)
+            (_) => const LlmRateLimit(
+              'Túl sok kérés rövid idő alatt.',
+              retryAfter: Duration(seconds: 1),
+            ),
+        ]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.enterText(find.byType(TextField), 'edzés');
+        await tester.tap(find.byTooltip('Küldés'));
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle(
+          const Duration(seconds: 1),
+          EnginePhase.sendSemanticsUpdate,
+          const Duration(seconds: 30),
+        );
+        expect(
+          find.textContaining('Túl sok kérés rövid idő alatt.'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Várj egy percet'), findsOneWidget);
+        expect(find.widgetWithText(FilledButton, 'Beállítások'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
   });
 }
 

@@ -60,6 +60,9 @@ class AssistantState {
     this.selected = const {},
     this.acceptedCount,
     this.prompt = '',
+    this.status,
+    this.notice,
+    this.errorDetail,
   });
 
   final bool busy;
@@ -72,6 +75,15 @@ class AssistantState {
   final int? acceptedCount;
   final String prompt;
 
+  /// Progress line while busy (e.g. waiting for a rate limit to clear).
+  final String? status;
+
+  /// Something worth telling after a successful run (e.g. model switched).
+  final String? notice;
+
+  /// The service's own explanation of an error, for diagnosis.
+  final String? errorDetail;
+
   AssistantState copyWith({
     bool? busy,
     AssistantOutcome? outcome,
@@ -83,6 +95,8 @@ class AssistantState {
     int? acceptedCount,
     bool clearAccepted = false,
     String? prompt,
+    String? status,
+    bool clearStatus = false,
   }) => AssistantState(
     busy: busy ?? this.busy,
     outcome: clearOutcome ? null : (outcome ?? this.outcome),
@@ -102,6 +116,7 @@ class AssistantController extends Notifier<AssistantState> {
     final text = prompt.trim();
     if (text.isEmpty || state.busy) return;
     state = AssistantState(busy: true, prompt: text);
+    void status(String s) => state = state.copyWith(status: s);
     try {
       final key = await ref.read(apiKeyStoreProvider).read();
       if (key == null) {
@@ -134,17 +149,58 @@ class AssistantController extends Notifier<AssistantState> {
         handbook: ref.read(handbookStoreProvider),
         settingsStore: ref.read(aiSettingsStoreProvider),
       );
-      final outcome = await service.ask(text, model: model, settings: settings);
+      Future<AssistantOutcome> run(String m) =>
+          service.ask(text, model: m, settings: settings, onStatus: status);
+
+      AssistantOutcome outcome;
+      String? notice;
+      try {
+        outcome = await run(model);
+      } on LlmRateLimit catch (first) {
+        if (!(first.quotaZero || first.daily)) rethrow;
+        // This model has no (more) free quota: try the other flash models once.
+        AssistantOutcome? alt;
+        String? used;
+        for (final cand in fallbackModels(await provider.listModels(), model)) {
+          status('A(z) $model-hez nincs szabad keret, próbálom ezt: $cand…');
+          try {
+            alt = await run(cand);
+            used = cand;
+            break;
+          } on LlmRateLimit {
+            continue;
+          }
+        }
+        if (alt == null) rethrow; // keep the precise first error
+        outcome = alt;
+        settings = settings.copyWith(model: used);
+        await settingsNotifier.change(settings);
+        notice =
+            'Átváltottam a(z) $used modellre, mert a(z) $model-hez nincs szabad ingyenes keret. A Beállításokban átállíthatod.';
+      }
       state = AssistantState(
         prompt: text,
         outcome: outcome,
         selected: {for (var i = 0; i < outcome.items.length; i++) i},
+        notice: notice,
       );
     } on LlmAuth catch (e) {
       state = AssistantState(
         prompt: text,
         error: e.message,
         errorNeedsSettings: true,
+      );
+    } on LlmRateLimit catch (e) {
+      final advice = e.quotaZero
+          ? ' Válassz másik modellt a Beállításokban, vagy engedélyezd a számlázást a Google AI Studióban (az ingyenes szint nem minden fióknál és országban érhető el).'
+          : e.daily
+          ? ' Holnap újra működik, vagy válassz másik modellt a Beállításokban.'
+          : ' Várj egy percet, és próbáld újra.';
+      state = AssistantState(
+        prompt: text,
+        error: '${e.message}$advice',
+        errorNeedsSettings: !e.transient,
+        errorDetail: e.detail.isEmpty ? null : e.detail,
       );
     } on LlmException catch (e) {
       state = AssistantState(prompt: text, error: e.message);

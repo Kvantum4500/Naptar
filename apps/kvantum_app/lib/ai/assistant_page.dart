@@ -96,7 +96,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 ],
               ),
               const SizedBox(height: 16),
-              if (st.busy) const _Working(),
+              if (st.busy) _Working(status: st.status),
               if (st.error != null)
                 Card(
                   color: scheme.errorContainer,
@@ -109,6 +109,25 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                           st.error!,
                           style: TextStyle(color: scheme.onErrorContainer),
                         ),
+                        if (st.errorDetail != null)
+                          ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            title: Text(
+                              'Részletek',
+                              style: TextStyle(color: scheme.onErrorContainer),
+                            ),
+                            children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: SelectableText(
+                                  st.errorDetail!,
+                                  style: TextStyle(
+                                    color: scheme.onErrorContainer,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 8,
@@ -130,6 +149,14 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+              if (st.notice != null)
+                Card(
+                  color: scheme.tertiaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.swap_horiz),
+                    title: Text(st.notice!),
                   ),
                 ),
               if (st.acceptedCount != null)
@@ -241,21 +268,23 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
 }
 
 class _Working extends StatelessWidget {
-  const _Working();
+  const _Working({this.status});
+  final String? status;
   @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.symmetric(vertical: 8),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
     child: Row(
       children: [
-        SizedBox(
+        const SizedBox(
           width: 18,
           height: 18,
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
-        SizedBox(width: 12),
+        const SizedBox(width: 12),
         Expanded(
           child: Text(
-            'Az asszisztens dolgozik: adatot kér le, szabad időt keres, ellenőrzi a szabályokat…',
+            status ??
+                'Az asszisztens dolgozik: tervez, és ellenőrzi a szabályokat…',
           ),
         ),
       ],

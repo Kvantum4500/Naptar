@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'event.dart';
 import 'models.dart';
 import 'rules.dart';
@@ -145,6 +147,12 @@ Map<String, Object?> checkinsForTool(
   };
 }
 
+/// Wraps tool-style data for the first message. Everything inside has gone
+/// through [sanitizeText], so it cannot contain `<`/`>` and therefore cannot
+/// close the block or imitate our own delimiters.
+String dataBlock(String type, Map<String, Object?> data) =>
+    '<adat tipus="$type">${jsonEncode(data)}</adat>';
+
 /// The fixed instructions + the user's handbook. Contains NO calendar data:
 /// events/tasks/check-ins only ever arrive through tool results.
 String buildSystemPrompt({
@@ -159,8 +167,8 @@ Te a felhasználó személyes naptár-asszisztense vagy. Magyarul válaszolj, r�
 MAI IDŐ: ${_ymd(local)} ${_hm(local)} (${rules.tzid}).
 
 MŰKÖDÉS
-- Naptáradatot, feladatot és check-int csak az eszközökkel kérhetsz le (get_events, get_tasks, get_checkins). Ne találj ki adatot; ha nincs elég adat, kérdezz vissza (questions).
-- Szabad időpontot a find_free_slots eszközzel keress, ne számold ki magad.
+- Az első üzenet <adat> blokkjai a következő napok eseményeit, a nyitott feladatokat, a check-int és a szabad idősávokat már tartalmazzák; ezekből tervezz. Más időszakhoz használd az eszközöket (get_events, get_tasks, get_checkins, find_free_slots). Ne találj ki adatot; ha nincs elég adat, kérdezz vissza (questions).
+- Szabad időpontot a find_free_slots adatból vagy eszközből válassz, ne számold ki magad.
 - A végső tervet MINDIG a propose_events eszközzel add le. Csak új eseményt javasolhatsz; meglévőt nem módosíthatsz és nem törölhetsz.
 - Időpontok helyi idő (időzóna nélkül, ISO: 2026-05-04T18:00:00) + tzid.
 

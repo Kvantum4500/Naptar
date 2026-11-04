@@ -302,6 +302,139 @@ void main() {
     });
   });
 
+  group('429 diagnosis', () {
+    Future<LlmRateLimit> limit(
+      Object body, [
+      Map<String, String> headers = const {},
+    ]) async {
+      try {
+        await provider((_) async => _json(body, 429, headers))
+            .generate('gemini-2.5-pro', request());
+      } on LlmRateLimit catch (e) {
+        return e;
+      }
+      throw StateError('no rate limit');
+    }
+
+    test(
+      '"limit: 0" means this model has no free quota for this key',
+      () async {
+        final e = await limit({
+          'error': {
+            'status': 'RESOURCE_EXHAUSTED',
+            'message': 'You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro',
+            'details': [
+              {
+                '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+                'violations': [
+                  {
+                    'quotaMetric': 'x/generate_content_free_tier_requests',
+                    'quotaId':
+                        'GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+                    'quotaDimensions': {'model': 'gemini-2.5-pro'},
+                  },
+                ],
+              },
+            ],
+          },
+        });
+        expect(e.quotaZero, isTrue);
+        expect(e.transient, isFalse);
+        expect(e.model, 'gemini-2.5-pro');
+        expect(e.message, contains('gemini-2.5-pro'));
+        expect(e.message, contains('nincs ingyenes keret'));
+        expect(e.detail, contains('limit: 0'));
+      },
+    );
+
+    test('a daily quota is recognised and is not transient', () async {
+      final e = await limit({
+        'error': {
+          'status': 'RESOURCE_EXHAUSTED',
+          'message': 'Quota exceeded for metric: generate_content_free_tier_requests, limit: 250, model: gemini-2.5-flash',
+          'details': [
+            {
+              '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+              'violations': [
+                {
+                  'quotaId':
+                      'GenerateRequestsPerDayPerProjectPerModel-FreeTier',
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(e.daily, isTrue);
+      expect(e.quotaZero, isFalse);
+      expect(e.transient, isFalse);
+      expect(e.message, contains('mai ingyenes keret'));
+    });
+
+    test('a per-minute limit is transient and carries the wait hint', () async {
+      final e = await limit({
+        'error': {
+          'status': 'RESOURCE_EXHAUSTED',
+          'message': 'Quota exceeded for metric: generate_content_free_tier_requests, limit: 10, model: gemini-2.5-flash',
+          'details': [
+            {
+              '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+              'violations': [
+                {
+                  'quotaId':
+                      'GenerateRequestsPerMinutePerProjectPerModel-FreeTier',
+                },
+              ],
+            },
+            {
+              '@type': 'type.googleapis.com/google.rpc.RetryInfo',
+              'retryDelay': '37s',
+            },
+          ],
+        },
+      });
+      expect(e.transient, isTrue);
+      expect(e.retryAfter, const Duration(seconds: 37));
+      expect(e.message, contains('37 mp'));
+    });
+
+    test(
+      'the detail never contains anything that looks like a key and is bounded',
+      () async {
+        final e = await limit({
+          'error': {
+            'status': 'RESOURCE_EXHAUSTED',
+            'message': 'bad key AIzaSyA1234567890abcdefghijk ${'x' * 800}',
+          },
+        });
+        expect(e.detail.contains('AIza'), isFalse);
+        expect(e.detail.length, lessThanOrEqualTo(401));
+      },
+    );
+
+    test('fallback models: other stable flash first, then lite, then previews; never the failed one', () {
+      LlmModel m(String id) => LlmModel(id, id);
+      final list = [
+        m('gemini-2.5-pro'),
+        m('gemini-2.5-flash'),
+        m('gemini-2.5-flash-lite'),
+        m('gemini-2.0-flash'),
+        m('gemini-3.0-flash-preview'),
+        m('gemini-2.5-flash-image'),
+        m('gemini-2.0-flash-lite'),
+        m('gemini-2.5-flash-tts'),
+      ];
+      expect(fallbackModels(list, 'gemini-2.5-flash'), [
+        'gemini-2.0-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-2.0-flash-lite',
+        'gemini-3.0-flash-preview',
+      ]);
+      expect(fallbackModels(list, 'gemini-2.5-pro').first, 'gemini-2.5-flash');
+      expect(fallbackModels([m('gemini-2.5-pro')], 'gemini-2.5-pro'), isEmpty);
+    });
+  });
+
   group('models', () {
     test('lists only models that can generate content, follows paging, strips "models/"', () async {
       var page = 0;

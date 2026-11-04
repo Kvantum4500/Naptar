@@ -203,6 +203,8 @@ class GeminiProvider implements LLMProvider {
     String message = '';
     String apiStatus = '';
     Duration? retry;
+    String? quotaModel;
+    var quotaIds = '';
     try {
       final j = jsonDecode(body);
       final err = j is Map ? j['error'] : null;
@@ -210,6 +212,16 @@ class GeminiProvider implements LLMProvider {
         message = '${err['message'] ?? ''}';
         apiStatus = '${err['status'] ?? ''}';
         for (final d in (err['details'] as List? ?? const [])) {
+          if (d is Map && '${d['@type']}'.contains('QuotaFailure')) {
+            for (final v in (d['violations'] as List? ?? const [])) {
+              if (v is! Map) continue;
+              quotaIds += ' ${v['quotaId'] ?? ''} ${v['quotaMetric'] ?? ''}';
+              final dims = v['quotaDimensions'];
+              if (dims is Map && dims['model'] != null) {
+                quotaModel = '${dims['model']}';
+              }
+            }
+          }
           final rd = d is Map ? d['retryDelay'] : null;
           if (rd is String) {
             final m = RegExp(r'^(\d+(?:\.\d+)?)s$').firstMatch(rd);
@@ -228,9 +240,25 @@ class GeminiProvider implements LLMProvider {
     if (header != null) retry = Duration(seconds: header);
 
     if (status == 429 || apiStatus == 'RESOURCE_EXHAUSTED') {
+      final all = '$message $quotaIds';
+      quotaModel ??= RegExp(r'model:\s*([\w.\-]+)').firstMatch(message)?[1];
+      final zero = RegExp(r'limit:\s*0\b').hasMatch(all);
+      final daily =
+          !zero &&
+          RegExp(r'PerDay|per day|daily', caseSensitive: false).hasMatch(all);
+      final name = quotaModel ?? 'ez a modell';
+      final text = zero
+          ? 'A(z) $name modellhez ennél a kulcsnál nincs ingyenes keret (limit: 0).'
+          : daily
+          ? 'Elfogyott a mai ingyenes keret ehhez a modellhez ($name).'
+          : 'Túl sok kérés rövid idő alatt${retry == null ? '' : ' (kb. ${retry.inSeconds} mp várakozás kell)'}.';
       return LlmRateLimit(
-        'Elfogyott az ingyenes keret vagy túl sok a kérés. Próbáld később.',
+        text,
         retryAfter: retry,
+        detail: _safeDetail(message),
+        quotaZero: zero,
+        daily: daily,
+        model: quotaModel,
       );
     }
     if (status == 401 ||
@@ -284,4 +312,40 @@ String? pickDefaultModel(List<LlmModel> models) {
   return gemini.isEmpty
       ? (models.isEmpty ? null : models.first.id)
       : gemini.first.id;
+}
+
+/// The service message without anything that looks like a key, bounded.
+String _safeDetail(String m) {
+  final clean = m
+      .replaceAll(RegExp(r'AIza[0-9A-Za-z_\-]{10,}'), '[kulcs]')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return clean.length > 400 ? '${clean.substring(0, 400)}…' : clean;
+}
+
+/// Other models worth trying when one has no quota: stable flash first, then
+/// flash-lite (usually the most generous free tier), then previews.
+List<String> fallbackModels(List<LlmModel> models, String failed) {
+  double version(String id) {
+    final m = RegExp(r'gemini-(\d+(?:\.\d+)?)').firstMatch(id);
+    return m == null ? 0 : double.parse(m[1]!);
+  }
+
+  bool special(String id) => RegExp(
+    r'(image|tts|live|audio|embed|thinking|exp|vision|robotics|computer)',
+  ).hasMatch(id);
+  List<String> pick(bool Function(String) f) => [
+    for (final m in models)
+      if (m.id != failed && m.id.contains('flash') && !special(m.id) && f(m.id))
+        m.id,
+  ]..sort((a, b) => version(b).compareTo(version(a)));
+
+  final stableFlash = pick(
+    (id) => !id.contains('lite') && !id.contains('preview'),
+  );
+  final stableLite = pick(
+    (id) => id.contains('lite') && !id.contains('preview'),
+  );
+  final previews = pick((id) => id.contains('preview'));
+  return [...stableFlash, ...stableLite, ...previews].take(4).toList();
 }

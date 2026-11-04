@@ -101,8 +101,29 @@ class LlmAuth extends LlmException {
 
 /// Limit reached; [retryAfter] is the server's hint when it gave one.
 class LlmRateLimit extends LlmException {
-  const LlmRateLimit(super.message, {this.retryAfter});
+  const LlmRateLimit(
+    super.message, {
+    this.retryAfter,
+    this.detail = '',
+    this.quotaZero = false,
+    this.daily = false,
+    this.model,
+  });
   final Duration? retryAfter;
+
+  /// The service's own explanation (never contains the key), for diagnosis.
+  final String detail;
+
+  /// The model has NO free quota for this key/account ("limit: 0"): waiting
+  /// does not help, another model might.
+  final bool quotaZero;
+
+  /// The daily quota is used up: waiting minutes does not help either.
+  final bool daily;
+  final String? model;
+
+  /// A per-minute style limit that clears by itself shortly.
+  bool get transient => !quotaZero && !daily;
 }
 
 /// No connection, timeout or a server-side problem; worth retrying later.

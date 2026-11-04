@@ -8,10 +8,12 @@ class FakeLlm implements LLMProvider {
   final List<Object Function(LlmRequest)>
   script; // LlmReply or an exception to throw
   final List<LlmRequest> requests = [];
+  final List<String> models = [];
 
   @override
   Future<LlmReply> generate(String model, LlmRequest request) async {
     requests.add(request);
+    models.add(model);
     if (requests.length > script.length) {
       throw StateError('model called more often than scripted');
     }

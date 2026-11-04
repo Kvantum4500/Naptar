@@ -127,13 +127,16 @@ void main() {
       useSize(tester);
       final db = await newDb();
       final repo = EventRepository(db);
-      final n = DateTime.now();
+      // The grid scrolls to "now - 1 h"; an event starting this hour is always visible.
+      final n = toWallClock(bp, DateTime.now().toUtc());
+      final h = n.hour.clamp(1, 21);
+      String hh(int x) => x.toString().padLeft(2, '0');
       await tester.runAsync(
         () => repo.saveLocal(
           evt(
             'p',
             'Panel esemény',
-            floating(n.year, n.month, n.day, 10),
+            floating(n.year, n.month, n.day, h),
             colorId: '7',
           ),
         ),
@@ -145,8 +148,8 @@ void main() {
       expect(find.text('Hónap'), findsOneWidget);
       // ... and the side panel has the timeline: block with its time range + hour labels
       expect(find.text('Panel esemény'), findsOneWidget);
-      expect(find.text('10:00–11:00'), findsOneWidget);
-      expect(find.text('12:00'), findsWidgets);
+      expect(find.text('${hh(h)}:00–${hh(h + 1)}:00'), findsOneWidget);
+      expect(find.text('${hh((h + 2).clamp(1, 23))}:00'), findsWidgets);
       expect(find.text('1 esemény'), findsOneWidget);
 
       // tapping the block opens the editor directly, no view switch needed
@@ -180,13 +183,15 @@ void main() {
     useSize(tester);
     final db = await newDb();
     final repo = EventRepository(db);
-    final n = DateTime.now();
+    final n = toWallClock(bp, DateTime.now().toUtc());
+    final h = n.hour.clamp(1, 21);
+    String hh(int x) => x.toString().padLeft(2, '0');
     await tester.runAsync(
       () => repo.saveLocal(
         evt(
           'w',
           'Heti edzés',
-          floating(n.year, n.month, n.day, 10),
+          floating(n.year, n.month, n.day, h),
           colorId: '2',
         ),
       ),
@@ -197,8 +202,8 @@ void main() {
     await tester.tap(find.text('Hét'));
     await tester.pumpAndSettle();
     expect(find.text('Heti edzés'), findsOneWidget);
-    expect(find.text('10:00–11:00'), findsOneWidget);
-    expect(find.text('12:00'), findsWidgets);
+    expect(find.text('${hh(h)}:00–${hh(h + 1)}:00'), findsOneWidget);
+    expect(find.text('${hh((h + 2).clamp(1, 23))}:00'), findsWidgets);
     final saved = await tester.runAsync(() => repo.meta('calView'));
     expect(saved, 'week');
     await shutdown(tester, db);
