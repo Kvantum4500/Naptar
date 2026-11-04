@@ -351,8 +351,7 @@ void main() {
       final e = await limit({
         'error': {
           'status': 'RESOURCE_EXHAUSTED',
-          'message':
-              'Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.',
+          'message': 'Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.',
         },
       });
       expect(e.billing, isTrue);

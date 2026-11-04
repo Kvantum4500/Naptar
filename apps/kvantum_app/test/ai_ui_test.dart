@@ -292,7 +292,10 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Tervezz edzést');
       await tester.tap(find.byTooltip('Küldés'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Még nincs API-kulcs megadva ehhez'), findsOneWidget);
+      expect(
+        find.textContaining('Még nincs API-kulcs megadva ehhez'),
+        findsOneWidget,
+      );
       expect(find.text('Beállítások'), findsWidgets);
       await shutdown(tester, db);
     });

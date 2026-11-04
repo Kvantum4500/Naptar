@@ -12,6 +12,7 @@ import 'event_editor.dart';
 import 'tasks_page.dart';
 import 'format.dart';
 import 'month_view.dart';
+import 'shift_page.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
 
@@ -182,6 +183,7 @@ class HomePage extends ConsumerWidget {
                 final page = switch (v) {
                   'tasks' => const TasksPage(),
                   'assistant' => const AssistantPage(),
+                  'shifts' => const ShiftPage(),
                   _ => const SettingsPage(),
                 };
                 Navigator.of(context)
@@ -190,6 +192,7 @@ class HomePage extends ConsumerWidget {
               itemBuilder: (c) => const [
                 PopupMenuItem(value: 'tasks', child: Text('Feladatok')),
                 PopupMenuItem(value: 'assistant', child: Text('Asszisztens')),
+                PopupMenuItem(value: 'shifts', child: Text('Beosztás')),
                 PopupMenuItem(value: 'settings', child: Text('Beállítások')),
               ],
             )
@@ -199,6 +202,13 @@ class HomePage extends ConsumerWidget {
               icon: const Icon(Icons.checklist),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const TasksPage()),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Beosztás',
+              icon: const Icon(Icons.event_repeat),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ShiftPage()),
               ),
             ),
             IconButton(
