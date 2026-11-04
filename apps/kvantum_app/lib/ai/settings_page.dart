@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../update/update_dialog.dart';
 import 'ai_providers.dart';
+import '../notify/reminders.dart';
 import 'ai_settings.dart';
 import 'handbook_page.dart';
 import 'llm_provider.dart';
@@ -108,6 +109,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  /// Turning a reminder on asks for the notification permission first; when
+  /// it is refused nothing is switched on and the user is told why.
+  Future<void> _setReminders(ReminderSettings next) async {
+    if (next.any) {
+      final ok = await ref.read(reminderSchedulerProvider).ensurePermission();
+      if (!ok) {
+        _say(
+          'Az értesítések le vannak tiltva. Engedélyezd az Android beállításaiban (Alkalmazások → Kvantum Naptár → Értesítések).',
+          error: true,
+        );
+        return;
+      }
+    }
+    await ref.read(reminderSettingsProvider.notifier).change(next);
+  }
+
   Future<void> _deleteKey(String provider) async {
     await ref.read(apiKeyStoreProvider).write(null, provider: provider);
     setState(() {
@@ -120,6 +137,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(aiSettingsProvider).value ?? const AiSettings();
+    final reminders =
+        ref.watch(reminderSettingsProvider).value ?? const ReminderSettings();
     if (_loadedFor != settings.provider &&
         ref.watch(aiSettingsProvider).hasValue) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _refresh(settings));
@@ -309,6 +328,51 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onChanged: (v) =>
                       notifier.change(settings.copyWith(checkins: v)),
                 ),
+              ]),
+              section('Emlékeztetők', [
+                if (!ref.watch(reminderSchedulerProvider).supported)
+                  const Text(
+                    'Az emlékeztetők ezen az eszközön még nem érhetők el (egyelőre csak Androidon működnek).',
+                  )
+                else ...[
+                  const Text(
+                    'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    initialValue: reminders.shiftLeadMinutes,
+                    decoration: const InputDecoration(
+                      labelText: 'Emlékeztető a műszak előtt',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text('Ki')),
+                      DropdownMenuItem(
+                        value: 60,
+                        child: Text('1 órával előtte'),
+                      ),
+                      DropdownMenuItem(
+                        value: 120,
+                        child: Text('2 órával előtte'),
+                      ),
+                      DropdownMenuItem(
+                        value: 180,
+                        child: Text('3 órával előtte'),
+                      ),
+                    ],
+                    onChanged: (v) => v == null
+                        ? null
+                        : _setReminders(
+                            reminders.copyWith(shiftLeadMinutes: v),
+                          ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Napi check-in emlékeztető (20:00)'),
+                    value: reminders.checkIn,
+                    onChanged: (v) =>
+                        _setReminders(reminders.copyWith(checkIn: v)),
+                  ),
+                ],
               ]),
               section('Alvási sáv', [
                 const Text(

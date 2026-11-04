@@ -12,6 +12,7 @@ import 'event_editor.dart';
 import 'tasks_page.dart';
 import 'format.dart';
 import 'month_view.dart';
+import '../notify/reminders.dart';
 import 'shift_page.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
@@ -60,6 +61,7 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(reminderSyncProvider); // keeps the device reminders up to date
     final view = ref.watch(viewModeProvider);
     final month = ref.watch(visibleMonthProvider);
     final sel = ref.watch(selectedDayProvider);

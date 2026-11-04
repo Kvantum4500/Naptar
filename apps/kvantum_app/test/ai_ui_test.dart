@@ -184,6 +184,11 @@ void main() {
 
     testWidgets('the sleep window is editable and remembered', (tester) async {
       await boot(tester, const SettingsPage());
+      await tester.scrollUntilVisible(
+        find.text('Alvási sáv'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Alvási sáv'), findsOneWidget);
       final c = ref0(tester);
       var s = (await tester.runAsync(
