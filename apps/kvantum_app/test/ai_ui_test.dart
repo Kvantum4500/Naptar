@@ -494,6 +494,180 @@ void main() {
       await shutdown(tester, db);
     });
 
+    // ---- moves need an explicit "Engedélyezem" too
+    FakeGemini moveScript(List<String> refs, String start, String end) =>
+        FakeGemini([
+          (_) => calls([
+            tool('propose_events', {
+              'summary': 'Áthelyezés',
+              'proposals': <Object?>[],
+              'moves': [
+                for (final r in refs)
+                  {'ref': r, 'start': start, 'end': end, 'reason': 'kérted'},
+              ],
+            }),
+          ]),
+        ]);
+
+    testWidgets('a move waits for "Engedélyezem", then changes the time', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('p1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      refs.add(await refOf(tester, 'Fogorvos'));
+      await ask(tester);
+
+      expect(
+        find.textContaining('Áthelyezésre javasolt események (1)'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Új időpont'), findsOneWidget);
+      expect(find.text('Mégse'), findsOneWidget);
+      // nothing happened yet
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.start,
+        floating(2026, 11, 20, 9),
+      );
+
+      await tester.tap(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      final e = (await tester.runAsync(() => events.byId('p1')))!;
+      expect(e.start, floating(2026, 11, 20, 19));
+      expect(e.end, floating(2026, 11, 20, 20));
+      expect(find.text('1 esemény áthelyezve.'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('"Mégse" moves nothing', (tester) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('p1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      refs.add(await refOf(tester, 'Fogorvos'));
+      await ask(tester);
+      await tester.tap(find.text('Mégse'));
+      await tester.pumpAndSettle();
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.start,
+        floating(2026, 11, 20, 9),
+      );
+      expect(find.text('Engedélyezem'), findsNothing);
+      expect(find.textContaining('áthelyezve'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('moving one day of a series only overrides that day', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: moveScript(refs, '2026-11-18T19:00:00', '2026-11-18T20:00:00'),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () => events.saveLocal(
+          evt(
+            's1',
+            'Edzés',
+            floating(2026, 11, 18, 9),
+            rrule: 'FREQ=DAILY;COUNT=3',
+          ),
+        ),
+      );
+      refs.add(await refOf(tester, 'Edzés'));
+      await ask(tester);
+      expect(find.textContaining('csak ez a nap mozdul'), findsOneWidget);
+      await tester.tap(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      final master = (await tester.runAsync(() => events.byId('s1')))!;
+      expect(master.start, floating(2026, 11, 18, 9)); // series unchanged
+      final occ = (await tester.runAsync(
+        () => events.occurrences(
+          DateTime.utc(2026, 11, 18),
+          DateTime.utc(2026, 11, 22),
+        ),
+      ))!;
+      expect(occ.length, 3);
+      expect(
+        occ.where((o) => o.startUtc.hour == 18).length, // 19:00 CET = 18:00Z
+        1,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a move onto another event is not offered', (tester) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: moveScript(refs, '2026-11-20T13:00:00', '2026-11-20T14:00:00'),
+        key: 'k',
+      );
+      await tester.runAsync(() async {
+        await events.saveLocal(
+          evt('p1', 'Fogorvos', floating(2026, 11, 20, 9)),
+        );
+        await events.saveLocal(
+          evt('p2', 'Megbeszélés', floating(2026, 11, 20, 13)),
+        );
+      });
+      refs.add(await refOf(tester, 'Fogorvos'));
+      await ask(tester);
+      expect(find.text('Engedélyezem'), findsNothing);
+      await tester.tap(find.textContaining('Nem javasolt'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('ütközik'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a shift cannot be moved', (tester) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () => events.saveLocal(
+          evt(
+            'm1',
+            'Nappali műszak',
+            floating(2026, 11, 20, 6),
+          ).copyWith(notes: kShiftMarker),
+        ),
+      );
+      refs.add(await refOf(tester, 'Nappali műszak'));
+      await ask(tester);
+      expect(find.text('Engedélyezem'), findsNothing);
+      await tester.tap(find.textContaining('Nem javasolt'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('műszak, azt nem lehet'), findsOneWidget);
+      expect(
+        (await tester.runAsync(() => events.byId('m1')))!.start,
+        floating(2026, 11, 20, 6),
+      );
+      await shutdown(tester, db);
+    });
+
     testWidgets('without a key it points to the settings instead of failing', (
       tester,
     ) async {

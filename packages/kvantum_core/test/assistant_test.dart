@@ -31,6 +31,7 @@ List<String> spans(List<TimeSlot> s) => [
 
 void main() {
   deletionTests();
+  moveTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -543,6 +544,77 @@ void deletionTests() {
       expect(parseDeletions({'proposals': []}).items, isEmpty);
       expect(parseDeletions(null).items, isEmpty);
       expect(parseDeletions({'deletions': 'x'}).problems, isNotEmpty);
+    });
+  });
+}
+
+void moveTests() {
+  group('parseMoves', () {
+    const ref = 'a@2026-05-04T09:00:00.000Z';
+    test('reads a valid move', () {
+      final r = parseMoves({
+        'moves': [
+          {
+            'ref': ref,
+            'start': '2026-05-05T19:00:00',
+            'end': '2026-05-05T20:00:00',
+            'reason': 'kérted',
+          },
+        ],
+      });
+      expect(r.problems, isEmpty);
+      expect(r.items.single.startWall, DateTime.utc(2026, 5, 5, 19));
+      expect(r.items.single.tzid, 'Europe/Budapest');
+    });
+
+    test('explains broken entries and never throws', () {
+      final r = parseMoves({
+        'moves': [
+          {
+            'ref': 'nincs',
+            'start': '2026-05-05T19:00',
+            'end': '2026-05-05T20:00',
+          },
+          {'ref': ref, 'start': 'hülyeség', 'end': '2026-05-05T20:00'},
+          {'ref': ref, 'start': '2026-05-05T20:00', 'end': '2026-05-05T19:00'},
+          {
+            'ref': ref,
+            'start': '2026-05-05T19:00',
+            'end': '2026-05-05T20:00',
+            'tzid': 'Nem/Zona',
+          },
+          'szöveg',
+        ],
+      });
+      expect(r.items, isEmpty);
+      expect(r.problems.length, 5);
+      expect(parseMoves({'moves': 'x'}).problems, isNotEmpty);
+      expect(parseMoves(null).items, isEmpty);
+    });
+
+    test('keeps distinct refs only and caps the count', () {
+      final one = {
+        'ref': ref,
+        'start': '2026-05-05T19:00',
+        'end': '2026-05-05T20:00',
+      };
+      expect(
+        parseMoves({
+          'moves': [one, one],
+        }).items.length,
+        1,
+      );
+      final many = [
+        for (var i = 0; i < 25; i++)
+          {
+            ...one,
+            'ref':
+                'a@2026-05-04T09:${(i % 60).toString().padLeft(2, '0')}:00.000Z',
+          },
+      ];
+      final r = parseMoves({'moves': many});
+      expect(r.items.length, 20);
+      expect(r.problems, isNotEmpty);
     });
   });
 }

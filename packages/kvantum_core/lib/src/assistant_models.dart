@@ -143,6 +143,89 @@ ParsedProposal parseProposal(
   );
 }
 
+/// A move the model asked for: ONE existing occurrence gets a new time.
+/// It only becomes a proposal the user must confirm with a button.
+class MoveRequest {
+  const MoveRequest({
+    required this.ref,
+    required this.startWall,
+    required this.endWall,
+    required this.tzid,
+    required this.reason,
+  });
+  final String ref;
+  final DateTime startWall; // floating
+  final DateTime endWall;
+  final String tzid;
+  final String reason;
+
+  DateTime get startUtc => resolveWallClock(tzid, startWall);
+  DateTime get endUtc => resolveWallClock(tzid, endWall);
+}
+
+/// Reads the optional `moves` list of the `propose_events` arguments.
+/// Never throws; at most [max] distinct references are kept.
+({List<MoveRequest> items, List<String> problems}) parseMoves(
+  Object? json, {
+  String defaultTz = 'Europe/Budapest',
+  int max = 20,
+}) {
+  final problems = <String>[];
+  final out = <MoveRequest>[];
+  final raw = json is Map ? json['moves'] : null;
+  if (raw == null) return (items: out, problems: problems);
+  if (raw is! List) {
+    return (items: out, problems: const ['A „moves” mező nem lista.']);
+  }
+  final seen = <String>{};
+  for (var i = 0; i < raw.length; i++) {
+    final n = i + 1;
+    final it = raw[i];
+    final ref = it is Map && it['ref'] is String
+        ? (it['ref'] as String).trim()
+        : '';
+    if (parseOccurrenceRef(ref) == null) {
+      problems.add('$n. áthelyezés: hibás hivatkozás.');
+      continue;
+    }
+    final m = it as Map;
+    final tz = _text(m['tzid'], 60).isEmpty ? defaultTz : _text(m['tzid'], 60);
+    try {
+      locationOf(tz);
+    } catch (_) {
+      problems.add('$n. áthelyezés: ismeretlen időzóna: $tz.');
+      continue;
+    }
+    final s = _wall(m['start'], tz);
+    final e = _wall(m['end'], tz);
+    if (s == null || e == null) {
+      problems.add('$n. áthelyezés: hibás vagy hiányzó kezdés/befejezés.');
+      continue;
+    }
+    if (!e.isAfter(s)) {
+      problems.add('$n. áthelyezés: a befejezés nem a kezdés után van.');
+      continue;
+    }
+    if (!seen.add(ref)) continue;
+    if (out.length >= max) {
+      problems.add(
+        'Egyszerre legfeljebb $max áthelyezés javasolható; a többit kihagytam.',
+      );
+      break;
+    }
+    out.add(
+      MoveRequest(
+        ref: ref,
+        startWall: s,
+        endWall: e,
+        tzid: tz,
+        reason: _text(m['reason'], 300),
+      ),
+    );
+  }
+  return (items: out, problems: problems);
+}
+
 String _text(Object? v, int max) {
   final s = (v is String ? v : '').replaceAll(RegExp(r'\s+'), ' ').trim();
   return s.length > max ? s.substring(0, max) : s;

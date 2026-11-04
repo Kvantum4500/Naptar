@@ -180,6 +180,18 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     ),
                   ),
                 ),
+              if (st.movedCount != null)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.event_repeat),
+                    title: Text('${st.movedCount} esemény áthelyezve.'),
+                    trailing: TextButton(
+                      onPressed: ctl.dismiss,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
               if (st.deletedCount != null)
                 Card(
                   color: scheme.primaryContainer,
@@ -195,6 +207,77 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
               if (o != null) ..._result(context, st, o),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _moveCard(
+    BuildContext context,
+    AssistantState st,
+    List<dynamic> moves,
+  ) {
+    final ctl = ref.read(assistantControllerProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
+    String span(DateTime s, DateTime e) =>
+        '${fmtDateLong(DateTime.utc(s.year, s.month, s.day))}, ${fmtTime(s)}–${fmtTime(e)}';
+    return Card(
+      color: scheme.tertiaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Áthelyezésre javasolt események (${moves.length})',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text('Semmi nem módosul, amíg nem engedélyezed.'),
+            const SizedBox(height: 8),
+            for (final m in moves) ...[
+              () {
+                final occ = m.occurrence as Occurrence;
+                final tz = occ.tzid ?? defaultTz;
+                final from = span(
+                  toWallClock(tz, occ.startUtc),
+                  toWallClock(tz, occ.endUtc),
+                );
+                final to = span(m.newStart as DateTime, m.newEnd as DateTime);
+                final reason = m.reason as String;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        occ.title,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text('Most: $from'),
+                      Text('Új időpont: $to'),
+                      if (occ.recurring)
+                        const Text('Ismétlődő esemény: csak ez a nap mozdul.'),
+                      if (reason.isNotEmpty) Text(reason),
+                    ],
+                  ),
+                );
+              }(),
+            ],
+            Row(
+              children: [
+                OutlinedButton(
+                  onPressed: ctl.declineMoves,
+                  child: const Text('Mégse'),
+                ),
+                const SizedBox(width: 10),
+                FilledButton(
+                  onPressed: ctl.confirmMoves,
+                  child: const Text('Engedélyezem'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -319,6 +402,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           leading: const Icon(Icons.help_outline),
           title: Text(q),
         ),
+      if ((o.moves as List).isNotEmpty)
+        _moveCard(context, st, o.moves as List<dynamic>),
       if ((o.deletions as List).isNotEmpty)
         _deleteCard(context, st, o.deletions as List<dynamic>),
       if (o.items.isNotEmpty) ...[
@@ -359,7 +444,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           o.text.isEmpty &&
           (o.questions as List).isEmpty &&
           (o.deletions as List).isEmpty &&
+          (o.moves as List).isEmpty &&
           o.summary.isEmpty &&
+          st.movedCount == null &&
           st.deletedCount == null)
         const ListTile(
           leading: Icon(Icons.info_outline),

@@ -8,6 +8,7 @@ import '../providers.dart';
 import '../sync/sync_controller.dart';
 import '../ui/delete_ops.dart';
 import '../ui/event_editor.dart' show Scope;
+import '../ui/move_ops.dart';
 import 'ai_settings.dart';
 import 'assistant_service.dart';
 import 'gemini_provider.dart';
@@ -75,6 +76,7 @@ class AssistantState {
     this.errorDetail,
     this.deleteScopes = const {},
     this.deletedCount,
+    this.movedCount,
   });
 
   /// Per proposed deletion of a recurring event: what to remove (default: only that day).
@@ -82,6 +84,9 @@ class AssistantState {
 
   /// How many events were deleted after the user confirmed.
   final int? deletedCount;
+
+  /// How many events were moved after the user confirmed.
+  final int? movedCount;
 
   final bool busy;
   final AssistantOutcome? outcome;
@@ -119,6 +124,7 @@ class AssistantState {
   }) => AssistantState(
     deleteScopes: deleteScopes ?? this.deleteScopes,
     deletedCount: deletedCount,
+    movedCount: movedCount,
     notice: notice,
     errorDetail: errorDetail,
     busy: busy ?? this.busy,
@@ -308,6 +314,7 @@ class AssistantController extends Notifier<AssistantState> {
       acceptedCount: state.acceptedCount,
       prompt: state.prompt,
       notice: state.notice,
+      movedCount: state.movedCount,
       deletedCount: n,
     );
     return n;
@@ -323,6 +330,44 @@ class AssistantController extends Notifier<AssistantState> {
       acceptedCount: state.acceptedCount,
       prompt: state.prompt,
       notice: state.notice,
+      movedCount: state.movedCount,
+    );
+  }
+
+  /// "Engedélyezem": moves exactly the events listed on the confirmation card.
+  Future<int> confirmMoves() async {
+    final o = state.outcome;
+    if (o == null || o.moves.isEmpty) return 0;
+    final repo = ref.read(repoProvider);
+    var n = 0;
+    for (final m in o.moves) {
+      if (await moveOccurrence(repo, m.occurrence, m.newStart, m.newEnd)) n++;
+    }
+    ref.read(syncControllerProvider.notifier).requestSync();
+    state = AssistantState(
+      outcome: o.withoutMoves(),
+      selected: state.selected,
+      acceptedCount: state.acceptedCount,
+      prompt: state.prompt,
+      notice: state.notice,
+      deletedCount: state.deletedCount,
+      deleteScopes: state.deleteScopes,
+      movedCount: n,
+    );
+    return n;
+  }
+
+  /// "Mégse": nothing is moved; the rest of the answer stays.
+  void declineMoves() {
+    final o = state.outcome;
+    if (o == null) return;
+    state = AssistantState(
+      outcome: o.withoutMoves(),
+      selected: state.selected,
+      acceptedCount: state.acceptedCount,
+      prompt: state.prompt,
+      notice: state.notice,
+      deleteScopes: state.deleteScopes,
     );
   }
 

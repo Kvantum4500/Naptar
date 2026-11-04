@@ -66,7 +66,7 @@ const _tools = <ToolDecl>[
   ),
   ToolDecl(
     'propose_events',
-    'A végső terv leadása. Új eseményeket javasolhat (proposals); törlést csak a felhasználó kifejezett kérésére (deletions). Semmi nem történik a felhasználó jóváhagyása nélkül.',
+    'A végső terv leadása. Új eseményeket javasolhat (proposals); törlést (deletions) és áthelyezést (moves) csak a felhasználó kifejezett kérésére. Semmi nem történik a felhasználó jóváhagyása nélkül.',
     {
       'type': 'object',
       'properties': {
@@ -108,6 +108,27 @@ const _tools = <ToolDecl>[
             'required': ['ref'],
           },
         },
+        'moves': {
+          'type': 'array',
+          'description': 'Meglévő események áthelyezése új időpontra, CSAK ha a felhasználó áthelyezést kért. A ref az eseményadatban szereplő érték; start/end az ÚJ helyi idő. Műszak nem helyezhető át.',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'ref': {'type': 'string'},
+              'start': {
+                'type': 'string',
+                'description': 'Új kezdés, helyi idő zóna nélkül.',
+              },
+              'end': {
+                'type': 'string',
+                'description': 'Új befejezés, helyi idő zóna nélkül.',
+              },
+              'tzid': {'type': 'string'},
+              'reason': {'type': 'string'},
+            },
+            'required': ['ref', 'start', 'end'],
+          },
+        },
         'questions': {
           'type': 'array',
           'items': {'type': 'string'},
@@ -128,6 +149,18 @@ class DeletionProposal {
   final String reason;
 }
 
+/// One existing occurrence the assistant suggests moving. Nothing happens
+/// until the user presses "Engedélyezem".
+class MoveProposal {
+  const MoveProposal(this.occurrence, this.newStart, this.newEnd, this.reason);
+  final Occurrence occurrence;
+
+  /// New local wall-clock times (in the occurrence's zone).
+  final DateTime newStart;
+  final DateTime newEnd;
+  final String reason;
+}
+
 class AssistantOutcome {
   const AssistantOutcome({
     this.text = '',
@@ -136,8 +169,22 @@ class AssistantOutcome {
     this.dropped = const [],
     this.questions = const [],
     this.deletions = const [],
+    this.moves = const [],
     this.calls = 0,
   });
+
+  /// Existing events proposed for moving (need explicit confirmation).
+  final List<MoveProposal> moves;
+
+  AssistantOutcome withoutMoves() => AssistantOutcome(
+    text: text,
+    summary: summary,
+    items: items,
+    dropped: dropped,
+    questions: questions,
+    deletions: deletions,
+    calls: calls,
+  );
 
   /// Existing events proposed for deletion (need explicit confirmation).
   final List<DeletionProposal> deletions;
@@ -148,6 +195,7 @@ class AssistantOutcome {
     items: items,
     dropped: dropped,
     questions: questions,
+    moves: moves,
     calls: calls,
   );
 
@@ -242,13 +290,15 @@ class AssistantService {
           if (r.outcome != null) {
             final o = r.outcome!;
             final del = await _resolveDeletions(c.args, settings);
+            final mv = await _resolveMoves(c.args, settings);
             return AssistantOutcome(
               text: reply.text,
               summary: o.summary,
               items: o.items,
-              dropped: [...o.dropped, ...del.notes],
+              dropped: [...o.dropped, ...del.notes, ...mv.notes],
               questions: o.questions,
               deletions: del.items,
+              moves: mv.items,
               calls: call,
             );
           }
@@ -419,7 +469,9 @@ class AssistantService {
     final parsed = parseProposal(args, defaultTz: _tz);
     final dropped = [...parsed.problems];
 
-    final wantsDeletes = parseDeletions(args).items.isNotEmpty;
+    final wantsDeletes =
+        parseDeletions(args).items.isNotEmpty ||
+        parseMoves(args, defaultTz: _tz).items.isNotEmpty;
     if (parsed.items.isEmpty) {
       if (repairsLeft > 0 && parsed.questions.isEmpty && !wantsDeletes) {
         return (
@@ -549,6 +601,76 @@ class AssistantService {
       } else {
         out.add(DeletionProposal(hit, d.reason));
       }
+    }
+    return (items: out, notes: notes);
+  }
+
+  /// Turns the model's move requests into real occurrences with a conflict
+  /// check. Shifts and all-day events are never moved; a move that would
+  /// overlap another event is dropped with a note.
+  Future<({List<MoveProposal> items, List<String> notes})> _resolveMoves(
+    Map<String, Object?> args,
+    AiSettings settings,
+  ) async {
+    final parsed = parseMoves(args, defaultTz: _tz);
+    final notes = [...parsed.problems];
+    final out = <MoveProposal>[];
+    if (parsed.items.isNotEmpty && !settings.events) {
+      return (
+        items: out,
+        notes: [
+          ...notes,
+          'Áthelyezés nem javasolható, mert az események megosztása ki van kapcsolva.',
+        ],
+      );
+    }
+    final doomed = {for (final d in parseDeletions(args).items) d.ref};
+    for (final m in parsed.items) {
+      final ref = parseOccurrenceRef(m.ref)!;
+      final around = await events.occurrences(
+        ref.originalStart.subtract(const Duration(days: 1)),
+        ref.originalStart.add(const Duration(days: 2)),
+      );
+      final hit = around.where((o) => occurrenceRef(o) == m.ref).firstOrNull;
+      if (hit == null) {
+        notes.add(
+          'Az áthelyezésre javasolt esemény nem található (talán már törölve van).',
+        );
+        continue;
+      }
+      if (hit.isShift) {
+        notes.add('„${hit.title}” műszak, azt nem lehet áthelyezni.');
+        continue;
+      }
+      if (hit.allDay) {
+        notes.add('„${hit.title}” egész napos, azt nem helyezem át.');
+        continue;
+      }
+      final newOcc = ProposedBlock(
+        title: hit.title,
+        startUtc: m.startUtc,
+        endUtc: m.endUtc,
+        isWorkout: false,
+        isHard: false,
+      );
+      final others = [
+        for (final o in await events.occurrences(
+          m.startUtc.subtract(const Duration(days: 1)),
+          m.endUtc.add(const Duration(days: 1)),
+        ))
+          if (occurrenceRef(o) != m.ref && !doomed.contains(occurrenceRef(o)))
+            o,
+      ];
+      final bad = validateProposal(
+        [newOcc],
+        existing: others,
+        rules: rules,
+      ).where((v) => v.code == 'conflict' || v.code == 'bad_range').toList();
+      if (bad.isNotEmpty) {
+        notes.add(bad.map((v) => v.message).join('; '));
+        continue;
+      }
+      out.add(MoveProposal(hit, m.startWall, m.endWall, m.reason));
     }
     return (items: out, notes: notes);
   }
