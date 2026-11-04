@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'drive_remote.dart';
 
 const _space = 'appDataFolder';
-final _recordName = RegExp(r'^(task|checkin)-[A-Za-z0-9._-]+\.json$');
+final _recordName = RegExp(r'^(task|checkin|handbook)-[A-Za-z0-9._-]+\.json$');
 
 /// [DriveRemote] on top of Drive API v3, limited to the hidden appDataFolder
 /// (scope `drive.appdata`: the app can see nothing else in the user's Drive).

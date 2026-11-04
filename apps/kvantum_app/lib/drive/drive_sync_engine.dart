@@ -97,7 +97,7 @@ class DriveSyncEngine {
       }
       if (full) {
         // Files we knew about that the full listing no longer contains.
-        for (final kind in [kindTask, kindCheckIn]) {
+        for (final kind in syncedKinds) {
           for (final rec in await repo.all(kind)) {
             final name = recordFileName(kind, rec.id);
             final fid = await repo.fileId(name);
@@ -189,7 +189,7 @@ class DriveSyncEngine {
   }
 
   SyncRecord? _parse(String name, String content) {
-    final m = RegExp(r'^(task|checkin)-(.+)\.json$').firstMatch(name);
+    final m = RegExp(r'^(task|checkin|handbook)-(.+)\.json$').firstMatch(name);
     if (m == null) return null;
     try {
       final r = SyncRecord.decode(content);
@@ -202,10 +202,10 @@ class DriveSyncEngine {
   }
 
   bool _looksLikeRecordFile(String name) =>
-      RegExp(r'^(task|checkin)-.+\.json$').hasMatch(name);
+      RegExp(r'^(task|checkin|handbook)-.+\.json$').hasMatch(name);
 
   Future<SyncRecord?> _recordForName(String name) async {
-    final m = RegExp(r'^(task|checkin)-(.+)\.json$').firstMatch(name);
+    final m = RegExp(r'^(task|checkin|handbook)-(.+)\.json$').firstMatch(name);
     return m == null ? null : repo.get(m[1]!, m[2]!);
   }
 

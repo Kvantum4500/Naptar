@@ -6,7 +6,7 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 | Rész | Állapot |
 |---|---|
 | `packages/kvantum_core` – tiszta Dart mag: időzóna/DST, ismétlődés, ISO-hét, duplikáció-védelem, AI szabályellenőrző | **kész, 23 teszt zöld** |
-| `handbook/` – Gemini kézikönyv | **első verzió** |
+| `apps/kvantum_app/assets/handbook/` – Gemini kézikönyv | **első verzió** |
 | `apps/kvantum_app` – Flutter app: helyi SQLite (drift), hónapnézet + napi lista, eseményszerkesztő (ismétlődéssel), outbox | **kész, tesztelve** |
 | Szinkronmotor (`lib/sync`): pull → reconcile → push, syncToken, teljes újraszinkron, ütközéskezelés, idempotens újrapróbálás | **kész, 9 teszt (hamis távoli naptárral)** |
 | Google Calendar adapter (`GoogleCalendarRemote`), Google belépés (OAuth, biztonságos tároló), szinkronvezérlő (60 mp + mentés után + előtérbe lépéskor) | **kész, 21 teszt hamis HTTP-vel; élő fiókkal még nem próbálva** |

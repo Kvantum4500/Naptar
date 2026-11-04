@@ -2,6 +2,10 @@ import 'sync_record.dart';
 
 const kindTask = 'task';
 const kindCheckIn = 'checkin';
+const kindHandbook = 'handbook';
+
+/// Kinds that are stored as record files in Drive.
+const syncedKinds = [kindTask, kindCheckIn, kindHandbook];
 
 /// Drive file name of a record (one file per task / per check-in day).
 String recordFileName(String kind, String id) => '$kind-$id.json';

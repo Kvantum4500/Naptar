@@ -60,7 +60,12 @@ List<Violation> validateProposal(
   for (var i = 0; i < sorted.length; i++) {
     final b = sorted[i];
     if (!b.endUtc.isAfter(b.startUtc)) {
-      v.add(Violation('bad_range', '"${b.title}": end must be after start'));
+      v.add(
+        Violation(
+          'bad_range',
+          '„${b.title}”: a befejezésnek a kezdés után kell lennie',
+        ),
+      );
       continue;
     }
     // Sleep window (in the user's zone).
@@ -68,9 +73,7 @@ List<Violation> validateProposal(
     final e = toWallClock(rules.tzid, b.endUtc);
     if (_inSleep(s, rules) ||
         _inSleep(e.subtract(const Duration(minutes: 1)), rules)) {
-      v.add(
-        Violation('sleep_window', '"${b.title}" falls into the sleep window'),
-      );
+      v.add(Violation('sleep_window', '„${b.title}” az alvási sávba esik'));
     }
     // Overlap + buffer with existing events (all-day events do not block).
     for (final x in existing.where((x) => !x.allDay)) {
@@ -79,7 +82,7 @@ List<Violation> validateProposal(
         v.add(
           Violation(
             'conflict',
-            '"${b.title}" collides with "${x.title}" (incl. ${rules.bufferMinutes} min buffer)',
+            '„${b.title}” ütközik ezzel: „${x.title}” (a ${rules.bufferMinutes} perc puffert is beleszámítva)',
           ),
         );
       }
@@ -89,7 +92,7 @@ List<Violation> validateProposal(
       v.add(
         Violation(
           'self_conflict',
-          '"${b.title}" overlaps "${sorted[i - 1].title}"',
+          '„${b.title}” átfedi ezt: „${sorted[i - 1].title}”',
         ),
       );
     }
@@ -101,7 +104,7 @@ List<Violation> validateProposal(
         v.add(
           Violation(
             'low_energy',
-            '"${b.title}" is hard but energy is $energy on ${day.toIso8601String().substring(0, 10)}',
+            '„${b.title}” nehéz edzés, de a fizikai energia ${day.toIso8601String().substring(0, 10)}-n csak $energy/5 (legalább ${rules.minEnergyForHard} kell)',
           ),
         );
       }
@@ -116,7 +119,7 @@ List<Violation> validateProposal(
       v.add(
         Violation(
           'rest',
-          'Less than ${rules.minHoursBetweenHard} h between hard sessions',
+          'Két nehéz edzés között legalább ${rules.minHoursBetweenHard} óra kell',
         ),
       );
     }
@@ -135,7 +138,7 @@ List<Violation> validateProposal(
       v.add(
         Violation(
           'weekly_cap',
-          '$n workouts in week of $k (max ${rules.maxWorkoutsPerWeek})',
+          '$n edzés a(z) $k-i hétre (legfeljebb ${rules.maxWorkoutsPerWeek} megengedett)',
         ),
       );
     }
