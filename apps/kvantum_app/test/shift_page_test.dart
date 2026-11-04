@@ -92,6 +92,25 @@ void main() {
     },
   );
 
+  testWidgets('the monthly summary follows the generated shifts', (
+    tester,
+  ) async {
+    await boot(tester, floating(2026, 11, 12));
+    expect(
+      find.textContaining('Ebben a hónapban nincs generált műszak'),
+      findsOneWidget,
+    );
+    await create(tester);
+    expect(find.textContaining('Éjszakai műszak: 6'), findsOneWidget);
+    expect(find.textContaining('Nappali műszak: 4'), findsOneWidget);
+    expect(find.text('Műszakórák összesen: 120'), findsOneWidget);
+    expect(find.text('Munkanap: 10 · szabadnap: 20'), findsOneWidget);
+    await tester.tap(find.byTooltip('Következő hónap'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('2026. 12. hó'), findsOneWidget);
+    await shutdown(tester, db);
+  });
+
   testWidgets('a cycle without any work day creates nothing', (tester) async {
     await boot(tester, floating(2026, 11, 12));
     // delete the first three steps; only the trailing days off remain

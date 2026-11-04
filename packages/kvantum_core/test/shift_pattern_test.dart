@@ -2,6 +2,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:test/test.dart';
 
 void main() {
+  summaryTests();
   String d(DateTime t) => t.toIso8601String().substring(0, 16);
 
   test('default cycle: 3 nights, 3 off, 3 days, 3 off, then repeats', () {
@@ -68,5 +69,38 @@ void main() {
       untilDay: floating(2026, 11, 13),
     );
     expect(one.length, 1);
+  });
+}
+
+void summaryTests() {
+  test('month summary counts shifts by their start day and sums hours', () {
+    final plan = generateShiftPlan(
+      defaultShiftCycle,
+      startDay: floating(2026, 11, 12),
+      untilDay: floating(2027, 1, 1),
+    );
+    final ev = [
+      for (final s in plan)
+        (title: s.title, notes: kShiftMarker, start: s.start, end: s.end),
+      // a hand-typed event is ignored
+      (
+        title: 'Fogorvos',
+        notes: '',
+        start: floating(2026, 11, 20, 9),
+        end: floating(2026, 11, 20, 10),
+      ),
+    ];
+    final nov = summarizeShifts(ev, year: 2026, month: 11);
+    // nights 12,13,14 ; days 18,19,20 ; nights 24,25,26 ; days 30
+    expect(nov.counts['Éjszakai műszak'], 6);
+    expect(nov.counts['Nappali műszak'], 4);
+    expect(nov.hours, 10 * 12);
+    expect(nov.workDays, 10);
+    expect(nov.offDays, 30 - 10);
+    // night of 31 Dec 18:00 -> 1 Jan counts for December only
+    final dec = summarizeShifts(ev, year: 2026, month: 12);
+    final jan = summarizeShifts(ev, year: 2027, month: 1);
+    expect(jan.counts, isEmpty);
+    expect(dec.workDays + dec.offDays, 31);
   });
 }

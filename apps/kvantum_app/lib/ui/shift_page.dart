@@ -48,6 +48,26 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
   var _months = 6;
   var _busy = false;
   String? _msg;
+  late DateTime _month = DateTime.utc(_from.year, _from.month);
+  var _events = const <CalEvent>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final all = await ref.read(repoProvider).all();
+    if (mounted) {
+      setState(
+        () => _events = [
+          for (final e in all)
+            if (e.notes == kShiftMarker) e,
+        ],
+      );
+    }
+  }
 
   int _len(TimeOfDay s, TimeOfDay e) {
     final a = s.hour * 60 + s.minute;
@@ -125,6 +145,7 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
         );
       }
       ref.read(syncControllerProvider.notifier).requestSync();
+      await _reload();
       if (!mounted) return;
       setState(
         () => _msg =
@@ -170,6 +191,68 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       ),
     ],
   );
+
+  Widget _summary() {
+    final sum = summarizeShifts(
+      [
+        for (final e in _events)
+          (title: e.title, notes: e.notes, start: e.start, end: e.end),
+      ],
+      year: _month.year,
+      month: _month.month,
+    );
+    final theme = Theme.of(context);
+    final h = sum.hours == sum.hours.roundToDouble()
+        ? '${sum.hours.round()}'
+        : sum.hours.toStringAsFixed(1);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Előző hónap',
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () => setState(
+                    () => _month = DateTime.utc(_month.year, _month.month - 1),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    'Havi összesítő: ${_month.year}. ${_month.month}. hó',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Következő hónap',
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: () => setState(
+                    () => _month = DateTime.utc(_month.year, _month.month + 1),
+                  ),
+                ),
+              ],
+            ),
+            if (sum.counts.isEmpty)
+              const Text('Ebben a hónapban nincs generált műszak.')
+            else ...[
+              for (final e in sum.counts.entries) Text('${e.key}: ${e.value}'),
+              Text('Műszakórák összesen: $h'),
+            ],
+            Text('Munkanap: ${sum.workDays} · szabadnap: ${sum.offDays}'),
+            const SizedBox(height: 4),
+            Text(
+              'Egy műszak ahhoz a naphoz számít, amelyiken kezdődik.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -343,6 +426,8 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(_msg!),
                 ),
+              const SizedBox(height: 20),
+              _summary(),
             ],
           ),
         ),
