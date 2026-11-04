@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'assistant_models.dart';
 import 'event.dart';
 import 'models.dart';
 import 'rules.dart';
@@ -56,6 +57,7 @@ Map<String, Object?> eventsForTool(
       for (final o in shown)
         if (o.allDay)
           {
+            'ref': occurrenceRef(o),
             'nap': _ymd(o.startUtc),
             'egesz_napos': true,
             'cim': sanitizeText(o.title),
@@ -65,6 +67,7 @@ Map<String, Object?> eventsForTool(
             final s = toWallClock(o.tzid ?? tz, o.startUtc);
             final e = toWallClock(o.tzid ?? tz, o.endUtc);
             return {
+              'ref': occurrenceRef(o),
               'nap': _ymd(s),
               'kezdes': _hm(s),
               'veg': _hm(e),
@@ -170,7 +173,7 @@ MAI IDŐ: ${_ymd(local)} ${_hm(local)} (${rules.tzid}).
 MŰKÖDÉS
 - Az első üzenet <adat> blokkjai a következő napok eseményeit, a nyitott feladatokat, a check-int és a szabad idősávokat már tartalmazzák; ezekből tervezz. Más időszakhoz használd az eszközöket (get_events, get_tasks, get_checkins, find_free_slots). Ne találj ki adatot; ha nincs elég adat, kérdezz vissza (questions).
 - Szabad időpontot a find_free_slots adatból vagy eszközből válassz, ne számold ki magad.
-- A végső tervet MINDIG a propose_events eszközzel add le. Csak új eseményt javasolhatsz; meglévőt nem módosíthatsz és nem törölhetsz.
+- A végső tervet MINDIG a propose_events eszközzel add le. Új eseményeket a proposals mezőben javasolhatsz. Meglévőt nem módosíthatsz. Törlést CSAK akkor javasolhatsz (deletions mező, az eseményadat ref értékével), ha a felhasználó a kérésében kifejezetten törlést kért; ez nem töröl semmit, a felhasználó külön gombbal engedélyezi. Egy törléshez csak a megnevezett eseményeket add meg, ne többet.
 - Időpontok helyi idő (időzóna nélkül, ISO: 2026-05-04T18:00:00) + tzid.
 
 BIZALMI SZABÁLY

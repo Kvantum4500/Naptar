@@ -318,6 +318,182 @@ void main() {
       tool('propose_events', {'summary': summary, 'proposals': items}),
     ]);
 
+    // ---- deletions need an explicit "Engedélyezem"
+    Future<String> refOf(WidgetTester tester, String title) async {
+      final occ = (await tester.runAsync(
+        () => events.occurrences(
+          DateTime.utc(2026, 11, 1),
+          DateTime.utc(2026, 12, 31),
+        ),
+      ))!;
+      return occurrenceRef(occ.firstWhere((o) => o.title == title));
+    }
+
+    FakeGemini deleteScript(List<String> refs) => FakeGemini([
+      (_) => calls([
+        tool('propose_events', {
+          'summary': 'Törlés',
+          'proposals': <Object?>[],
+          'deletions': [
+            for (final r in refs) {'ref': r, 'reason': 'kérted'},
+          ],
+        }),
+      ]),
+    ]);
+
+    Future<void> ask(WidgetTester tester) async {
+      await tester.enterText(find.byType(TextField), 'töröld a fogorvost');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'a deletion waits for "Engedélyezem" and then removes the event',
+      (tester) async {
+        final refs = <String>[];
+        await boot(
+          tester,
+          const AssistantPage(),
+          llm: deleteScript(refs),
+          key: 'k',
+        );
+        await tester.runAsync(
+          () => events.saveLocal(
+            evt('p1', 'Fogorvos', floating(2026, 11, 20, 9)),
+          ),
+        );
+        refs.add(await refOf(tester, 'Fogorvos'));
+        await ask(tester);
+
+        expect(
+          find.textContaining('Törlésre javasolt események (1)'),
+          findsOneWidget,
+        );
+        expect(find.text('Fogorvos'), findsOneWidget);
+        expect(find.text('Mégse'), findsOneWidget);
+        expect(find.text('Engedélyezem'), findsOneWidget);
+        // nothing happened yet
+        expect((await tester.runAsync(() => events.byId('p1')))!, isNotNull);
+
+        await tester.tap(find.text('Engedélyezem'));
+        await tester.pumpAndSettle();
+        final gone = (await tester.runAsync(() => events.all()))!
+            .where((e) => e.id == 'p1')
+            .toList();
+        // never synced -> removed outright
+        expect(gone, isEmpty);
+        expect(find.text('1 esemény törölve.'), findsOneWidget);
+        expect(find.text('Engedélyezem'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('"Mégse" deletes nothing', (tester) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: deleteScript(refs),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('p1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      refs.add(await refOf(tester, 'Fogorvos'));
+      await ask(tester);
+      await tester.tap(find.text('Mégse'));
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.byId('p1')))!, isNotNull);
+      expect(find.text('Engedélyezem'), findsNothing);
+      expect(find.textContaining('törölve'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a recurring event asks what to remove: only that day by default',
+      (tester) async {
+        final refs = <String>[];
+        await boot(
+          tester,
+          const AssistantPage(),
+          llm: deleteScript(refs),
+          key: 'k',
+        );
+        await tester.runAsync(
+          () => events.saveLocal(
+            evt(
+              's1',
+              'Műszak',
+              floating(2026, 11, 18, 6),
+              rrule: 'FREQ=DAILY;COUNT=5',
+            ),
+          ),
+        );
+        refs.add(await refOf(tester, 'Műszak')); // first one: 18 Nov
+        await ask(tester);
+        expect(find.text('Ismétlődő esemény, mit töröljek?'), findsOneWidget);
+        expect(find.text('Csak ezt'), findsOneWidget);
+        expect(find.text('Ezt és a következőket'), findsOneWidget);
+        expect(find.text('Az összeset'), findsOneWidget);
+        await tester.tap(find.text('Engedélyezem'));
+        await tester.pumpAndSettle();
+        final m = (await tester.runAsync(() => events.byId('s1')))!;
+        expect(m.exdates, [floating(2026, 11, 18, 6)]);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('a recurring event can be removed completely', (tester) async {
+      final refs = <String>[];
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: deleteScript(refs),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () => events.saveLocal(
+          evt(
+            's1',
+            'Műszak',
+            floating(2026, 11, 18, 6),
+            rrule: 'FREQ=DAILY;COUNT=5',
+          ),
+        ),
+      );
+      refs.add(await refOf(tester, 'Műszak'));
+      await ask(tester);
+      await tester.tap(find.text('Az összeset'));
+      await tester.pump();
+      await tester.tap(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      expect(await tester.runAsync(() => events.byId('s1')), isNull);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a made-up reference is never offered for deletion', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: deleteScript(['nincs-ilyen@2026-11-20T09:00:00.000Z']),
+        key: 'k',
+      );
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('p1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      await ask(tester);
+      expect(find.text('Engedélyezem'), findsNothing);
+      await tester.tap(find.textContaining('Nem javasolt'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('esemény nem található'), findsOneWidget);
+      expect((await tester.runAsync(() => events.byId('p1')))!, isNotNull);
+      await shutdown(tester, db);
+    });
+
     testWidgets('without a key it points to the settings instead of failing', (
       tester,
     ) async {

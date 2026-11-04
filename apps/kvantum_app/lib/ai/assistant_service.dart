@@ -66,7 +66,7 @@ const _tools = <ToolDecl>[
   ),
   ToolDecl(
     'propose_events',
-    'A végső terv leadása. Csak ÚJ eseményeket javasolhat; a felhasználó jóváhagyása után kerülnek a naptárba.',
+    'A végső terv leadása. Új eseményeket javasolhat (proposals); törlést csak a felhasználó kifejezett kérésére (deletions). Semmi nem történik a felhasználó jóváhagyása nélkül.',
     {
       'type': 'object',
       'properties': {
@@ -96,6 +96,18 @@ const _tools = <ToolDecl>[
             'required': ['title', 'start', 'end'],
           },
         },
+        'deletions': {
+          'type': 'array',
+          'description': 'Törlendő meglévő események, CSAK ha a felhasználó törlést kért. A ref az eseményadatban szereplő érték.',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'ref': {'type': 'string'},
+              'reason': {'type': 'string'},
+            },
+            'required': ['ref'],
+          },
+        },
         'questions': {
           'type': 'array',
           'items': {'type': 'string'},
@@ -108,6 +120,14 @@ const _tools = <ToolDecl>[
 ];
 
 /// What the assistant came back with.
+/// One existing event the assistant suggests deleting. Nothing happens until
+/// the user presses "Engedélyezem".
+class DeletionProposal {
+  const DeletionProposal(this.occurrence, this.reason);
+  final Occurrence occurrence;
+  final String reason;
+}
+
 class AssistantOutcome {
   const AssistantOutcome({
     this.text = '',
@@ -115,8 +135,21 @@ class AssistantOutcome {
     this.items = const [],
     this.dropped = const [],
     this.questions = const [],
+    this.deletions = const [],
     this.calls = 0,
   });
+
+  /// Existing events proposed for deletion (need explicit confirmation).
+  final List<DeletionProposal> deletions;
+
+  AssistantOutcome withoutDeletions() => AssistantOutcome(
+    text: text,
+    summary: summary,
+    items: items,
+    dropped: dropped,
+    questions: questions,
+    calls: calls,
+  );
 
   /// Plain answer (e.g. a question) when no plan was proposed.
   final String text;
@@ -208,12 +241,14 @@ class AssistantService {
           final r = await _propose(c.args, repairsLeft: maxRepairs - repairs);
           if (r.outcome != null) {
             final o = r.outcome!;
+            final del = await _resolveDeletions(c.args, settings);
             return AssistantOutcome(
               text: reply.text,
               summary: o.summary,
               items: o.items,
-              dropped: o.dropped,
+              dropped: [...o.dropped, ...del.notes],
               questions: o.questions,
+              deletions: del.items,
               calls: call,
             );
           }
@@ -384,8 +419,9 @@ class AssistantService {
     final parsed = parseProposal(args, defaultTz: _tz);
     final dropped = [...parsed.problems];
 
+    final wantsDeletes = parseDeletions(args).items.isNotEmpty;
     if (parsed.items.isEmpty) {
-      if (repairsLeft > 0 && parsed.questions.isEmpty) {
+      if (repairsLeft > 0 && parsed.questions.isEmpty && !wantsDeletes) {
         return (
           outcome: null,
           feedback: {
@@ -406,7 +442,12 @@ class AssistantService {
       );
     }
 
-    final existing = await _existingAround(parsed.items);
+    final doomed = {for (final d in parseDeletions(args).items) d.ref};
+    final existing = [
+      for (final o in await _existingAround(parsed.items))
+        // events the user is asked to delete do not block the new plan
+        if (!doomed.contains(occurrenceRef(o))) o,
+    ];
     final energy = await _energyByDate();
     List<Violation> check(List<ProposalItem> items) => validateProposal(
       [for (final i in items) i.toBlock()],
@@ -475,6 +516,41 @@ class AssistantService {
       ),
       feedback: null,
     );
+  }
+
+  /// Turns the model's `ref`s into real occurrences. Anything that does not
+  /// exist (made up, already gone) is dropped with a note; sharing events off
+  /// means no deletions at all.
+  Future<({List<DeletionProposal> items, List<String> notes})>
+  _resolveDeletions(Map<String, Object?> args, AiSettings settings) async {
+    final parsed = parseDeletions(args);
+    final notes = [...parsed.problems];
+    final out = <DeletionProposal>[];
+    if (parsed.items.isNotEmpty && !settings.events) {
+      return (
+        items: out,
+        notes: [
+          ...notes,
+          'Törlés nem javasolható, mert az események megosztása ki van kapcsolva.',
+        ],
+      );
+    }
+    for (final d in parsed.items) {
+      final ref = parseOccurrenceRef(d.ref)!;
+      final around = await events.occurrences(
+        ref.originalStart.subtract(const Duration(days: 1)),
+        ref.originalStart.add(const Duration(days: 2)),
+      );
+      final hit = around.where((o) => occurrenceRef(o) == d.ref).firstOrNull;
+      if (hit == null) {
+        notes.add(
+          'A törlésre javasolt esemény nem található (talán már törölve van).',
+        );
+      } else {
+        out.add(DeletionProposal(hit, d.reason));
+      }
+    }
+    return (items: out, notes: notes);
   }
 
   Future<List<Occurrence>> _existingAround(List<ProposalItem> items) {

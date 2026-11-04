@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:kvantum_core/kvantum_core.dart' show Occurrence, toWallClock;
+
+import '../ui/day_utils.dart' show defaultTz;
+import '../ui/event_editor.dart' show Scope;
 import '../ui/format.dart';
 import 'ai_providers.dart';
 import 'settings_page.dart';
@@ -176,9 +180,112 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     ),
                   ),
                 ),
+              if (st.deletedCount != null)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text('${st.deletedCount} esemény törölve.'),
+                    trailing: TextButton(
+                      onPressed: ctl.dismiss,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
               if (o != null) ..._result(context, st, o),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _deleteCard(
+    BuildContext context,
+    AssistantState st,
+    List<dynamic> dels,
+  ) {
+    final ctl = ref.read(assistantControllerProvider.notifier);
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Törlésre javasolt események (${dels.length})',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text('Semmi nem törlődik, amíg nem engedélyezed.'),
+            const SizedBox(height: 8),
+            for (var i = 0; i < dels.length; i++) ...[
+              () {
+                final occ = dels[i].occurrence as Occurrence;
+                final reason = dels[i].reason as String;
+                final tz = occ.tzid ?? defaultTz;
+                final s = occ.allDay
+                    ? occ.startUtc
+                    : toWallClock(tz, occ.startUtc);
+                final e = occ.allDay ? occ.endUtc : toWallClock(tz, occ.endUtc);
+                final day = fmtDateLong(DateTime.utc(s.year, s.month, s.day));
+                final label = occ.allDay
+                    ? '$day (egész napos)'
+                    : '$day, ${fmtTime(s)}–${fmtTime(e)}';
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      occ.title,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(label),
+                    if (reason.isNotEmpty) Text(reason),
+                    if (occ.recurring) ...[
+                      const SizedBox(height: 4),
+                      const Text('Ismétlődő esemény, mit töröljek?'),
+                      SegmentedButton<Scope>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: Scope.only,
+                            label: Text('Csak ezt'),
+                          ),
+                          ButtonSegment(
+                            value: Scope.following,
+                            label: Text('Ezt és a következőket'),
+                          ),
+                          ButtonSegment(
+                            value: Scope.all,
+                            label: Text('Az összeset'),
+                          ),
+                        ],
+                        selected: {st.deleteScopes[i] ?? Scope.only},
+                        onSelectionChanged: (v) =>
+                            ctl.setDeleteScope(i, v.first),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                  ],
+                );
+              }(),
+            ],
+            Row(
+              children: [
+                OutlinedButton(
+                  onPressed: ctl.declineDeletions,
+                  child: const Text('Mégse'),
+                ),
+                const SizedBox(width: 10),
+                FilledButton(
+                  onPressed: ctl.confirmDeletions,
+                  child: const Text('Engedélyezem'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -212,6 +319,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           leading: const Icon(Icons.help_outline),
           title: Text(q),
         ),
+      if ((o.deletions as List).isNotEmpty)
+        _deleteCard(context, st, o.deletions as List<dynamic>),
       if (o.items.isNotEmpty) ...[
         for (var i = 0; i < o.items.length; i++)
           Card(
@@ -246,7 +355,12 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           ],
         ),
       ],
-      if (o.items.isEmpty && o.text.isEmpty && (o.questions as List).isEmpty)
+      if (o.items.isEmpty &&
+          o.text.isEmpty &&
+          (o.questions as List).isEmpty &&
+          (o.deletions as List).isEmpty &&
+          o.summary.isEmpty &&
+          st.deletedCount == null)
         const ListTile(
           leading: Icon(Icons.info_outline),
           title: Text('Most nem tudtam használható tervet adni.'),
@@ -255,7 +369,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
           title: Text(
-            'Nem javasolt (${(o.dropped as List).length}), mert sértené a szabályokat',
+            'Nem javasolt (${(o.dropped as List).length}): szabálysértés vagy nem található',
             style: TextStyle(color: scheme.outline),
           ),
           children: [

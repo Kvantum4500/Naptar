@@ -30,6 +30,7 @@ List<String> spans(List<TimeSlot> s) => [
 ];
 
 void main() {
+  deletionTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -350,7 +351,8 @@ void main() {
       final r = eventsForTool(list, tz: bp);
       final ev = (r['esemenyek'] as List).cast<Map<String, Object?>>();
       expect(ev.map((e) => e['cim']), ['Ünnep', 'Korán', 'Később']);
-      expect(ev[1], {
+      expect(ev[1]['ref'], isA<String>());
+      expect(ev[1]..remove('ref'), {
         'nap': '2026-05-04',
         'kezdes': '09:00',
         'veg': '10:00',
@@ -489,5 +491,58 @@ void main() {
         expect(p, contains('propose_events'));
       },
     );
+  });
+}
+
+void deletionTests() {
+  group('deletion references', () {
+    test('every event in the data carries a ref that round-trips', () {
+      final o = occ(
+        floating(2026, 5, 4, 9),
+        floating(2026, 5, 4, 10),
+        title: 'Fogorvos',
+      );
+      final data = eventsForTool([o], tz: bp);
+      final ref = (data['esemenyek'] as List).single['ref'] as String;
+      expect(ref, occurrenceRef(o));
+      final back = parseOccurrenceRef(ref)!;
+      expect(back.eventId, 'e');
+      expect(back.originalStart, o.originalStart);
+    });
+
+    test('broken references are rejected', () {
+      expect(parseOccurrenceRef('nincs-kukac'), isNull);
+      expect(parseOccurrenceRef('@2026-05-04T09:00:00'), isNull);
+      expect(parseOccurrenceRef('x@nem-datum'), isNull);
+      expect(parseOccurrenceRef('x@'), isNull);
+    });
+
+    test('parseDeletions keeps valid, distinct refs and explains the rest', () {
+      final r = parseDeletions({
+        'deletions': [
+          {'ref': 'a@2026-05-04T09:00:00.000Z', 'reason': 'kérted'},
+          {'ref': 'a@2026-05-04T09:00:00.000Z'},
+          {'ref': 'hibas'},
+          'nem objektum',
+        ],
+      });
+      expect(r.items.length, 1);
+      expect(r.items.single.reason, 'kérted');
+      expect(r.problems.length, 2);
+    });
+
+    test('the number of deletions is capped; a missing list is fine', () {
+      final many = {
+        'deletions': [
+          for (var i = 0; i < 30; i++) {'ref': 'e$i@2026-05-04T09:00:00.000Z'},
+        ],
+      };
+      final r = parseDeletions(many, max: 5);
+      expect(r.items.length, 5);
+      expect(r.problems, isNotEmpty);
+      expect(parseDeletions({'proposals': []}).items, isEmpty);
+      expect(parseDeletions(null).items, isEmpty);
+      expect(parseDeletions({'deletions': 'x'}).problems, isNotEmpty);
+    });
   });
 }

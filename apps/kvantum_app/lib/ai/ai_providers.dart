@@ -6,6 +6,8 @@ import 'package:uuid/uuid.dart';
 import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
+import '../ui/delete_ops.dart';
+import '../ui/event_editor.dart' show Scope;
 import 'ai_settings.dart';
 import 'assistant_service.dart';
 import 'gemini_provider.dart';
@@ -71,7 +73,15 @@ class AssistantState {
     this.status,
     this.notice,
     this.errorDetail,
+    this.deleteScopes = const {},
+    this.deletedCount,
   });
+
+  /// Per proposed deletion of a recurring event: what to remove (default: only that day).
+  final Map<int, Scope> deleteScopes;
+
+  /// How many events were deleted after the user confirmed.
+  final int? deletedCount;
 
   final bool busy;
   final AssistantOutcome? outcome;
@@ -105,7 +115,12 @@ class AssistantState {
     String? prompt,
     String? status,
     bool clearStatus = false,
+    Map<int, Scope>? deleteScopes,
   }) => AssistantState(
+    deleteScopes: deleteScopes ?? this.deleteScopes,
+    deletedCount: deletedCount,
+    notice: notice,
+    errorDetail: errorDetail,
     busy: busy ?? this.busy,
     outcome: clearOutcome ? null : (outcome ?? this.outcome),
     error: clearError ? null : (error ?? this.error),
@@ -267,6 +282,48 @@ class AssistantController extends Notifier<AssistantState> {
     ref.read(syncControllerProvider.notifier).requestSync();
     state = AssistantState(prompt: state.prompt, acceptedCount: n);
     return n;
+  }
+
+  void setDeleteScope(int index, Scope scope) => state = state.copyWith(
+    deleteScopes: {...state.deleteScopes, index: scope},
+  );
+
+  /// "Engedélyezem": deletes exactly the events listed on the confirmation card.
+  Future<int> confirmDeletions() async {
+    final o = state.outcome;
+    if (o == null || o.deletions.isEmpty) return 0;
+    final repo = ref.read(repoProvider);
+    var n = 0;
+    for (var i = 0; i < o.deletions.length; i++) {
+      final d = o.deletions[i];
+      final scope = d.occurrence.recurring
+          ? (state.deleteScopes[i] ?? Scope.only)
+          : Scope.only;
+      if (await deleteOccurrence(repo, d.occurrence, scope)) n++;
+    }
+    ref.read(syncControllerProvider.notifier).requestSync();
+    state = AssistantState(
+      outcome: o.withoutDeletions(),
+      selected: state.selected,
+      acceptedCount: state.acceptedCount,
+      prompt: state.prompt,
+      notice: state.notice,
+      deletedCount: n,
+    );
+    return n;
+  }
+
+  /// "Mégse": nothing is deleted; the rest of the answer stays.
+  void declineDeletions() {
+    final o = state.outcome;
+    if (o == null) return;
+    state = AssistantState(
+      outcome: o.withoutDeletions(),
+      selected: state.selected,
+      acceptedCount: state.acceptedCount,
+      prompt: state.prompt,
+      notice: state.notice,
+    );
   }
 
   void dismiss() => state = const AssistantState();
