@@ -225,6 +225,64 @@ void main() {
     },
   );
 
+  for (final w in [
+    320.0,
+    360.0,
+    420.0,
+    640.0,
+    800.0,
+    819.0,
+    820.0,
+    821.0,
+    900.0,
+    999.0,
+    1000.0,
+    1280.0,
+    1920.0,
+  ]) {
+    testWidgets('app bar never overflows at width ${w.toInt()}', (
+      tester,
+    ) async {
+      useSize(tester, size: Size(w, 800));
+      final db = await newDb();
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
+  }
+
+  testWidgets(
+    'below 1000 px the page shortcuts live in the menu and open the pages',
+    (tester) async {
+      useSize(tester, size: const Size(800, 800));
+      final db = await newDb();
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Asszisztens'), findsNothing);
+      await tester.tap(find.byTooltip('Menü'));
+      await tester.pumpAndSettle();
+      for (final label in ['Feladatok', 'Asszisztens', 'Beállítások']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      await tester.tap(find.text('Asszisztens'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
+      await shutdown(tester, db);
+    },
+  );
+
+  testWidgets('wide windows show the shortcuts as icons', (tester) async {
+    useSize(tester, size: const Size(1280, 800));
+    final db = await newDb();
+    await tester.pumpWidget(app(const HomePage(), db));
+    await tester.pumpAndSettle();
+    for (final t in ['Feladatok', 'Asszisztens', 'Beállítások']) {
+      expect(find.byTooltip(t), findsOneWidget);
+    }
+    await shutdown(tester, db);
+  });
+
   testWidgets('narrow window shows a compact view menu and no overflow', (
     tester,
   ) async {

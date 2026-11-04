@@ -5,6 +5,8 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
 import '../update/update_dialog.dart';
+import '../ai/assistant_page.dart';
+import '../ai/settings_page.dart';
 import 'checkin.dart';
 import 'event_editor.dart';
 import 'tasks_page.dart';
@@ -62,7 +64,10 @@ class HomePage extends ConsumerWidget {
     final sel = ref.watch(selectedDayProvider);
     final width = MediaQuery.sizeOf(context).width;
     final wide = width >= 900;
-    final compact = width < 640;
+    // Icon-only controls below this width; the full labels need about 800 px.
+    final compact = width < 820;
+    // Below this width the page shortcuts fold into one menu so the bar never overflows.
+    final menuMode = width < 1000;
 
     Future<void> open(Occurrence o) => openEditor(context, ref, occurrence: o);
 
@@ -170,13 +175,47 @@ class HomePage extends ConsumerWidget {
             icon: const Icon(Icons.chevron_right),
             onPressed: () => _shift(ref, 1),
           ),
-          IconButton(
-            tooltip: 'Feladatok',
-            icon: const Icon(Icons.checklist),
-            onPressed: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute<void>(builder: (_) => const TasksPage())),
-          ),
+          if (menuMode)
+            PopupMenuButton<String>(
+              tooltip: 'Menü',
+              onSelected: (v) {
+                final page = switch (v) {
+                  'tasks' => const TasksPage(),
+                  'assistant' => const AssistantPage(),
+                  _ => const SettingsPage(),
+                };
+                Navigator.of(context)
+                    .push(MaterialPageRoute<void>(builder: (_) => page));
+              },
+              itemBuilder: (c) => const [
+                PopupMenuItem(value: 'tasks', child: Text('Feladatok')),
+                PopupMenuItem(value: 'assistant', child: Text('Asszisztens')),
+                PopupMenuItem(value: 'settings', child: Text('Beállítások')),
+              ],
+            )
+          else ...[
+            IconButton(
+              tooltip: 'Feladatok',
+              icon: const Icon(Icons.checklist),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const TasksPage()),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Asszisztens',
+              icon: const Icon(Icons.auto_awesome),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const AssistantPage()),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Beállítások',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+              ),
+            ),
+          ],
           SyncStatusButton(
             compact: compact,
             onCheckUpdate: () => showUpdateDialog(context, ref),

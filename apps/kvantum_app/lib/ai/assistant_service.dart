@@ -413,10 +413,9 @@ class AssistantService {
     }
     final rest = clean.isEmpty ? <Violation>[] : check(clean);
     if (clean.isEmpty || rest.isNotEmpty) {
+      // Per-item reasons are already listed; add only what concerns the set
+      // as a whole (rest between hard sessions, weekly cap, overlaps).
       for (final v in rest) {
-        dropped.add(v.message);
-      }
-      for (final v in all) {
         if (!dropped.contains(v.message)) dropped.add(v.message);
       }
       return (

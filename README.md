@@ -14,7 +14,7 @@ Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Cal
 | Nézetek (hónap/hét/nap), színek, szerkesztő teljes ismétlődéssel, szinkronállapot | kész, 109 app teszt |
 | Önfrissítés (Windows kész, Android a kulcs beállítása után) | kész, éles próba kell |
 | Feladatok és napi check-in a Drive `appDataFolder`-ben (mezőnkénti összefésülés, duplikáció-védelem, offline sor), felület | **kész, 150 app teszt** |
-| Gemini-asszisztens | következő lépés |
+| Gemini-asszisztens: kulcs és modell a Beállításokban, adatforrás-kapcsolók, kézikönyv-szerkesztő (Drive-szinkronnal), javaslat → jóváhagyás → Naptar naptár; szabályokat kód ellenőrzi | **kész, 219 app + 81 mag teszt; élő Gemini-hívás még nincs kipróbálva** |
 | Turbo mód (Cloudflare Worker + FCM) | következő lépés |
 
 ## Futtatás
