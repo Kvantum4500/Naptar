@@ -11,8 +11,10 @@ import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
+import 'package:kvantum_app/data/backup_ops.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/ui/backup_io.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -55,6 +57,7 @@ void main() {
     FakeGemini? llm,
     String? key,
     bool stubHandbook = true,
+    BackupIo? io,
   }) async {
     useSize(tester);
     db = await newDb();
@@ -66,6 +69,7 @@ void main() {
         db,
         extra: [
           apiKeyStoreProvider.overrideWithValue(keys),
+          if (io != null) backupIoProvider.overrideWithValue(io),
           llmFactoryProvider.overrideWithValue((cfg) => llm ?? FakeGemini([])),
           currentBuildProvider.overrideWith((ref) async => 7),
           // The bundled assets are covered by the handbook page test; the
@@ -83,6 +87,117 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  group('backup', () {
+    testWidgets('export saves an .ics, import restores it without duplicates', (
+      tester,
+    ) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('b1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Mentés fájlba'),
+        200,
+        scrollable: scroll,
+      );
+      await tester.ensureVisible(find.text('Mentés fájlba'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mentés fájlba'));
+      await tester.pumpAndSettle();
+      expect(io.saved, contains('SUMMARY:Fogorvos'));
+      expect(find.text('A naptár elmentve.'), findsOneWidget);
+
+      // delete, then restore
+      await tester.runAsync(() => events.deleteLocal('b1'));
+      io.toPick = io.saved;
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Visszaállítva: 1 új, 0 frissítve, 0 változatlan'),
+        findsOneWidget,
+      );
+      expect(
+        (await tester.runAsync(() => events.byId('b1')))!.start,
+        floating(2026, 11, 20, 9),
+      );
+
+      // a second restore changes nothing
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('0 új, 0 frissítve, 1 változatlan'),
+        findsOneWidget,
+      );
+      expect((await tester.runAsync(() => events.all()))!.length, 1);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('restoring a changed event keeps its Google link', (
+      tester,
+    ) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      final linked = evt(
+        'b2',
+        'Edzés',
+        floating(2026, 11, 20, 9),
+      ).copyWith(googleId: 'g-1', etag: 'e-1');
+      await tester.runAsync(() => events.saveLocal(linked));
+      final backup = await tester.runAsync(() => exportBackup(events));
+      await tester.runAsync(
+        () => events.saveLocal(linked.copyWith(title: 'Átírt')),
+      );
+      io.toPick = backup;
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: scroll,
+      );
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      final e = (await tester.runAsync(() => events.byId('b2')))!;
+      expect(e.title, 'Edzés');
+      expect(e.googleId, 'g-1');
+      expect(e.version, greaterThan(linked.version + 1));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a cancelled picker or a junk file changes nothing', (
+      tester,
+    ) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: scroll,
+      );
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból')); // cancelled
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Visszaállítva'), findsNothing);
+      io.toPick = 'ez nem naptár';
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nem találtam beolvasható'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+  });
 
   group('settings page', () {
     testWidgets(
@@ -983,3 +1098,17 @@ void main() {
 
 ProviderContainer ref0(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(MaterialApp)));
+
+class _MemoryIo implements BackupIo {
+  String? saved;
+  String? toPick;
+
+  @override
+  Future<bool> save(String fileName, String text) async {
+    saved = text;
+    return true;
+  }
+
+  @override
+  Future<String?> pick() async => toPick;
+}

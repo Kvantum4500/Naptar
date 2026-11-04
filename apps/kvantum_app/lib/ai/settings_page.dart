@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/backup_ops.dart';
+import '../data/event_repository.dart' show kNaptarCalendar;
+import '../providers.dart';
+import '../sync/sync_controller.dart';
+import '../ui/backup_io.dart';
 import '../update/update_dialog.dart';
 import 'ai_providers.dart';
 import '../notify/reminders.dart';
@@ -106,6 +111,59 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       _say('Az ellenőrzés nem sikerült: $e', error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// The backup buttons sit far below the key section, where [_say] is not
+  /// visible, so their results appear as a snack bar.
+  void _toast(String m, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(m),
+          backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+        ),
+      );
+  }
+
+  Future<void> _export() async {
+    try {
+      final text = await exportBackup(ref.read(repoProvider));
+      final d = DateTime.now();
+      final name =
+          'naptar-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.ics';
+      final ok = await ref.read(backupIoProvider).save(name, text);
+      if (ok) _toast('A naptár elmentve.');
+    } catch (e) {
+      _toast('A mentés nem sikerült: $e', error: true);
+    }
+  }
+
+  Future<void> _import() async {
+    try {
+      final text = await ref.read(backupIoProvider).pick();
+      if (text == null) return;
+      final r = await importBackup(
+        ref.read(repoProvider),
+        text,
+        calendarId: kNaptarCalendar,
+      );
+      if (r.total > 0) {
+        ref.read(syncControllerProvider.notifier).requestSync();
+      }
+      final extra = r.problems.isEmpty
+          ? ''
+          : ' (${r.problems.length} elemet kihagytam vagy figyelmeztetéssel olvastam be)';
+      _toast(
+        r.total == 0 && r.unchanged == 0
+            ? 'Nem találtam beolvasható eseményt a fájlban.$extra'
+            : 'Visszaállítva: ${r.added} új, ${r.updated} frissítve, ${r.unchanged} változatlan.$extra',
+        error: r.total == 0 && r.unchanged == 0,
+      );
+    } catch (e) {
+      _toast('A visszaállítás nem sikerült: $e', error: true);
     }
   }
 
@@ -373,6 +431,28 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         _setReminders(reminders.copyWith(checkIn: v)),
                   ),
                 ],
+              ]),
+              section('Mentés és visszaállítás', [
+                const Text(
+                  'A naptár egy .ics fájlba menthető, amit bármely naptárprogram megnyit. A visszaállítás csak hozzáad vagy frissít, soha nem töröl.',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _export,
+                      icon: const Icon(Icons.download),
+                      label: const Text('Mentés fájlba'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _import,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Visszaállítás fájlból'),
+                    ),
+                  ],
+                ),
               ]),
               section('Alvási sáv', [
                 const Text(

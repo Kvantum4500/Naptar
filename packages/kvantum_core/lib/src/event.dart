@@ -94,6 +94,7 @@ class CalEvent {
     bool clearColor = false,
     bool? aiGenerated,
     bool bumpVersion = true,
+    int? version,
   }) => CalEvent(
     id: id ?? this.id,
     calendarId: calendarId,
@@ -109,7 +110,7 @@ class CalEvent {
     recurringEventId: recurringEventId ?? this.recurringEventId,
     originalStart: originalStart ?? this.originalStart,
     cancelled: cancelled ?? this.cancelled,
-    version: bumpVersion ? version + 1 : version,
+    version: version ?? (bumpVersion ? this.version + 1 : this.version),
     googleId: googleId ?? this.googleId,
     etag: etag ?? this.etag,
     iCalUid: iCalUid ?? this.iCalUid,

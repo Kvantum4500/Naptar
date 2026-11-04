@@ -4,6 +4,7 @@ export 'src/assistant_context.dart';
 export 'src/assistant_models.dart';
 export 'src/event.dart';
 export 'src/free_slots.dart';
+export 'src/ics.dart';
 export 'src/models.dart';
 export 'src/reconcile.dart';
 export 'src/recurrence.dart';
