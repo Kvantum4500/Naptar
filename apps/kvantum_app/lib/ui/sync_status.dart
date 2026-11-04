@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../sync/sync_controller.dart';
+import '../update/update_dialog.dart' show currentBuildProvider;
 import 'format.dart';
 
 /// Always-visible sync indicator in the app bar, with a details menu.
@@ -85,14 +86,19 @@ class SyncStatusButton extends ConsumerWidget {
           case 'sync':
             ctl.syncNow();
           case 'details':
-            _info(
-              context,
-              'Szinkronállapot',
-              'Utolsó sikeres szinkron: ${s.lastSync == null ? 'még nem volt' : '${fmtDate(s.lastSync!)} ${_hm(s.lastSync!)}'}\n'
-                  'Függő módosítás: ${s.pending}\n'
-                  'Naptár: Google „Naptar”\n'
-                  '${s.error == null ? 'Hiba: nincs' : 'Hiba: ${s.error}'}',
-            );
+            () async {
+              final build = await ref.read(currentBuildProvider.future);
+              if (!context.mounted) return;
+              _info(
+                context,
+                'Szinkronállapot',
+                'Verzió: build $build\n'
+                    'Utolsó sikeres szinkron: ${s.lastSync == null ? 'még nem volt' : '${fmtDate(s.lastSync!)} ${_hm(s.lastSync!)}'}\n'
+                    'Függő módosítás: ${s.pending}\n'
+                    'Naptár: Google „Naptar”\n'
+                    '${s.error == null ? 'Hiba: nincs' : 'Hiba: ${s.error}'}',
+              );
+            }();
           case 'update':
             onCheckUpdate();
           case 'out':

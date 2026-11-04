@@ -47,11 +47,26 @@ class PlatformUpdateInstaller implements UpdateInstaller {
       );
       if (work.existsSync()) work.deleteSync(recursive: true);
       final root = extractUpdateZip(package, work, exeName: exeName);
-      await launchWindowsUpdate(
-        newFiles: root,
-        installDir: installDir,
-        exeName: exeName,
-      );
+      logUpdate('update to ${info.build}: ${root.path} -> ${installDir.path}');
+      try {
+        final r = applyUpdateFiles(
+          newRoot: root,
+          installDir: installDir,
+          tag: 'b${info.build}',
+          log: logUpdate,
+        );
+        logUpdate(
+          'swap ok: replaced ${r.replaced.length}, unchanged ${r.unchanged.length}',
+        );
+      } on UpdateSwapException catch (e) {
+        return '${e.message}\nNapló: $updateLogPath';
+      }
+      try {
+        await launchNewApp(File(p.join(installDir.path, exeName)));
+      } catch (e) {
+        logUpdate('launch failed: $e');
+        return 'A frissítés telepítve, de az új verzió nem indult el ($e). Indítsd el kézzel a programot.';
+      }
       exit(0);
     }
     if (Platform.isAndroid) {

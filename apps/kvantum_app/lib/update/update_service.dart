@@ -308,29 +308,6 @@ Directory extractUpdateZip(
   throw FormatException('A csomagban nincs $exeName.');
 }
 
-/// PowerShell that waits for the app to exit, backs up the install folder,
-/// copies the new files over it and restarts the app. On any failure it
-/// restores the backup, so a broken update can never leave a half-installed app.
-String buildUpdateScript() => r'''
-param([int]$ProcId, [string]$Src, [string]$Dst, [string]$Exe)
-$ErrorActionPreference = 'Stop'
-try { Wait-Process -Id $ProcId -Timeout 60 -ErrorAction SilentlyContinue } catch {}
-Start-Sleep -Milliseconds 500
-$Bak = "$Dst.bak"
-if (Test-Path -LiteralPath $Bak) { Remove-Item -LiteralPath $Bak -Recurse -Force }
-Copy-Item -LiteralPath $Dst -Destination $Bak -Recurse
-$ok = $true
-try {
-  & robocopy $Src $Dst /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-  if ($LASTEXITCODE -ge 8) { throw "robocopy hiba: $LASTEXITCODE" }
-} catch {
-  $ok = $false
-  & robocopy $Bak $Dst /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-}
-Start-Process -FilePath (Join-Path $Dst $Exe)
-if ($ok) { Remove-Item -LiteralPath $Bak -Recurse -Force -ErrorAction SilentlyContinue }
-''';
-
 bool isDirWritable(Directory d) {
   try {
     final f = File(
@@ -344,32 +321,137 @@ bool isDirWritable(Directory d) {
   }
 }
 
-/// Starts the detached updater and returns; the caller must exit the app.
-Future<void> launchWindowsUpdate({
-  required Directory newFiles,
+class UpdateSwapException implements Exception {
+  UpdateSwapException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+class SwapResult {
+  const SwapResult({required this.replaced, required this.unchanged});
+  final List<String> replaced; // relative paths
+  final List<String> unchanged;
+}
+
+bool _sameContent(File a, File b) {
+  if (a.lengthSync() != b.lengthSync()) return false;
+  final x = a.readAsBytesSync();
+  final y = b.readAsBytesSync();
+  for (var i = 0; i < x.length; i++) {
+    if (x[i] != y[i]) return false;
+  }
+  return true;
+}
+
+/// Replaces the installed files with the ones in [newRoot] while the app is
+/// still running, without any helper script.
+///
+/// Windows lets a running exe/dll be RENAMED (but not overwritten or deleted),
+/// so every old file is renamed to `<name>.old-<tag>` and the new one is copied
+/// into its place. Files that did not change (e.g. icudtl.dat, which the engine
+/// keeps open) are left alone. If anything fails, every step is undone, so the
+/// installation is never left half-updated. [beforeStep] lets tests inject
+/// failures; [log] receives a line per step.
+SwapResult applyUpdateFiles({
+  required Directory newRoot,
   required Directory installDir,
-  required String exeName,
-}) async {
-  final script = File(
-    p.join(Directory.systemTemp.path, 'naptar-update', 'apply.ps1'),
-  );
-  script.parent.createSync(recursive: true);
-  script.writeAsStringSync(buildUpdateScript());
-  await Process.start('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-WindowStyle',
-    'Hidden',
-    '-File',
-    script.path,
-    '-ProcId',
-    '$pid',
-    '-Src',
-    newFiles.path,
-    '-Dst',
-    installDir.path,
-    '-Exe',
-    exeName,
-  ], mode: ProcessStartMode.detached);
+  required String tag,
+  void Function(String step, String relPath)? beforeStep,
+  void Function(String line)? log,
+}) {
+  final files = newRoot.listSync(recursive: true).whereType<File>().toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
+  final replaced = <String>[];
+  final unchanged = <String>[];
+  final undo = <void Function()>[];
+  try {
+    for (final src in files) {
+      final rel = p.relative(src.path, from: newRoot.path);
+      final target = File(p.join(installDir.path, rel));
+      if (target.existsSync() && _sameContent(target, src)) {
+        unchanged.add(rel);
+        continue;
+      }
+      target.parent.createSync(recursive: true);
+      File? old;
+      if (target.existsSync()) {
+        old = File('${target.path}.old-$tag');
+        if (old.existsSync()) {
+          try {
+            old.deleteSync(); // left over from an earlier attempt
+          } on FileSystemException {
+            old = File(
+              '${target.path}.old-$tag-${DateTime.now().microsecondsSinceEpoch}',
+            );
+          }
+        }
+        beforeStep?.call('rename', rel);
+        log?.call('rename $rel');
+        target.renameSync(old.path);
+      }
+      final oldFile = old;
+      undo.add(() {
+        try {
+          if (target.existsSync()) target.deleteSync();
+          if (oldFile != null && oldFile.existsSync()) {
+            oldFile.renameSync(target.path);
+          }
+        } catch (_) {}
+      });
+      beforeStep?.call('copy', rel);
+      log?.call('copy $rel');
+      src.copySync(target.path);
+      replaced.add(rel);
+    }
+  } catch (e) {
+    for (final u in undo.reversed) {
+      u();
+    }
+    log?.call('FAILED, rolled back: $e');
+    throw UpdateSwapException(
+      'A csere nem sikerült, a régi verzió érintetlen maradt: '
+      '${e is FileSystemException ? '${e.message} (${e.path})' : e}',
+    );
+  }
+  return SwapResult(replaced: replaced, unchanged: unchanged);
+}
+
+/// Deletes the `*.old-*` files an update leaves behind (locked ones are kept
+/// until the next start). Returns how many were removed.
+int cleanupOldFiles(Directory installDir) {
+  var n = 0;
+  try {
+    for (final f in installDir.listSync(recursive: true).whereType<File>()) {
+      if (RegExp(r'\.old-[^\\/]*$').hasMatch(f.path)) {
+        try {
+          f.deleteSync();
+          n++;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return n;
+}
+
+/// Starts the new version as an independent process; the caller then exits.
+Future<void> launchNewApp(File exe) => Process.start(
+  exe.path,
+  const [],
+  workingDirectory: exe.parent.path,
+  mode: ProcessStartMode.detached,
+);
+
+/// Best-effort update log (shown to the user when something fails).
+String get updateLogPath =>
+    p.join(Directory.systemTemp.path, 'naptar-update', 'update.log');
+
+void logUpdate(String line) {
+  try {
+    final f = File(updateLogPath)..parent.createSync(recursive: true);
+    f.writeAsStringSync(
+      '${DateTime.now().toIso8601String()}  $line\n',
+      mode: FileMode.append,
+    );
+  } catch (_) {}
 }

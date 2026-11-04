@@ -311,24 +311,144 @@ void main() {
     });
 
     test(
-      'the update script backs up, copies, restores on failure and restarts',
-      () {
-        final s = buildUpdateScript();
-        expect(s, contains('Wait-Process'));
-        expect(s, contains('Copy-Item -LiteralPath \$Dst -Destination \$Bak'));
-        expect(s, contains('robocopy \$Src \$Dst'));
-        expect(s, contains('robocopy \$Bak \$Dst')); // restore path
-        expect(s, contains('Start-Process'));
-      },
-    );
-
-    test(
       'writable check works on a normal folder and fails on a missing one',
       () {
         expect(isDirWritable(tmp), isTrue);
         expect(isDirWritable(Directory('${tmp.path}/nope/none')), isFalse);
       },
     );
+  });
+
+  group('Windows file swap (no helper script)', () {
+    late Directory root, installDir, newDir;
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('naptar-swap-test');
+      installDir = Directory('${root.path}/install')..createSync();
+      newDir = Directory('${root.path}/new')..createSync();
+    });
+    tearDown(() => root.deleteSync(recursive: true));
+
+    void write(Directory d, String rel, String content) {
+      File('${d.path}/$rel')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    String read(String rel) =>
+        File('${installDir.path}/$rel').readAsStringSync();
+
+    test('changed files are replaced, new ones added, identical ones untouched', () {
+      write(installDir, 'app.exe', 'old exe');
+      write(installDir, 'icudtl.dat', 'same data');
+      write(installDir, 'data/app.so', 'old so');
+      write(newDir, 'app.exe', 'NEW exe');
+      write(newDir, 'icudtl.dat', 'same data');
+      write(newDir, 'data/app.so', 'NEW so');
+      write(newDir, 'data/extra/new.bin', 'brand new');
+
+      final r = applyUpdateFiles(
+        newRoot: newDir,
+        installDir: installDir,
+        tag: 'b5',
+      );
+      expect(read('app.exe'), 'NEW exe');
+      expect(read('data/app.so'), 'NEW so');
+      expect(read('data/extra/new.bin'), 'brand new');
+      expect(r.unchanged, ['icudtl.dat']);
+      expect(r.replaced.toSet(), {
+        'app.exe',
+        'data/app.so',
+        'data/extra/new.bin',
+      });
+      // the replaced originals are kept aside (a running exe cannot be deleted)
+      expect(
+        File('${installDir.path}/app.exe.old-b5').readAsStringSync(),
+        'old exe',
+      );
+      expect(
+        File('${installDir.path}/icudtl.dat.old-b5').existsSync(),
+        isFalse,
+      );
+    });
+
+    test('a failure half-way undoes everything: the old version is intact', () {
+      write(installDir, 'a.dll', 'old a');
+      write(installDir, 'b.dll', 'old b');
+      write(installDir, 'c.dll', 'old c');
+      write(newDir, 'a.dll', 'NEW a');
+      write(newDir, 'b.dll', 'NEW b');
+      write(newDir, 'c.dll', 'NEW c');
+      write(newDir, 'd.dll', 'NEW d');
+
+      var calls = 0;
+      expect(
+        () => applyUpdateFiles(
+          newRoot: newDir,
+          installDir: installDir,
+          tag: 'b5',
+          beforeStep: (step, rel) {
+            if (++calls == 5) {
+              throw const FileSystemException('locked', 'b.dll');
+            }
+          },
+        ),
+        throwsA(
+          isA<UpdateSwapException>().having(
+            (e) => e.message,
+            'message',
+            contains('érintetlen'),
+          ),
+        ),
+      );
+      expect(read('a.dll'), 'old a');
+      expect(read('b.dll'), 'old b');
+      expect(read('c.dll'), 'old c');
+      expect(File('${installDir.path}/d.dll').existsSync(), isFalse);
+      expect(
+        installDir.listSync().whereType<File>().any(
+          (f) => f.path.contains('.old-'),
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'a leftover .old file from an earlier attempt does not block the swap',
+      () {
+        write(installDir, 'app.exe', 'old');
+        write(installDir, 'app.exe.old-b5', 'stale');
+        write(newDir, 'app.exe', 'NEW');
+        applyUpdateFiles(newRoot: newDir, installDir: installDir, tag: 'b5');
+        expect(read('app.exe'), 'NEW');
+        expect(read('app.exe.old-b5'), 'old');
+      },
+    );
+
+    test(
+      'startup cleanup removes only the .old files, including nested ones',
+      () {
+        write(installDir, 'app.exe', 'keep');
+        write(installDir, 'app.exe.old-b5', 'x');
+        write(installDir, 'data/app.so.old-b5-123', 'x');
+        write(installDir, 'data/readme.old', 'keep: not an update leftover');
+        expect(cleanupOldFiles(installDir), 2);
+        expect(File('${installDir.path}/app.exe').existsSync(), isTrue);
+        expect(File('${installDir.path}/data/readme.old').existsSync(), isTrue);
+        expect(File('${installDir.path}/app.exe.old-b5').existsSync(), isFalse);
+      },
+    );
+
+    test('an update with nothing changed replaces nothing', () {
+      write(installDir, 'app.exe', 'same');
+      write(newDir, 'app.exe', 'same');
+      final r = applyUpdateFiles(
+        newRoot: newDir,
+        installDir: installDir,
+        tag: 'b5',
+      );
+      expect(r.replaced, isEmpty);
+      expect(r.unchanged, ['app.exe']);
+    });
   });
 
   group('update dialog', () {
