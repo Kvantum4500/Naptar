@@ -63,6 +63,8 @@ class AiSettings {
     this.events = true,
     this.tasks = true,
     this.checkins = true,
+    this.sleepStartHour = 23,
+    this.sleepEndHour = 7,
   });
 
   /// Provider id from the catalog (gemini, groq, mistral, openrouter, openai, custom).
@@ -77,6 +79,10 @@ class AiSettings {
   final bool tasks;
   final bool checkins;
 
+  /// Sleep window (wall-clock hours): the assistant plans nothing inside it.
+  final int sleepStartHour;
+  final int sleepEndHour;
+
   AiSettings copyWith({
     String? provider,
     String? model,
@@ -85,6 +91,8 @@ class AiSettings {
     bool? events,
     bool? tasks,
     bool? checkins,
+    int? sleepStartHour,
+    int? sleepEndHour,
   }) => AiSettings(
     provider: provider ?? this.provider,
     model: clearModel ? null : (model ?? this.model),
@@ -92,6 +100,8 @@ class AiSettings {
     events: events ?? this.events,
     tasks: tasks ?? this.tasks,
     checkins: checkins ?? this.checkins,
+    sleepStartHour: sleepStartHour ?? this.sleepStartHour,
+    sleepEndHour: sleepEndHour ?? this.sleepEndHour,
   );
 }
 
@@ -118,6 +128,8 @@ class AiSettingsStore {
       events: (await read('ai.events')) != 'off',
       tasks: (await read('ai.tasks')) != 'off',
       checkins: (await read('ai.checkins')) != 'off',
+      sleepStartHour: _hour(await read('ai.sleepStart'), 23),
+      sleepEndHour: _hour(await read('ai.sleepEnd'), 7),
     );
   }
 
@@ -128,6 +140,19 @@ class AiSettingsStore {
     await write('ai.events', s.events ? null : 'off');
     await write('ai.tasks', s.tasks ? null : 'off');
     await write('ai.checkins', s.checkins ? null : 'off');
+    await write(
+      'ai.sleepStart',
+      s.sleepStartHour == 23 ? null : '${s.sleepStartHour}',
+    );
+    await write(
+      'ai.sleepEnd',
+      s.sleepEndHour == 7 ? null : '${s.sleepEndHour}',
+    );
+  }
+
+  static int _hour(String? v, int fallback) {
+    final n = int.tryParse(v ?? '');
+    return n != null && n >= 0 && n <= 23 ? n : fallback;
   }
 
   String get _usageKey {

@@ -163,6 +163,10 @@ class AssistantController extends Notifier<AssistantState> {
         records: ref.read(recordRepoProvider),
         handbook: ref.read(handbookStoreProvider),
         settingsStore: ref.read(aiSettingsStoreProvider),
+        rules: PlanRules(
+          sleepStartHour: settings.sleepStartHour,
+          sleepEndHour: settings.sleepEndHour,
+        ),
       );
       Future<AssistantOutcome> run(String m) =>
           service.ask(text, model: m, settings: settings, onStatus: status);

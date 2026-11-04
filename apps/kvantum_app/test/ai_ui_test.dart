@@ -182,6 +182,34 @@ void main() {
       },
     );
 
+    testWidgets('the sleep window is editable and remembered', (tester) async {
+      await boot(tester, const SettingsPage());
+      expect(find.text('Alvási sáv'), findsOneWidget);
+      final c = ref0(tester);
+      var s = (await tester.runAsync(
+        () => c.read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect([s.sleepStartHour, s.sleepEndHour], [23, 7]);
+
+      final dropdowns = find.byType(DropdownButtonFormField<int>);
+      await tester.ensureVisible(dropdowns.first);
+      await tester.pumpAndSettle();
+      await tester.tap(dropdowns.first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('08:00').last);
+      await tester.pumpAndSettle();
+      await tester.tap(dropdowns.last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('16:00').last);
+      await tester.pumpAndSettle();
+
+      s = (await tester.runAsync(
+        () => c.read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect([s.sleepStartHour, s.sleepEndHour], [8, 16]);
+      await shutdown(tester, db);
+    });
+
     testWidgets('the key field hides the text until asked', (tester) async {
       await boot(tester, const SettingsPage());
       expect(

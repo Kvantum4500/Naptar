@@ -69,6 +69,7 @@ Map<String, Object?> eventsForTool(
               'kezdes': _hm(s),
               'veg': _hm(e),
               'cim': sanitizeText(o.title),
+              if (o.isShift) 'muszak': true,
             };
           }(),
     ],
@@ -178,6 +179,8 @@ BIZALMI SZABÁLY
 KEMÉNY SZABÁLYOK (az app kóddal is ellenőrzi, a megszegő javaslat nem kerül a naptárba)
 - Alvási sáv: ${rules.sleepStartHour.toString().padLeft(2, '0')}:00–${rules.sleepEndHour.toString().padLeft(2, '0')}:00, ekkor semmit nem tervezel.
 - Események között legalább ${rules.bufferMinutes} perc puffer.
+- A „muszak: true” jelölésű események a felhasználó munkaműszakjai (rögzítettek); nehéz edzés műszak előtt és után ${rules.shiftBufferHours} órán belül nem lehet.
+- Ha egy napra nincs check-in, közepes energiát (3/5) feltételezel, ezt jelzed az indoklásban, és arra a napra csak könnyű edzést javasolsz.
 - Nehéz edzés csak ${rules.minEnergyForHard}/5 vagy magasabb fizikai energiánál; nehéz edzések között legalább ${rules.minHoursBetweenHard} óra; heti legfeljebb ${rules.maxWorkoutsPerWeek} edzés.
 
 KÉZIKÖNYV (a felhasználó szabályai és összefüggései, ezek az irányadók)

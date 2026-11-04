@@ -310,6 +310,59 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       notifier.change(settings.copyWith(checkins: v)),
                 ),
               ]),
+              section('Alvási sáv', [
+                const Text(
+                  'Ebben az időszakban az asszisztens semmit nem tervez. Éjszakás időszakban állítsd át arra, amikor ténylegesen alszol (pl. 08:00–16:00).',
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: settings.sleepStartHour,
+                        decoration: const InputDecoration(
+                          labelText: 'Alvás kezdete',
+                        ),
+                        items: [
+                          for (var h = 0; h < 24; h++)
+                            DropdownMenuItem(
+                              value: h,
+                              enabled: h != settings.sleepEndHour,
+                              child: Text('${h.toString().padLeft(2, '0')}:00'),
+                            ),
+                        ],
+                        onChanged: (v) => v == null
+                            ? null
+                            : notifier.change(
+                                settings.copyWith(sleepStartHour: v),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: settings.sleepEndHour,
+                        decoration: const InputDecoration(
+                          labelText: 'Alvás vége',
+                        ),
+                        items: [
+                          for (var h = 0; h < 24; h++)
+                            DropdownMenuItem(
+                              value: h,
+                              enabled: h != settings.sleepStartHour,
+                              child: Text('${h.toString().padLeft(2, '0')}:00'),
+                            ),
+                        ],
+                        onChanged: (v) => v == null
+                            ? null
+                            : notifier.change(
+                                settings.copyWith(sleepEndHour: v),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ]),
               section('Kézikönyv', [
                 const Text(
                   'Az asszisztens szabályai, a profilod és az összefüggések. Szerkesztheted, és a Google Drive-on át minden eszközön ugyanaz.',

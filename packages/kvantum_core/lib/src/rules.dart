@@ -10,6 +10,7 @@ class PlanRules {
     this.minHoursBetweenHard = 48,
     this.maxWorkoutsPerWeek = 5,
     this.minEnergyForHard = 3,
+    this.shiftBufferHours = 8,
     this.tzid = 'Europe/Budapest',
   });
   final int sleepStartHour;
@@ -18,6 +19,9 @@ class PlanRules {
   final int minHoursBetweenHard;
   final int maxWorkoutsPerWeek;
   final int minEnergyForHard; // 1..5 physical energy
+
+  /// A hard session may not start/end this close to a shift.
+  final int shiftBufferHours;
   final String tzid;
 }
 
@@ -100,6 +104,27 @@ List<Violation> validateProposal(
     if (b.isHard) {
       final day = floating(s.year, s.month, s.day);
       final energy = energyByDate[day];
+      final rest = Duration(hours: rules.shiftBufferHours);
+      for (final x in existing.where((x) => x.isShift && !x.allDay)) {
+        if (b.startUtc.isBefore(x.endUtc.add(rest)) &&
+            x.startUtc.isBefore(b.endUtc.add(rest))) {
+          v.add(
+            Violation(
+              'shift_rest',
+              '„${b.title}” nehéz edzés, de a műszakhoz (${x.title}) túl közel van (előtte és utána legalább ${rules.shiftBufferHours} óra kell)',
+            ),
+          );
+          break;
+        }
+      }
+      if (energy == null) {
+        v.add(
+          Violation(
+            'no_data_hard',
+            '„${b.title}” nehéz edzés, de ${day.toIso8601String().substring(0, 10)}-ra nincs check-in; check-in nélkül csak könnyű edzés javasolható',
+          ),
+        );
+      }
       if (energy != null && energy < rules.minEnergyForHard) {
         v.add(
           Violation(

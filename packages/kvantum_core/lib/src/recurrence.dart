@@ -1,5 +1,7 @@
 import 'package:rrule/rrule.dart';
 
+import 'shift_pattern.dart';
+
 import 'event.dart';
 import 'time.dart';
 
@@ -48,6 +50,7 @@ List<Occurrence> expand(
         allDay: true,
         colorId: e.colorId,
         recurring: master.isRecurring,
+        isShift: e.notes == kShiftMarker,
       );
     }
     if (isOverride) {
@@ -62,6 +65,7 @@ List<Occurrence> expand(
         isOverride: true,
         colorId: e.colorId,
         recurring: true,
+        isShift: e.notes == kShiftMarker,
       );
     }
     final s = resolveWallClock(master.tzid!, wallStart);
@@ -76,6 +80,7 @@ List<Occurrence> expand(
       tzid: master.tzid,
       colorId: e.colorId,
       recurring: master.isRecurring,
+      isShift: e.notes == kShiftMarker,
     );
   }
 
