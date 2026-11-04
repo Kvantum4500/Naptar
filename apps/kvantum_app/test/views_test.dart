@@ -121,6 +121,59 @@ void main() {
     },
   );
 
+  testWidgets(
+    'month view side panel shows the selected day as an hour timeline',
+    (tester) async {
+      useSize(tester);
+      final db = await newDb();
+      final repo = EventRepository(db);
+      final n = DateTime.now();
+      await tester.runAsync(
+        () => repo.saveLocal(
+          evt(
+            'p',
+            'Panel esemény',
+            floating(n.year, n.month, n.day, 10),
+            colorId: '7',
+          ),
+        ),
+      );
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+
+      // still the month view ...
+      expect(find.text('Hónap'), findsOneWidget);
+      // ... and the side panel has the timeline: block with its time range + hour labels
+      expect(find.text('Panel esemény'), findsOneWidget);
+      expect(find.text('10:00–11:00'), findsOneWidget);
+      expect(find.text('12:00'), findsWidgets);
+      expect(find.text('1 esemény'), findsOneWidget);
+
+      // tapping the block opens the editor directly, no view switch needed
+      await tester.tap(find.text('Panel esemény'));
+      await tester.pumpAndSettle();
+      expect(find.text('Esemény szerkesztése'), findsOneWidget);
+      await shutdown(tester, db);
+    },
+  );
+
+  testWidgets(
+    'side panel: an empty day says so, and a tap on the timeline starts a new event',
+    (tester) async {
+      useSize(tester);
+      final db = await newDb();
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+      expect(find.text('Nincs esemény erre a napra.'), findsOneWidget);
+      final panel = find.byType(TimeGrid);
+      expect(panel, findsOneWidget);
+      await tester.tapAt(tester.getCenter(panel));
+      await tester.pumpAndSettle();
+      expect(find.text('Új esemény'), findsWidgets);
+      await shutdown(tester, db);
+    },
+  );
+
   testWidgets('week view: hour scale, event block, view choice is remembered', (
     tester,
   ) async {

@@ -24,6 +24,7 @@ class TimeGrid extends ConsumerStatefulWidget {
     required this.onOpen,
     required this.onCreateAt,
     this.onDayTap,
+    this.showDayHeader = true,
   });
 
   final List<DateTime> days;
@@ -33,6 +34,10 @@ class TimeGrid extends ConsumerStatefulWidget {
   /// Floating wall-clock start (15 min snapped) of an empty slot the user tapped.
   final void Function(DateTime wallStart) onCreateAt;
   final void Function(DateTime day)? onDayTap;
+
+  /// The weekday/number header is hidden when the grid is embedded under a
+  /// panel title that already names the day.
+  final bool showDayHeader;
 
   @override
   ConsumerState<TimeGrid> createState() => _TimeGridState();
@@ -94,56 +99,57 @@ class _TimeGridState extends ConsumerState<TimeGrid> {
         return Column(
           children: [
             // ---- day headers
-            SizedBox(
-              height: 52,
-              child: Row(
-                children: [
-                  const SizedBox(width: _labelWidth),
-                  for (final d in widget.days)
-                    SizedBox(
-                      width: colW,
-                      child: InkWell(
-                        onTap: widget.onDayTap == null
-                            ? null
-                            : () => widget.onDayTap!(d),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              DateFormat.E('hu')
-                                  .format(DateTime(d.year, d.month, d.day)),
-                              style: Theme.of(context).textTheme.labelMedium,
-                            ),
-                            const SizedBox(height: 2),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
+            if (widget.showDayHeader)
+              SizedBox(
+                height: 52,
+                child: Row(
+                  children: [
+                    const SizedBox(width: _labelWidth),
+                    for (final d in widget.days)
+                      SizedBox(
+                        width: colW,
+                        child: InkWell(
+                          onTap: widget.onDayTap == null
+                              ? null
+                              : () => widget.onDayTap!(d),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                DateFormat.E('hu')
+                                    .format(DateTime(d.year, d.month, d.day)),
+                                style: Theme.of(context).textTheme.labelMedium,
                               ),
-                              decoration: d == today
-                                  ? BoxDecoration(
-                                      color: scheme.primary,
-                                      borderRadius: BorderRadius.circular(12),
-                                    )
-                                  : null,
-                              child: Text(
-                                '${d.day}',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: d == today
-                                      ? scheme.onPrimary
-                                      : scheme.onSurface,
+                              const SizedBox(height: 2),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: d == today
+                                    ? BoxDecoration(
+                                        color: scheme.primary,
+                                        borderRadius: BorderRadius.circular(12),
+                                      )
+                                    : null,
+                                child: Text(
+                                  '${d.day}',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: d == today
+                                        ? scheme.onPrimary
+                                        : scheme.onSurface,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
             // ---- all-day strip
             if (maxAllDay > 0)
               Container(

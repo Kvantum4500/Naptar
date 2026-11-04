@@ -76,7 +76,10 @@ class HomePage extends ConsumerWidget {
             ref.read(viewModeProvider.notifier).set(CalView.day);
           },
         );
-        final list = DayList(onOpen: open);
+        final list = _DayPanel(
+          onOpen: open,
+          onCreateAt: (s) => openEditor(context, ref, initialStart: s),
+        );
         body = wide
             ? Row(
                 children: [
@@ -192,6 +195,51 @@ class HomePage extends ConsumerWidget {
           Expanded(child: body),
         ],
       ),
+    );
+  }
+}
+
+/// Side panel of the month view: the selected day as an hour-scale timeline,
+/// so a day can be read and extended without switching to the day view.
+class _DayPanel extends ConsumerWidget {
+  const _DayPanel({required this.onOpen, required this.onCreateAt});
+  final OpenOccurrence onOpen;
+  final void Function(DateTime wallStart) onCreateAt;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final day = ref.watch(selectedDayProvider);
+    final range = ref.watch(dayRangeProvider);
+    final count = ref.watch(monthOccurrencesProvider).value?[day]?.length ?? 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                fmtDateLong(day),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Text(
+                count == 0 ? 'Nincs esemény erre a napra.' : '$count esemény',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: TimeGrid(
+            days: [range.first],
+            range: range,
+            showDayHeader: false,
+            onOpen: onOpen,
+            onCreateAt: onCreateAt,
+          ),
+        ),
+      ],
     );
   }
 }
