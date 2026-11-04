@@ -39,4 +39,5 @@ Ismert korlát: egy ismétlődő esemény szerkesztése az egész sorozatra vona
 - Minden `main`-re küldött változás (és a `[build]` jelű commit feature ágon) megépíti a Windows-zipet és az Android-APK-t, és létrehoz egy GitHub Release-t (`build-<szám>`), SHA-256 összeggel.
 - Az app „Frissítés keresése” menüpontja ezt a kiadást nézi meg a csak olvasási `UPDATE_TOKEN`-nel, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit.
 - Az első indításnál a Windows figyelmeztet („ismeretlen kiadó”): a ZIP tulajdonságainál jelöld be a **Feloldás** (Unblock) négyzetet kicsomagolás előtt. A frissítések már nem figyelmeztetnek.
+- A build az `UPDATE_TOKEN` titokkal együtt készül; token nélkül a „Frissítés keresése” csak azt jelzi, hogy nincs token. Az első, tokent tartalmazó verziót kézzel kell telepíteni, onnantól az app magát frissíti.
 - Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja).
