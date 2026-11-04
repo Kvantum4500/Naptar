@@ -907,6 +907,64 @@ void main() {
       },
     );
 
+    testWidgets('after "Elvetem" the user can have the reason remembered', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'x');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Elvetem'));
+      await tester.pumpAndSettle();
+      expect(find.text('Szeretnéd, hogy megjegyezzem, miért?'), findsOneWidget);
+      // nothing is written before the button
+      expect(
+        await tester.runAsync(
+          () => ref0(tester).read(handbookStoreProvider).learnedRules(),
+        ),
+        isEmpty,
+      );
+      await tester.tap(find.text('Ne tervezz edzést reggel 8 előtt.'));
+      await tester.pump();
+      await tester.tap(find.text('Megjegyzem'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Rögzítve a Tanult szokások'), findsOneWidget);
+      expect(
+        await tester.runAsync(
+          () => ref0(tester).read(handbookStoreProvider).learnedRules(),
+        ),
+        ['Ne tervezz edzést reggel 8 előtt.'],
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('"Nem most" writes nothing', (tester) async {
+      final llm = FakeGemini([
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'x');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Elvetem'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nem most'));
+      await tester.pumpAndSettle();
+      expect(find.text('Szeretnéd, hogy megjegyezzem, miért?'), findsNothing);
+      expect(
+        await tester.runAsync(
+          () => ref0(tester).read(handbookStoreProvider).learnedRules(),
+        ),
+        isEmpty,
+      );
+      await shutdown(tester, db);
+    });
+
     testWidgets(
       'a plan that breaks the rules is never offered; the reasons are listed',
       (tester) async {

@@ -181,6 +181,21 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     ),
                   ),
                 ),
+              if (st.askWhy) const _WhyCard(),
+              if (st.habitSaved)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.psychology_outlined),
+                    title: const Text(
+                      'Rögzítve a Tanult szokások közé (Beállítások → Kézikönyv).',
+                    ),
+                    trailing: TextButton(
+                      onPressed: ctl.dismiss,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
               if (st.movedCount != null)
                 Card(
                   color: scheme.primaryContainer,
@@ -440,7 +455,10 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
               label: Text('Elfogadom a kijelölteket (${st.selected.length})'),
             ),
             const SizedBox(width: 10),
-            TextButton(onPressed: ctl.dismiss, child: const Text('Elvetem')),
+            TextButton(
+              onPressed: ctl.discardPlan,
+              child: const Text('Elvetem'),
+            ),
           ],
         ),
       ],
@@ -495,4 +513,89 @@ class _Working extends StatelessWidget {
       ],
     ),
   );
+}
+
+const _whyChips = [
+  'Ne tervezz edzést reggel 8 előtt.',
+  'Ne tervezz edzést este 8 után.',
+  'Ne tervezz két nehéz edzést egymás után.',
+  'Rossz napon inkább csak könnyű edzés legyen.',
+];
+
+/// After "Elvetem": the user may tell why; only their own sentence is saved,
+/// and only when they press "Megjegyzem".
+class _WhyCard extends ConsumerStatefulWidget {
+  const _WhyCard();
+
+  @override
+  ConsumerState<_WhyCard> createState() => _WhyCardState();
+}
+
+class _WhyCardState extends ConsumerState<_WhyCard> {
+  final _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctl = ref.read(assistantControllerProvider.notifier);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Szeretnéd, hogy megjegyezzem, miért?',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'A mondatod bekerül a „Tanult szokások” közé, és a következő tervezéskor figyelembe veszi. Csak ezt mentem el, és csak ha megnyomod a gombot.',
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final c in _whyChips)
+                  ActionChip(
+                    label: Text(c),
+                    onPressed: () => setState(() => _text.text = c),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _text,
+              maxLength: 200,
+              decoration: const InputDecoration(
+                hintText: 'pl. Ne tervezz edzést reggel 8 előtt.',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: _text.text.trim().isEmpty
+                      ? null
+                      : () => ctl.rememberHabit(_text.text),
+                  child: const Text('Megjegyzem'),
+                ),
+                const SizedBox(width: 10),
+                TextButton(
+                  onPressed: ctl.skipHabit,
+                  child: const Text('Nem most'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

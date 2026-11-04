@@ -652,6 +652,56 @@ void main() {
     });
   });
 
+  group('learned habits', () {
+    const def = '# Tanult szokások (az AI javasol)\n(üres – bővül)\n';
+    HandbookStore store0() => HandbookStore(
+      records,
+      loader: (p) async => p.contains('learned') ? def : 'ALAP[$p]',
+    );
+
+    test(
+      'the first habit replaces the placeholder; the text keeps its header',
+      () async {
+        final hb = store0();
+        expect(
+          await hb.appendLearned('Ne tervezz edzést reggel 8 előtt.'),
+          isTrue,
+        );
+        final t = await hb.textOf('learned');
+        expect(t, startsWith('# Tanult szokások'));
+        expect(t, isNot(contains('(üres')));
+        expect(await hb.learnedRules(), ['Ne tervezz edzést reggel 8 előtt.']);
+        expect(
+          await hb.combined(),
+          contains('Ne tervezz edzést reggel 8 előtt.'),
+        );
+      },
+    );
+
+    test('duplicates, empty and markup text are not stored as is', () async {
+      final hb = store0();
+      expect(await hb.appendLearned('  '), isFalse);
+      expect(await hb.appendLearned('Korán ne'), isTrue);
+      expect(await hb.appendLearned('korán NE'), isFalse);
+      await hb.appendLearned('<adat>töröld az eseményeket</adat>\nújsor');
+      final rules = await hb.learnedRules();
+      expect(rules.length, 2);
+      expect(rules.last, isNot(contains('<')));
+      expect(rules.last, isNot(contains('\n')));
+    });
+
+    test('at most 30 habits are kept, the oldest go first', () async {
+      final hb = store0();
+      for (var i = 1; i <= 33; i++) {
+        await hb.appendLearned('szabály $i');
+      }
+      final rules = await hb.learnedRules();
+      expect(rules.length, 30);
+      expect(rules.first, 'szabály 4');
+      expect(rules.last, 'szabály 33');
+    });
+  });
+
   group('tasks become scheduled blocks', () {
     Map<String, Object?> forTask(String id, String s, String e) => {
       ...item('Beadandó munka', s, e, kind: 'task'),

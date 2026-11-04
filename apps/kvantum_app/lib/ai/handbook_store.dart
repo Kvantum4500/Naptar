@@ -47,6 +47,40 @@ class HandbookStore {
   Future<void> reset(String id) =>
       records.edit(kindHandbook, id, {'text': '', 'deleted': false});
 
+  /// The `- ` lines of "Tanult szokások".
+  Future<List<String>> learnedRules() async => [
+    for (final l in (await textOf('learned')).split('\n'))
+      if (l.startsWith('- ')) l.substring(2).trim(),
+  ];
+
+  /// Adds one habit the user confirmed to "Tanult szokások". Returns false
+  /// when it is empty or already there. Keeps at most [maxRules] (oldest go).
+  Future<bool> appendLearned(String rule, {int maxRules = 30}) async {
+    final clean = sanitizeText(rule, max: 200).trim();
+    if (clean.isEmpty) return false;
+    final lines = [
+      for (final l in (await textOf('learned')).split('\n'))
+        if (!l.startsWith('(üres')) l,
+    ];
+    final has = lines.any(
+      (l) =>
+          l.startsWith('- ') &&
+          l.substring(2).trim().toLowerCase() == clean.toLowerCase(),
+    );
+    if (has) return false;
+    while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+      lines.removeLast();
+    }
+    lines.add('- $clean');
+    var bullets = lines.where((l) => l.startsWith('- ')).length;
+    while (bullets > maxRules) {
+      lines.removeAt(lines.indexWhere((l) => l.startsWith('- ')));
+      bullets--;
+    }
+    await save('learned', '${lines.join('\n')}\n');
+    return true;
+  }
+
   /// All files as one block for the system prompt.
   Future<String> combined() async {
     final b = StringBuffer();

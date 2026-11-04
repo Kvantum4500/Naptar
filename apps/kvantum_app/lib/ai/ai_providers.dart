@@ -77,6 +77,8 @@ class AssistantState {
     this.deleteScopes = const {},
     this.deletedCount,
     this.movedCount,
+    this.askWhy = false,
+    this.habitSaved = false,
   });
 
   /// Per proposed deletion of a recurring event: what to remove (default: only that day).
@@ -87,6 +89,12 @@ class AssistantState {
 
   /// How many events were moved after the user confirmed.
   final int? movedCount;
+
+  /// After a discarded plan: offer to remember why.
+  final bool askWhy;
+
+  /// A habit was just written to "Tanult szokások".
+  final bool habitSaved;
 
   final bool busy;
   final AssistantOutcome? outcome;
@@ -375,6 +383,23 @@ class AssistantController extends Notifier<AssistantState> {
   }
 
   void dismiss() => state = const AssistantState();
+
+  /// "Elvetem": a discarded plan offers to remember why (the user's own
+  /// words; nothing is written without the button).
+  void discardPlan() {
+    final had = state.outcome?.items.isNotEmpty ?? false;
+    state = AssistantState(askWhy: had, prompt: state.prompt);
+  }
+
+  /// "Megjegyzem": writes the user's sentence to the handbook.
+  Future<bool> rememberHabit(String text) async {
+    final ok = await ref.read(handbookStoreProvider).appendLearned(text);
+    state = AssistantState(habitSaved: ok, prompt: state.prompt);
+    return ok;
+  }
+
+  /// "Nem most".
+  void skipHabit() => state = AssistantState(prompt: state.prompt);
 }
 
 final assistantControllerProvider =
