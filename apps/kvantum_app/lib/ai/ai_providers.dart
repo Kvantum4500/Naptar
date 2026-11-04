@@ -275,7 +275,10 @@ class AssistantController extends Notifier<AssistantState> {
           id: const Uuid().v4(),
           calendarId: kNaptarCalendar,
           title: it.title,
-          notes: it.reason,
+          notes: [
+            if (it.taskTitle != null) 'Feladat: ${it.taskTitle}',
+            if (it.reason.isNotEmpty) it.reason,
+          ].join('\n'),
           start: it.startWall,
           end: it.endWall,
           tzid: it.tzid,

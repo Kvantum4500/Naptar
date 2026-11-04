@@ -12,7 +12,40 @@ class ProposalItem {
     required this.kind,
     required this.hard,
     required this.reason,
+    this.taskId,
+    this.taskTitle,
+    this.taskDue,
+    this.taskEstimateMin,
+    this.taskEnergy,
   });
+
+  /// Task this block works on (named by the model, details filled in by the
+  /// app from the real task record).
+  final String? taskId;
+  final String? taskTitle;
+  final DateTime? taskDue; // floating date
+  final int? taskEstimateMin;
+  final int? taskEnergy;
+
+  ProposalItem withTask({
+    required String title,
+    DateTime? due,
+    int? estimateMin,
+    int? energy,
+  }) => ProposalItem(
+    title: this.title,
+    startWall: startWall,
+    endWall: endWall,
+    tzid: tzid,
+    kind: kind,
+    hard: hard,
+    reason: reason,
+    taskId: taskId,
+    taskTitle: title,
+    taskDue: due,
+    taskEstimateMin: estimateMin,
+    taskEnergy: energy,
+  );
 
   final String title;
   final DateTime startWall; // floating
@@ -33,6 +66,10 @@ class ProposalItem {
     endUtc: endUtc,
     isWorkout: kind == 'workout',
     isHard: hard,
+    taskId: taskId,
+    taskDue: taskDue,
+    taskEstimateMin: taskEstimateMin,
+    taskEnergy: taskEnergy,
   );
 }
 
@@ -132,6 +169,9 @@ ParsedProposal parseProposal(
         kind: kind,
         hard: it['hard'] == true,
         reason: _text(it['reason'], 300),
+        taskId: _text(it['taskId'], 100).isEmpty
+            ? null
+            : _text(it['taskId'], 100),
       ),
     );
   }

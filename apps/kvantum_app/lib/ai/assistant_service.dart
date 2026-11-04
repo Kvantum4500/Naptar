@@ -466,8 +466,15 @@ class AssistantService {
 
   Future<({AssistantOutcome? outcome, Map<String, Object?>? feedback})>
   _propose(Map<String, Object?> args, {required int repairsLeft}) async {
-    final parsed = parseProposal(args, defaultTz: _tz);
-    final dropped = [...parsed.problems];
+    final raw = parseProposal(args, defaultTz: _tz);
+    final dropped = [...raw.problems];
+    final linked = await _attachTasks(raw.items, dropped);
+    final parsed = ParsedProposal(
+      summary: raw.summary,
+      items: linked,
+      problems: raw.problems,
+      questions: raw.questions,
+    );
 
     final wantsDeletes =
         parseDeletions(args).items.isNotEmpty ||
@@ -477,9 +484,9 @@ class AssistantService {
         return (
           outcome: null,
           feedback: {
-            'hibak': parsed.problems.isEmpty
+            'hibak': dropped.isEmpty
                 ? ['Nem érkezett egyetlen használható javaslat sem.']
-                : parsed.problems,
+                : dropped,
             'feladat': 'Javítsd, és hívd újra a propose_events eszközt.',
           },
         );
@@ -603,6 +610,42 @@ class AssistantService {
       }
     }
     return (items: out, notes: notes);
+  }
+
+  /// Fills in the real task details (deadline, estimate, energy) for blocks
+  /// that name a task. A task that does not exist, is done or deleted drops
+  /// the block with a note, so a made-up id can never be scheduled.
+  Future<List<ProposalItem>> _attachTasks(
+    List<ProposalItem> items,
+    List<String> notes,
+  ) async {
+    if (items.every((i) => i.taskId == null)) return items;
+    final tasks = {
+      for (final r in await records.all(kindTask)) r.id: TaskView(r),
+    };
+    final out = <ProposalItem>[];
+    for (final i in items) {
+      if (i.taskId == null) {
+        out.add(i);
+        continue;
+      }
+      final t = tasks[i.taskId];
+      if (t == null || t.done || t.deleted) {
+        notes.add(
+          '„${i.title}”: a hivatkozott feladat nem található vagy már kész, ezért kihagytam.',
+        );
+        continue;
+      }
+      out.add(
+        i.withTask(
+          title: t.title,
+          due: t.due,
+          estimateMin: t.estimateMin,
+          energy: t.energyNeed,
+        ),
+      );
+    }
+    return out;
   }
 
   /// Turns the model's move requests into real occurrences with a conflict

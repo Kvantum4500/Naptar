@@ -13,6 +13,7 @@ const _quickPrompts = [
   'Tervezz edzést a jövő hétre',
   'Mikor férne be 45 perc mozgás ma?',
   'Tervezz könnyű napot, kevés energiám van',
+  'Ütemezd a nyitott feladataimat a következő napokra',
 ];
 
 /// Ask for a plan; review the proposals; accept the ones you like.
@@ -414,9 +415,12 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
               onChanged: (_) => ctl.toggle(i),
               title: Text(o.items[i].title as String),
               subtitle: Text(
+                '${o.items[i].taskTitle == null ? '' : 'Feladat: ${o.items[i].taskTitle}\n'}'
                 '${when(o.items[i])}${(o.items[i].reason as String).isEmpty ? '' : '\n${o.items[i].reason}'}',
               ),
-              isThreeLine: (o.items[i].reason as String).isNotEmpty,
+              isThreeLine:
+                  (o.items[i].reason as String).isNotEmpty ||
+                  o.items[i].taskTitle != null,
               secondary: o.items[i].hard == true
                   ? const Tooltip(
                       message: 'Nehéz edzés',

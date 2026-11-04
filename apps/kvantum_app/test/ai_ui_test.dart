@@ -798,6 +798,45 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('a task block shows its task and carries it into the event', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) => plan([
+          {
+            ...item(
+              'Beadandó munka',
+              '2026-05-05T18:00:00',
+              '2026-05-05T19:00:00',
+              kind: 'task',
+            ),
+            'taskId': 't1',
+          },
+        ]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.runAsync(
+        () => ref0(tester)
+            .read(recordRepoProvider)
+            .edit(
+              kindTask,
+              't1',
+              taskFields(title: 'Beadandó', estimateMin: 60),
+            ),
+      );
+      await tester.tap(
+        find.text('Ütemezd a nyitott feladataimat a következő napokra'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Feladat: Beadandó'), findsOneWidget);
+
+      await tester.tap(find.text('Elfogadom a kijelölteket (1)'));
+      await tester.pumpAndSettle();
+      final e = (await tester.runAsync(() => events.all()))!.single;
+      expect(e.notes, contains('Feladat: Beadandó'));
+      await shutdown(tester, db);
+    });
+
     testWidgets(
       'ask -> review -> accept creates AI-marked events in the Naptar calendar',
       (tester) async {

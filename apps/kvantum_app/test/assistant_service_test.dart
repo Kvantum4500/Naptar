@@ -651,4 +651,116 @@ void main() {
       expect(await hb.textOf('rules'), 'ALAP[assets/handbook/rules.md]');
     });
   });
+
+  group('tasks become scheduled blocks', () {
+    Map<String, Object?> forTask(String id, String s, String e) => {
+      ...item('Beadandó munka', s, e, kind: 'task'),
+      'taskId': id,
+    };
+
+    test(
+      'the block is linked to the real task and checked against it',
+      () async {
+        await records.edit(
+          kindTask,
+          't1',
+          taskFields(
+            title: 'Beadandó',
+            due: floating(2026, 5, 6),
+            estimateMin: 60,
+          ),
+        );
+        final llm = FakeLlm([
+          (_) => calls([
+            propose([
+              forTask('t1', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            ]),
+          ]),
+        ]);
+        final out = await service(llm)
+            .ask('Ütemezd a feladatokat', model: 'm', settings: settings);
+        expect(out.items.single.taskId, 't1');
+        expect(out.items.single.taskTitle, 'Beadandó');
+        expect(out.items.single.taskDue, floating(2026, 5, 6));
+        expect(out.dropped, isEmpty);
+      },
+    );
+
+    test('a made-up, finished or deleted task id is never scheduled', () async {
+      await records.edit(
+        kindTask,
+        'done',
+        taskFields(title: 'Kész', done: true),
+      );
+      final llm = FakeLlm([
+        (_) => calls([
+          propose([
+            forTask('nincs', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            forTask('done', '2026-05-05T20:00:00', '2026-05-05T21:00:00'),
+          ]),
+        ]),
+        (_) => calls([propose([])]),
+        (_) => calls([propose([])]),
+      ]);
+      final out = await service(llm)
+          .ask('Ütemezd', model: 'm', settings: settings);
+      expect(out.items, isEmpty);
+      // the model is told why both blocks were refused
+      final told = llm.requests[1].turns.last.parts
+          .whereType<LlmToolResult>()
+          .map((r) => r.result.toString())
+          .join();
+      expect('feladat nem található'.allMatches(told).length, 2);
+    });
+
+    test(
+      'a block after the deadline goes back to the model and is repaired',
+      () async {
+        await records.edit(
+          kindTask,
+          't1',
+          taskFields(
+            title: 'Beadandó',
+            due: floating(2026, 5, 5),
+            estimateMin: 60,
+          ),
+        );
+        final llm = FakeLlm([
+          (_) => calls([
+            propose([
+              forTask('t1', '2026-05-07T18:00:00', '2026-05-07T19:00:00'),
+            ]),
+          ]),
+          (_) => calls([
+            propose([
+              forTask('t1', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            ]),
+          ]),
+        ]);
+        final out = await service(llm)
+            .ask('Ütemezd', model: 'm', settings: settings);
+        expect(out.items.single.startWall, floating(2026, 5, 5, 18));
+        expect(
+          llm.requests[1].turns.last.parts
+              .whereType<LlmToolResult>()
+              .map((r) => r.result.toString())
+              .join(),
+          contains('határideje'),
+        );
+      },
+    );
+
+    test('the task data carries ids the model can refer to', () async {
+      await records.edit(kindTask, 't9', taskFields(title: 'Számla'));
+      final llm = FakeLlm([
+        (_) => calls([tool('get_tasks')]),
+        (_) => calls([
+          propose([item('Séta', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+        ]),
+      ]);
+      await service(llm).ask('Mi vár rám?', model: 'm', settings: settings);
+      final r = lastResults(llm)[0];
+      expect((r['feladatok'] as List).single['azonosito'], 't9');
+    });
+  });
 }

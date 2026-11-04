@@ -32,6 +32,7 @@ List<String> spans(List<TimeSlot> s) => [
 void main() {
   deletionTests();
   moveTests();
+  taskTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -615,6 +616,95 @@ void moveTests() {
       final r = parseMoves({'moves': many});
       expect(r.items.length, 20);
       expect(r.problems, isNotEmpty);
+    });
+  });
+}
+
+void taskTests() {
+  const rules = PlanRules();
+  ProposedBlock blk(
+    int d,
+    int h,
+    int mins, {
+    String id = 't1',
+    DateTime? due,
+    int? est,
+    int? energy,
+  }) => ProposedBlock(
+    title: 'Beadandó',
+    startUtc: resolveWallClock(rules.tzid, floating(2026, 5, d, h)),
+    endUtc: resolveWallClock(
+      rules.tzid,
+      floating(2026, 5, d, h).add(Duration(minutes: mins)),
+    ),
+    isWorkout: false,
+    taskId: id,
+    taskDue: due,
+    taskEstimateMin: est,
+    taskEnergy: energy,
+  );
+  List<String> codes(List<ProposedBlock> b, {Map<DateTime, int>? energy}) => [
+    for (final v in validateProposal(
+      b,
+      existing: [],
+      rules: rules,
+      energyByDate: energy ?? {},
+    ))
+      v.code,
+  ];
+
+  group('task blocks', () {
+    test('inside the deadline day is fine, after it is a violation', () {
+      final due = floating(2026, 5, 6);
+      expect(codes([blk(6, 20, 60, due: due)]), isEmpty);
+      expect(codes([blk(7, 9, 60, due: due)]), ['after_due']);
+    });
+
+    test('a block that ends exactly at midnight stays on its day', () {
+      final due = floating(2026, 5, 6);
+      expect(codes([blk(6, 22, 60, due: due)]), isEmpty);
+    });
+
+    test('the estimate must be scheduled in total; splitting is allowed', () {
+      expect(codes([blk(5, 9, 60, est: 120)]), ['task_too_short']);
+      expect(
+        codes([blk(5, 9, 60, est: 120), blk(6, 9, 60, est: 120)]),
+        isEmpty,
+      );
+    });
+
+    test('a demanding task is not put on a low-energy day', () {
+      final e = {floating(2026, 5, 5): 2};
+      expect(codes([blk(5, 9, 60, energy: 5)], energy: e), ['task_energy']);
+      expect(codes([blk(5, 9, 60, energy: 2)], energy: e), isEmpty);
+      // no check-in: not a violation for tasks
+      expect(codes([blk(5, 9, 60, energy: 5)]), isEmpty);
+    });
+
+    test('blocks without a task are untouched', () {
+      final b = ProposedBlock(
+        title: 'Séta',
+        startUtc: resolveWallClock(rules.tzid, floating(2026, 5, 5, 9)),
+        endUtc: resolveWallClock(rules.tzid, floating(2026, 5, 5, 10)),
+        isWorkout: false,
+      );
+      expect(codes([b]), isEmpty);
+    });
+
+    test('parseProposal keeps taskId; tasksForTool exposes the id', () {
+      final r = parseProposal({
+        'proposals': [
+          {
+            'title': 'Beadandó',
+            'start': '2026-05-05T09:00:00',
+            'end': '2026-05-05T10:00:00',
+            'kind': 'task',
+            'taskId': ' abc ',
+          },
+        ],
+      });
+      expect(r.items.single.taskId, 'abc');
+      expect(r.items.single.toBlock().taskId, 'abc');
     });
   });
 }

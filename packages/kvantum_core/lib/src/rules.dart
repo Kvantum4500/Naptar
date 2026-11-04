@@ -32,7 +32,18 @@ class ProposedBlock {
     required this.endUtc,
     this.isWorkout = true,
     this.isHard = false,
+    this.taskId,
+    this.taskDue,
+    this.taskEstimateMin,
+    this.taskEnergy,
   });
+
+  /// Set when the block works on a task: enables the deadline / length /
+  /// energy checks. [taskDue] is a floating date, inclusive.
+  final String? taskId;
+  final DateTime? taskDue;
+  final int? taskEstimateMin;
+  final int? taskEnergy;
   final String title;
   final DateTime startUtc;
   final DateTime endUtc;
@@ -135,6 +146,60 @@ List<Violation> validateProposal(
       }
     }
   }
+
+  // Task blocks: deadline, enough time in total, energy.
+  final byTask = <String, List<ProposedBlock>>{};
+  for (final b in sorted.where((b) => b.taskId != null)) {
+    byTask.putIfAbsent(b.taskId!, () => []).add(b);
+    final end = toWallClock(
+      rules.tzid,
+      b.endUtc.subtract(const Duration(minutes: 1)),
+    );
+    final due = b.taskDue;
+    if (due != null &&
+        floating(
+          end.year,
+          end.month,
+          end.day,
+        ).isAfter(floating(due.year, due.month, due.day))) {
+      v.add(
+        Violation(
+          'after_due',
+          '„${b.title}” a feladat határideje (${due.toIso8601String().substring(0, 10)}) utánra esik',
+        ),
+      );
+    }
+    final need = b.taskEnergy;
+    if (need != null && need >= 4) {
+      final s = toWallClock(rules.tzid, b.startUtc);
+      final day = floating(s.year, s.month, s.day);
+      final energy = energyByDate[day];
+      if (energy != null && energy < 3) {
+        v.add(
+          Violation(
+            'task_energy',
+            '„${b.title}” nagy energiát igénylő feladat, de a fizikai energia ${day.toIso8601String().substring(0, 10)}-n csak $energy/5',
+          ),
+        );
+      }
+    }
+  }
+  byTask.forEach((id, blocks) {
+    final est = blocks.first.taskEstimateMin;
+    if (est == null) return;
+    final total = blocks.fold<int>(
+      0,
+      (a, b) => a + b.endUtc.difference(b.startUtc).inMinutes,
+    );
+    if (total < est) {
+      v.add(
+        Violation(
+          'task_too_short',
+          '„${blocks.first.title}”: a feladat becsült ideje $est perc, de csak $total perc van beütemezve',
+        ),
+      );
+    }
+  });
 
   // Rest between hard sessions.
   final hard = sorted.where((b) => b.isHard).toList();
