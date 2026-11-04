@@ -347,6 +347,20 @@ void main() {
       },
     );
 
+    test('depleted prepayment credits are billing, not a rate limit', () async {
+      final e = await limit({
+        'error': {
+          'status': 'RESOURCE_EXHAUSTED',
+          'message':
+              'Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.',
+        },
+      });
+      expect(e.billing, isTrue);
+      expect(e.transient, isFalse);
+      expect(e.message, contains('egyenleg'));
+      expect(e.detail, contains('prepayment'));
+    });
+
     test('a daily quota is recognised and is not transient', () async {
       final e = await limit({
         'error': {

@@ -218,9 +218,11 @@ class AssistantService {
             );
           }
           repairs++;
-          results.add(LlmToolResult('propose_events', r.feedback!));
+          results.add(LlmToolResult('propose_events', r.feedback!, id: c.id));
         } else {
-          results.add(LlmToolResult(c.name, await _runTool(c, settings)));
+          results.add(
+            LlmToolResult(c.name, await _runTool(c, settings), id: c.id),
+          );
         }
       }
       turns.add(LlmTurn('user', results));

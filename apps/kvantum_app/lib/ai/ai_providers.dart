@@ -9,14 +9,15 @@ import '../sync/sync_controller.dart';
 import 'ai_settings.dart';
 import 'assistant_service.dart';
 import 'gemini_provider.dart';
+import 'provider_catalog.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
 
 final apiKeyStoreProvider = Provider<ApiKeyStore>((_) => SecureApiKeyStore());
 
-final llmFactoryProvider = Provider<LLMProvider Function(String apiKey)>(
+final llmFactoryProvider = Provider<LLMProvider Function(LlmConfig config)>(
   (_) =>
-      (key) => GeminiProvider(http.Client(), apiKey: key),
+      (cfg) => buildProvider(cfg, http.Client()),
 );
 
 final aiSettingsStoreProvider = Provider<AiSettingsStore>((ref) {
@@ -35,6 +36,13 @@ class AiSettingsNotifier extends AsyncNotifier<AiSettings> {
   Future<void> change(AiSettings s) async {
     await ref.read(aiSettingsStoreProvider).save(s);
     state = AsyncData(s);
+  }
+
+  /// Switches the provider; each provider remembers its own model.
+  Future<void> selectProvider(String id) async {
+    final store = ref.read(aiSettingsStoreProvider);
+    await store.write('ai.provider', id == 'gemini' ? null : id);
+    state = AsyncData(await store.load()); // brings that provider's own model
   }
 }
 
@@ -118,22 +126,29 @@ class AssistantController extends Notifier<AssistantState> {
     state = AssistantState(busy: true, prompt: text);
     void status(String s) => state = state.copyWith(status: s);
     try {
-      final key = await ref.read(apiKeyStoreProvider).read();
-      if (key == null) {
+      var settings = await ref.read(aiSettingsProvider.future);
+      final info = providerById(settings.provider);
+      final key = await ref.read(apiKeyStoreProvider).read(provider: info.id);
+      if (key == null && !info.keyOptional) {
         state = AssistantState(
           prompt: text,
           error:
-              'Még nincs Gemini API-kulcs megadva. Add meg a Beállításokban.',
+              'Még nincs API-kulcs megadva ehhez: ${info.label}. Add meg a Beállításokban.',
           errorNeedsSettings: true,
         );
         return;
       }
-      final provider = ref.read(llmFactoryProvider)(key);
+      final provider = ref.read(llmFactoryProvider)(
+        LlmConfig(
+          provider: info.id,
+          apiKey: key ?? '',
+          baseUrl: settings.customBaseUrl,
+        ),
+      );
       final settingsNotifier = ref.read(aiSettingsProvider.notifier);
-      var settings = await ref.read(aiSettingsProvider.future);
       var model = settings.model;
       if (model == null || model.trim().isEmpty) {
-        model = pickDefaultModel(await provider.listModels());
+        model = pickModelFor(info.id, await provider.listModels());
         if (model == null) {
           throw const LlmBadResponse(
             'Nem találtam használható modellt ehhez a kulcshoz.',
@@ -157,7 +172,9 @@ class AssistantController extends Notifier<AssistantState> {
       try {
         outcome = await run(model);
       } on LlmRateLimit catch (first) {
-        if (!(first.quotaZero || first.daily)) rethrow;
+        // Switching models only makes sense where one provider has several free
+        // ones (Gemini); billing problems affect every model alike.
+        if (info.id != 'gemini' || !(first.quotaZero || first.daily)) rethrow;
         // This model has no (more) free quota: try the other flash models once.
         AssistantOutcome? alt;
         String? used;
@@ -191,7 +208,9 @@ class AssistantController extends Notifier<AssistantState> {
         errorNeedsSettings: true,
       );
     } on LlmRateLimit catch (e) {
-      final advice = e.quotaZero
+      final advice = e.billing
+          ? ' Tölts fel egyenleget a szolgáltatónál, vagy válassz másik szolgáltatót a Beállításokban (pl. Groq vagy Mistral).'
+          : e.quotaZero
           ? ' Válassz másik modellt a Beállításokban, vagy engedélyezd a számlázást a Google AI Studióban (az ingyenes szint nem minden fióknál és országban érhető el).'
           : e.daily
           ? ' Holnap újra működik, vagy válassz másik modellt a Beállításokban.'

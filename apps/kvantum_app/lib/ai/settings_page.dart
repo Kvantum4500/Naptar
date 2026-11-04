@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../update/update_dialog.dart';
 import 'ai_providers.dart';
 import 'ai_settings.dart';
-import 'gemini_provider.dart';
 import 'handbook_page.dart';
 import 'llm_provider.dart';
+import 'provider_catalog.dart';
 
-/// App settings: Gemini key + model, what the assistant may see, handbook.
+/// App settings: AI provider + key + model, what the assistant may see, handbook.
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
   @override
@@ -17,25 +18,34 @@ class SettingsPage extends ConsumerStatefulWidget {
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
   final _key = TextEditingController();
+  final _base = TextEditingController();
   bool _hasKey = false;
   bool _busy = false;
   bool _show = false;
   String? _message;
   bool _messageIsError = false;
   List<LlmModel> _models = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    ref.read(apiKeyStoreProvider).read().then((k) {
-      if (mounted) setState(() => _hasKey = k != null);
-    });
-  }
+  String? _loadedFor;
 
   @override
   void dispose() {
     _key.dispose();
+    _base.dispose();
     super.dispose();
+  }
+
+  /// Reads whether a key exists for [provider] (called when it changes).
+  Future<void> _refresh(AiSettings s) async {
+    _loadedFor = s.provider;
+    final k = await ref.read(apiKeyStoreProvider).read(provider: s.provider);
+    if (!mounted) return;
+    setState(() {
+      _hasKey = k != null;
+      _models = const [];
+      _message = null;
+      _key.clear();
+      _base.text = s.customBaseUrl ?? '';
+    });
   }
 
   void _say(String m, {bool error = false}) => setState(() {
@@ -43,17 +53,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _messageIsError = error;
   });
 
-  Future<void> _saveAndCheck() async {
+  Future<void> _saveAndCheck(AiSettings settings) async {
+    final info = providerById(settings.provider);
     final typed = _key.text.trim();
     final store = ref.read(apiKeyStoreProvider);
-    final key = typed.isNotEmpty ? typed : await store.read();
-    if (key == null) {
+    final key = typed.isNotEmpty ? typed : await store.read(provider: info.id);
+    if (key == null && !info.keyOptional) {
       _say('Írd be az API-kulcsot.', error: true);
+      return;
+    }
+    final base = info.id == 'custom' ? _base.text.trim() : null;
+    if (info.id == 'custom' && (base == null || base.isEmpty)) {
+      _say('Add meg a szolgáltató címét.', error: true);
       return;
     }
     setState(() => _busy = true);
     try {
-      final models = await ref.read(llmFactoryProvider)(key).listModels();
+      final models = await ref
+          .read(llmFactoryProvider)(
+            LlmConfig(provider: info.id, apiKey: key ?? '', baseUrl: base),
+          )
+          .listModels();
       if (models.isEmpty) {
         _say(
           'A kulcs érvényes, de nem találtam használható modellt.',
@@ -61,20 +81,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         );
         return;
       }
-      await store.write(key); // only a key that works is kept
+      await store.write(
+        key,
+        provider: info.id,
+      ); // only a key that works is kept
       _key.clear();
-      final settings = await ref.read(aiSettingsProvider.future);
+      final notifier = ref.read(aiSettingsProvider.notifier);
       final known = models.any((m) => m.id == settings.model);
-      if (!known) {
-        await ref
-            .read(aiSettingsProvider.notifier)
-            .change(settings.copyWith(model: pickDefaultModel(models)));
-      }
+      await notifier.change(
+        settings.copyWith(
+          customBaseUrl: base,
+          model: known ? settings.model : pickModelFor(info.id, models),
+        ),
+      );
       setState(() {
-        _hasKey = true;
+        _hasKey = key != null;
         _models = models;
       });
-      _say('A kulcs rendben van, elmentve. ${models.length} modell érhető el.');
+      _say('Rendben van, elmentve. ${models.length} modell érhető el.');
     } on LlmException catch (e) {
       _say(e.message, error: true);
     } catch (e) {
@@ -84,8 +108,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
-  Future<void> _deleteKey() async {
-    await ref.read(apiKeyStoreProvider).write(null);
+  Future<void> _deleteKey(String provider) async {
+    await ref.read(apiKeyStoreProvider).write(null, provider: provider);
     setState(() {
       _hasKey = false;
       _models = const [];
@@ -96,6 +120,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(aiSettingsProvider).value ?? const AiSettings();
+    if (_loadedFor != settings.provider &&
+        ref.watch(aiSettingsProvider).hasValue) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh(settings));
+    }
+    final info = providerById(settings.provider);
     final usage = ref.watch(aiUsageProvider).value ?? 0;
     final notifier = ref.read(aiSettingsProvider.notifier);
     final build = ref.watch(currentBuildProvider).value;
@@ -123,7 +152,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              section('AI-asszisztens (Gemini)', [
+              section('AI-asszisztens', [
+                DropdownButtonFormField<String>(
+                  key: ValueKey('provider-${settings.provider}'),
+                  initialValue: settings.provider,
+                  decoration: const InputDecoration(labelText: 'Szolgáltató'),
+                  items: [
+                    for (final p in kProviders)
+                      DropdownMenuItem(value: p.id, child: Text(p.label)),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (v) => v == null ? null : notifier.selectProvider(v),
+                ),
+                const SizedBox(height: 6),
+                Text(info.note, style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     Icon(
@@ -132,10 +176,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       color: _hasKey ? scheme.primary : scheme.outline,
                     ),
                     const SizedBox(width: 8),
-                    Text(_hasKey ? 'API-kulcs megadva' : 'Nincs API-kulcs'),
+                    Text(
+                      _hasKey
+                          ? 'API-kulcs megadva'
+                          : (info.keyOptional
+                                ? 'Kulcs nem kötelező'
+                                : 'Nincs API-kulcs'),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => launchUrl(
+                        Uri.parse(info.keyUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('Kulcs létrehozása'),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                if (info.id == 'custom')
+                  TextField(
+                    controller: _base,
+                    decoration: const InputDecoration(
+                      labelText: 'Szolgáltató címe',
+                      hintText: 'http://localhost:11434/v1',
+                    ),
+                  ),
                 TextField(
                   controller: _key,
                   obscureText: !_show,
@@ -144,9 +210,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   decoration: InputDecoration(
                     labelText: _hasKey
                         ? 'Új API-kulcs (üresen hagyva a mostanit ellenőrzi)'
-                        : 'Gemini API-kulcs',
-                    helperText: 'Ingyenes kulcs: aistudio.google.com/apikey. A kulcs csak ezen az eszközön, a biztonságos tárolóban él.',
-                    helperMaxLines: 2,
+                        : 'API-kulcs',
+                    helperText: 'A kulcs csak ezen az eszközön, a biztonságos tárolóban él.',
                     suffixIcon: IconButton(
                       tooltip: _show ? 'Elrejt' : 'Mutat',
                       icon: Icon(
@@ -162,7 +227,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   runSpacing: 8,
                   children: [
                     FilledButton.icon(
-                      onPressed: _busy ? null : _saveAndCheck,
+                      onPressed: _busy ? null : () => _saveAndCheck(settings),
                       icon: _busy
                           ? const SizedBox(
                               width: 16,
@@ -174,7 +239,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                     if (_hasKey)
                       OutlinedButton(
-                        onPressed: _busy ? null : _deleteKey,
+                        onPressed: _busy ? null : () => _deleteKey(info.id),
                         child: const Text('Kulcs törlése'),
                       ),
                   ],
@@ -192,7 +257,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 const SizedBox(height: 14),
                 if (_models.isNotEmpty)
                   DropdownButtonFormField<String>(
-                    key: ValueKey(settings.model),
+                    key: ValueKey('${settings.provider}-${settings.model}'),
                     initialValue: _models.any((m) => m.id == settings.model)
                         ? settings.model
                         : null,
@@ -215,13 +280,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 const SizedBox(height: 8),
                 Text(
-                  'Ma elküldött kérések: $usage (az ingyenes szintnek napi korlátja van)',
+                  'Ma elküldött kérések: $usage',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ]),
               section('Mit láthat az asszisztens?', [
                 const Text(
-                  'Kikapcsolt adat sosem megy el a modellhez. Az ütközéseket ilyenkor is a program ellenőrzi.',
+                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi.',
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

@@ -242,12 +242,19 @@ class GeminiProvider implements LLMProvider {
     if (status == 429 || apiStatus == 'RESOURCE_EXHAUSTED') {
       final all = '$message $quotaIds';
       quotaModel ??= RegExp(r'model:\s*([\w.\-]+)').firstMatch(message)?[1];
-      final zero = RegExp(r'limit:\s*0\b').hasMatch(all);
+      final billing = RegExp(
+        r'prepayment|billing|credits are depleted|insufficient_quota',
+        caseSensitive: false,
+      ).hasMatch(all);
+      final zero = !billing && RegExp(r'limit:\s*0\b').hasMatch(all);
       final daily =
+          !billing &&
           !zero &&
           RegExp(r'PerDay|per day|daily', caseSensitive: false).hasMatch(all);
       final name = quotaModel ?? 'ez a modell';
-      final text = zero
+      final text = billing
+          ? 'A Google-fiók előre fizetett egyenlege elfogyott vagy nincs feltöltve, ezért a kérés nem engedélyezett.'
+          : zero
           ? 'A(z) $name modellhez ennél a kulcsnál nincs ingyenes keret (limit: 0).'
           : daily
           ? 'Elfogyott a mai ingyenes keret ehhez a modellhez ($name).'
@@ -258,6 +265,7 @@ class GeminiProvider implements LLMProvider {
         detail: _safeDetail(message),
         quotaZero: zero,
         daily: daily,
+        billing: billing,
         model: quotaModel,
       );
     }

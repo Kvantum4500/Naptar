@@ -9,8 +9,11 @@ class LlmText extends LlmPart {
 }
 
 class LlmToolCall extends LlmPart {
-  const LlmToolCall(this.name, this.args, {this.raw});
+  const LlmToolCall(this.name, this.args, {this.raw, this.id});
   final String name;
+
+  /// Provider-assigned call id (OpenAI-style APIs need it to match results).
+  final String? id;
   final Map<String, Object?> args;
 
   /// The provider's own representation of this part. It is sent back
@@ -20,8 +23,11 @@ class LlmToolCall extends LlmPart {
 }
 
 class LlmToolResult extends LlmPart {
-  const LlmToolResult(this.name, this.result);
+  const LlmToolResult(this.name, this.result, {this.id});
   final String name;
+
+  /// The id of the call this answers (see [LlmToolCall.id]).
+  final String? id;
   final Map<String, Object?> result;
 }
 
@@ -107,6 +113,7 @@ class LlmRateLimit extends LlmException {
     this.detail = '',
     this.quotaZero = false,
     this.daily = false,
+    this.billing = false,
     this.model,
   });
   final Duration? retryAfter;
@@ -120,10 +127,14 @@ class LlmRateLimit extends LlmException {
 
   /// The daily quota is used up: waiting minutes does not help either.
   final bool daily;
+
+  /// Nothing to do with request rate: the account has no (or used up its)
+  /// prepaid credit / billing. Waiting or switching models does not help.
+  final bool billing;
   final String? model;
 
   /// A per-minute style limit that clears by itself shortly.
-  bool get transient => !quotaZero && !daily;
+  bool get transient => !quotaZero && !daily && !billing;
 }
 
 /// No connection, timeout or a server-side problem; worth retrying later.

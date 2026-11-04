@@ -66,7 +66,7 @@ void main() {
         db,
         extra: [
           apiKeyStoreProvider.overrideWithValue(keys),
-          llmFactoryProvider.overrideWithValue((k) => llm ?? FakeGemini([])),
+          llmFactoryProvider.overrideWithValue((cfg) => llm ?? FakeGemini([])),
           currentBuildProvider.overrideWith((ref) async => 7),
           // The bundled assets are covered by the handbook page test; the
           // assistant tests use a stub so they do not depend on the test
@@ -94,7 +94,7 @@ void main() {
         await tester.tap(find.text('Mentés és ellenőrzés'));
         await tester.pumpAndSettle();
 
-        expect(find.textContaining('A kulcs rendben van'), findsOneWidget);
+        expect(find.textContaining('Rendben van, elmentve'), findsOneWidget);
         expect(find.text('API-kulcs megadva'), findsOneWidget);
         expect(keys.value, 'AIza-good');
         final s = await tester.runAsync(
@@ -109,6 +109,39 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    testWidgets('each provider keeps its own key and model', (tester) async {
+      await boot(tester, const SettingsPage());
+      final c = ref0(tester);
+      await tester.runAsync(
+        () => c.read(aiSettingsProvider.notifier).selectProvider('groq'),
+      );
+      await tester.runAsync(
+        () => c.read(apiKeyStoreProvider).write('gsk-test', provider: 'groq'),
+      );
+      await tester.runAsync(() async {
+        final st = c.read(aiSettingsStoreProvider);
+        await st.save((await st.load()).copyWith(model: 'llama-x'));
+      });
+      await tester.runAsync(
+        () => c.read(aiSettingsProvider.notifier).selectProvider('gemini'),
+      );
+      final g = (await tester.runAsync(
+        () => c.read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect(g.provider, 'gemini');
+      expect(g.model, isNot('llama-x'));
+      expect(keys.keyOf('groq'), 'gsk-test');
+      expect(keys.keyOf('gemini'), isNull);
+      await tester.runAsync(
+        () => c.read(aiSettingsProvider.notifier).selectProvider('groq'),
+      );
+      final r = (await tester.runAsync(
+        () => c.read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect(r.model, 'llama-x');
+      await shutdown(tester, db);
+    });
 
     testWidgets('a wrong key shows the reason and is NOT stored', (
       tester,
@@ -259,7 +292,7 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Tervezz edzést');
       await tester.tap(find.byTooltip('Küldés'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Még nincs Gemini API-kulcs'), findsOneWidget);
+      expect(find.textContaining('Még nincs API-kulcs megadva ehhez'), findsOneWidget);
       expect(find.text('Beállítások'), findsWidgets);
       await shutdown(tester, db);
     });
@@ -509,6 +542,26 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    testWidgets('a billing problem advises another provider, not waiting', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) => const LlmRateLimit(
+          'A Google-fiók előre fizetett egyenlege elfogyott.',
+          billing: true,
+          detail: 'prepayment credits are depleted',
+        ),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'edzés');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('válassz másik szolgáltatót'), findsOneWidget);
+      expect(find.textContaining('Várj egy percet'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Beállítások'), findsOneWidget);
+      await shutdown(tester, db);
+    });
 
     testWidgets(
       'a short per-minute limit gives a "wait and retry" message without a settings button',
