@@ -652,6 +652,93 @@ void main() {
     });
   });
 
+  group('smaller requests', () {
+    String firstOf(FakeLlm llm) =>
+        (llm.requests.first.turns.first.parts.single as LlmText).text;
+
+    test('a delete request sends only the events', () async {
+      await meeting('m', floating(2026, 5, 5, 12), floating(2026, 5, 5, 13));
+      await records.edit(kindTask, 't1', taskFields(title: 'Beadandó'));
+      await records.edit(kindCheckIn, '2026-05-04', checkInFields(physical: 4));
+      final llm = FakeLlm([(_) => say('ok')]);
+      await service(llm)
+          .ask('töröld a megbeszélést', model: 'm', settings: settings);
+      final first = firstOf(llm);
+      expect(first, contains('<adat tipus="esemenyek">'));
+      for (final b in ['feladatok', 'check_in', 'szabad_idosavok']) {
+        expect(first.contains('<adat tipus="$b">'), isFalse, reason: b);
+      }
+    });
+
+    test('the default window is 7 days; "két hétre" widens it', () async {
+      await meeting(
+        'far',
+        floating(2026, 5, 13, 12),
+        floating(2026, 5, 13, 13),
+        title: 'Távoli találkozó',
+      );
+      final a = FakeLlm([(_) => say('ok')]);
+      await service(a).ask('Tervezz edzést', model: 'm', settings: settings);
+      expect(firstOf(a).contains('Távoli találkozó'), isFalse);
+      expect(firstOf(a), contains('következő 7 napot'));
+
+      final b = FakeLlm([(_) => say('ok')]);
+      await service(b)
+          .ask('Tervezz edzést két hétre', model: 'm', settings: settings);
+      expect(firstOf(b), contains('Távoli találkozó'));
+      expect(firstOf(b), contains('következő 14 napot'));
+    });
+
+    test(
+      'events carry short aliases that resolve to the right event',
+      () async {
+        await meeting(
+          'a-very-long-event-id-0123456789',
+          floating(2026, 5, 5, 12),
+          floating(2026, 5, 5, 13),
+          title: 'Fogorvos',
+        );
+        final llm = FakeLlm([
+          (_) => calls([
+            tool('propose_events', {
+              'summary': 'Törlés',
+              'deletions': [
+                {'ref': ' E1 ', 'reason': 'kérted'},
+              ],
+            }),
+          ]),
+        ]);
+        final out = await service(llm)
+            .ask('töröld a fogorvost', model: 'm', settings: settings);
+        final first = firstOf(llm);
+        expect(first.contains('a-very-long-event-id'), isFalse);
+        expect(first, contains('"ref":"e1"'));
+        expect(out.deletions.single.occurrence.title, 'Fogorvos');
+      },
+    );
+
+    test(
+      'an unknown reference is dropped and shown as the model wrote it',
+      () async {
+        await meeting('m', floating(2026, 5, 5, 12), floating(2026, 5, 5, 13));
+        final llm = FakeLlm([
+          (_) => calls([
+            tool('propose_events', {
+              'deletions': [
+                {'ref': 'e99'},
+              ],
+            }),
+          ]),
+          (_) => calls([tool('propose_events', {})]),
+          (_) => calls([tool('propose_events', {})]),
+        ]);
+        final out = await service(llm)
+            .ask('töröld', model: 'm', settings: settings);
+        expect(out.deletions, isEmpty);
+      },
+    );
+  });
+
   group('learned habits', () {
     const def = '# Tanult szokások (az AI javasol)\n(üres – bővül)\n';
     HandbookStore store0() => HandbookStore(

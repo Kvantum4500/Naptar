@@ -40,7 +40,9 @@ Map<String, Object?> eventsForTool(
   required String tz,
   bool enabled = true,
   int max = 80,
+  String Function(Occurrence)? refOf,
 }) {
+  final refFor = refOf ?? occurrenceRef;
   if (!enabled) {
     return {
       'kikapcsolva': true,
@@ -57,7 +59,7 @@ Map<String, Object?> eventsForTool(
       for (final o in shown)
         if (o.allDay)
           {
-            'ref': occurrenceRef(o),
+            'ref': refFor(o),
             'nap': _ymd(o.startUtc),
             'egesz_napos': true,
             'cim': sanitizeText(o.title),
@@ -67,7 +69,7 @@ Map<String, Object?> eventsForTool(
             final s = toWallClock(o.tzid ?? tz, o.startUtc);
             final e = toWallClock(o.tzid ?? tz, o.endUtc);
             return {
-              'ref': occurrenceRef(o),
+              'ref': refFor(o),
               'nap': _ymd(s),
               'kezdes': _hm(s),
               'veg': _hm(e),
@@ -77,6 +79,64 @@ Map<String, Object?> eventsForTool(
           }(),
     ],
   };
+}
+
+/// What the first message of a request needs. Decided in code from the user's
+/// wording, so the model is not sent data the question cannot use (the free
+/// tiers allow only a few thousand tokens per minute).
+class AskScope {
+  const AskScope({
+    required this.edit,
+    required this.days,
+    required this.tasks,
+    required this.checkins,
+    required this.slots,
+  });
+
+  /// Deleting / moving: only the events are needed.
+  final bool edit;
+
+  /// Days covered by the first message, counted from today.
+  final int days;
+  final bool tasks;
+  final bool checkins;
+  final bool slots;
+}
+
+final _editWords = RegExp(
+  r'töröl|törlöd|töröld|áthelyez|helyezd át|tedd át|told át|mozgasd|módosít|átír',
+);
+final _nextWeek = RegExp(r'jövő\s*hét|következő\s*hét|jövőhét');
+final _twoWeeks = RegExp(r'két\s*hét|2\s*hét|kéthét');
+
+/// Picks the data window and blocks for [prompt]. [today] is a floating date.
+AskScope scopeFor(String prompt, DateTime today) {
+  final p = prompt.toLowerCase();
+  if (_editWords.hasMatch(p)) {
+    return const AskScope(
+      edit: true,
+      days: 14,
+      tasks: false,
+      checkins: false,
+      slots: false,
+    );
+  }
+  var days = 7;
+  if (p.contains('hónap')) {
+    days = 21;
+  } else if (_twoWeeks.hasMatch(p)) {
+    days = 14;
+  } else if (_nextWeek.hasMatch(p)) {
+    // up to and including the Sunday of next week
+    days = ((7 - today.weekday) + 7 + 1).clamp(8, 14);
+  }
+  return AskScope(
+    edit: false,
+    days: days,
+    tasks: true,
+    checkins: true,
+    slots: true,
+  );
 }
 
 Map<String, Object?> tasksForTool(

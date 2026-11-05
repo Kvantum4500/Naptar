@@ -225,7 +225,7 @@ class MoveRequest {
         ? (it['ref'] as String).trim()
         : '';
     if (parseOccurrenceRef(ref) == null) {
-      problems.add('$n. áthelyezés: hibás hivatkozás.');
+      problems.add('$n. áthelyezés: hibás hivatkozás${_shown(ref)}.');
       continue;
     }
     final m = it as Map;
@@ -265,6 +265,10 @@ class MoveRequest {
   }
   return (items: out, problems: problems);
 }
+
+/// What the model sent as a reference, for diagnosis (short, markup-free).
+String _shown(String ref) =>
+    ref.isEmpty ? ' (üres)' : ' („${_text(ref.replaceAll(RegExp('[<>]'), ''), 40)}”)';
 
 String _text(Object? v, int max) {
   final s = (v is String ? v : '').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -335,7 +339,9 @@ class DeletionRequest {
         ? (it['ref'] as String).trim()
         : '';
     if (parseOccurrenceRef(ref) == null) {
-      problems.add('${i + 1}. törlés: hibás hivatkozás.');
+      problems.add(
+        '${i + 1}. törlés: hibás hivatkozás${_shown(ref)}.',
+      );
       continue;
     }
     if (!seen.add(ref)) continue;

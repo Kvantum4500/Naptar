@@ -33,6 +33,7 @@ void main() {
   deletionTests();
   moveTests();
   taskTests();
+  scopeTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -705,6 +706,52 @@ void taskTests() {
       });
       expect(r.items.single.taskId, 'abc');
       expect(r.items.single.toBlock().taskId, 'abc');
+    });
+  });
+}
+
+void scopeTests() {
+  // 2026-05-06 is a Wednesday
+  final wed = floating(2026, 5, 6);
+  group('scopeFor', () {
+    test('delete and move requests need only the events', () {
+      for (final q in [
+        'töröld a manuálisan beírt programokat',
+        'Told át a holnapi edzést este 7-re',
+        'helyezd át a fogorvost',
+        'módosítsd a megbeszélést',
+      ]) {
+        final s = scopeFor(q, wed);
+        expect(s.edit, isTrue, reason: q);
+        expect((s.tasks, s.checkins, s.slots), (false, false, false));
+        expect(s.days, 14);
+      }
+    });
+
+    test('a normal request covers 7 days with every block', () {
+      final s = scopeFor('Mikor férne be 45 perc mozgás ma?', wed);
+      expect(
+        (s.edit, s.days, s.tasks, s.checkins, s.slots),
+        (false, 7, true, true, true),
+      );
+    });
+
+    test('"next week" reaches the end of next week, whatever today is', () {
+      // Wednesday: Sunday is +4, next Sunday +11 -> 12 days
+      expect(scopeFor('Tervezz edzést a jövő hétre', wed).days, 12);
+      // Monday: next Sunday is +13 -> 14 days
+      expect(
+        scopeFor('tervezz a következő hétre', floating(2026, 5, 4)).days,
+        14,
+      );
+      // Sunday: next Sunday is +7 -> 8 days
+      expect(scopeFor('jövő hét', floating(2026, 5, 10)).days, 8);
+    });
+
+    test('two weeks and a month widen the window', () {
+      expect(scopeFor('tervezz két hétre', wed).days, 14);
+      expect(scopeFor('Tervezz 2 hétre előre', wed).days, 14);
+      expect(scopeFor('Tervezz egy hónapra', wed).days, 21);
     });
   });
 }
