@@ -271,6 +271,30 @@ void main() {
       expect(e.retryAfter, const Duration(seconds: 12));
     });
 
+    test(
+      'a per-minute token limit that mentions billing is still just a wait',
+      () async {
+        final e = await status(429, {
+          'error': {
+            'message': 'Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM): Limit 8000, Used 5206, Requested 5313. Please try again in 18.8925s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing',
+          },
+        }) as LlmRateLimit;
+        expect(e.billing, isFalse);
+        expect(e.transient, isTrue);
+        expect(e.retryAfter, const Duration(seconds: 19));
+      },
+    );
+
+    test('millisecond hints are read too', () async {
+      final e = await status(429, {
+        'error': {
+          'message':
+              'Rate limit on requests per minute. Please try again in 250ms.',
+        },
+      }) as LlmRateLimit;
+      expect(e.retryAfter, const Duration(seconds: 1));
+    });
+
     test('429 daily quota is recognised and not transient', () async {
       final e = await status(429, {
         'error': {

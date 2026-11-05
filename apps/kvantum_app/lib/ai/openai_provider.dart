@@ -215,14 +215,31 @@ class OpenAiProvider implements LLMProvider {
     } on FormatException {
       // not JSON
     }
-    final retry = int.tryParse(headers['retry-after'] ?? '');
+    var retry = int.tryParse(headers['retry-after'] ?? '');
     final all = '$type $message';
+    // "Please try again in 18.9s": the service tells the wait in the text.
+    final hinted = RegExp(
+      r'try again in\s+([\d.]+)\s*(ms|s)\b',
+      caseSensitive: false,
+    ).firstMatch(message);
+    if (retry == null && hinted != null) {
+      final v = double.tryParse(hinted[1]!) ?? 0;
+      retry = (hinted[2]!.toLowerCase() == 'ms' ? v / 1000 : v).ceil();
+    }
+    // A short per-minute limit is NOT a billing problem, even when the message
+    // advertises a paid tier ("Upgrade ... /settings/billing").
+    final perMinute = RegExp(
+      r'per minute|\bTPM\b|\bRPM\b|try again in',
+      caseSensitive: false,
+    ).hasMatch(all);
     if (status == 402 ||
-        RegExp(
+        type.toLowerCase().contains('insufficient_quota') ||
+        (!perMinute &&
+            status != 401 &&
+            RegExp(
               r'insufficient_quota|billing|credit|payment',
               caseSensitive: false,
-            ).hasMatch(all) &&
-            status != 401) {
+            ).hasMatch(all))) {
       return LlmRateLimit(
         'A szolgáltatónál nincs elég egyenleg vagy a számlázás nincs beállítva.',
         detail: _safe(message),
