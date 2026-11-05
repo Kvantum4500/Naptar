@@ -240,11 +240,22 @@ class _EventEditorState extends ConsumerState<EventEditor> {
         ? floating(_end.year, _end.month, _end.day).add(const Duration(days: 1))
         : _end;
     final base = _master ?? _e;
+    var notes = _notes.text.trim();
+    // a generated shift whose title or hours the user changed is "modified":
+    // regenerating the pattern then keeps it
+    if (base != null &&
+        base.notes == kShiftMarker &&
+        notes == kShiftMarker &&
+        (_title.text.trim() != base.title ||
+            start != base.start ||
+            end != base.end)) {
+      notes = kShiftEditedMarker;
+    }
     return CalEvent(
       id: base?.id ?? 'form',
       calendarId: base?.calendarId ?? calendarIdLocal,
       title: _title.text.trim(),
-      notes: _notes.text.trim(),
+      notes: notes,
       location: _location.text.trim(),
       start: start,
       end: end,

@@ -7,7 +7,9 @@ import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'day_utils.dart';
+import 'event_editor.dart' show openEditor;
 import 'format.dart';
+import 'shift_ops.dart';
 
 enum ShiftType { night, day, off }
 
@@ -45,6 +47,7 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
   var _dayStart = const TimeOfDay(hour: 6, minute: 0);
   var _dayEnd = const TimeOfDay(hour: 18, minute: 0);
   late DateTime _from = ref.read(selectedDayProvider);
+  late final DateTime _listFrom = ref.read(selectedDayProvider);
   var _months = 6;
   var _busy = false;
   String? _msg;
@@ -63,7 +66,7 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       setState(
         () => _events = [
           for (final e in all)
-            if (e.notes == kShiftMarker) e,
+            if (isShiftNotes(e.notes)) e,
         ],
       );
     }
@@ -123,7 +126,14 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
     try {
       final repo = ref.read(repoProvider);
       var removed = 0;
-      for (final e in await repo.all()) {
+      final all = await repo.all();
+      // days where the user changed or added a shift: kept as they are
+      final keptDays = <DateTime>{
+        for (final e in all)
+          if (isEditedShiftNotes(e.notes))
+            DateTime.utc(e.start.year, e.start.month, e.start.day),
+      };
+      for (final e in all) {
         if (e.notes == kShiftMarker &&
             !e.isRecurring &&
             !e.start.isBefore(_from)) {
@@ -131,7 +141,14 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
           removed++;
         }
       }
+      var created = 0;
       for (final s in plan) {
+        if (keptDays.contains(
+          DateTime.utc(s.start.year, s.start.month, s.start.day),
+        )) {
+          continue;
+        }
+        created++;
         await repo.saveLocal(
           CalEvent(
             id: const Uuid().v4(),
@@ -149,7 +166,7 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       if (!mounted) return;
       setState(
         () => _msg =
-            '${plan.length} műszak létrehozva${removed > 0 ? ', $removed korábbi generált műszak cseréjével' : ''}.',
+            '$created műszak létrehozva${removed > 0 ? ', $removed korábbi generált műszak cseréjével' : ''}.',
       );
     } catch (e) {
       if (mounted) setState(() => _msg = 'Nem sikerült: $e');
@@ -191,6 +208,203 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       ),
     ],
   );
+
+  ShiftHours get _hours => ShiftHours(
+    nightStart: _nightStart.hour * 60 + _nightStart.minute,
+    nightMinutes: _len(_nightStart, _nightEnd),
+    dayStart: _dayStart.hour * 60 + _dayStart.minute,
+    dayMinutes: _len(_dayStart, _dayEnd),
+  );
+
+  List<CalEvent> get _upcoming => ([
+    for (final e in _events)
+      if (!e.start.isBefore(_listFrom)) e,
+  ]..sort((a, b) => a.start.compareTo(b.start))).take(30).toList();
+
+  Future<void> _swap(CalEvent e) async {
+    final ok = await swapShiftType(ref.read(repoProvider), e, _hours);
+    if (ok) ref.read(syncControllerProvider.notifier).requestSync();
+    await _reload();
+    if (mounted) {
+      setState(
+        () => _msg = ok
+            ? 'Műszak cserélve, a további generálás megtartja.'
+            : 'Ezt a műszakot nem lehet cserélni (a címe megváltozott).',
+      );
+    }
+  }
+
+  Future<void> _edit(CalEvent e) async {
+    await openEditor(
+      context,
+      ref,
+      occurrence: Occurrence(
+        eventId: e.id,
+        title: e.title,
+        startUtc: e.startUtc,
+        endUtc: e.endUtc,
+        originalStart: e.start,
+        allDay: false,
+        tzid: e.tzid,
+      ),
+    );
+    await _reload();
+  }
+
+  Future<void> _remove(CalEvent e) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Törlöd ezt a műszakot?'),
+        content: Text(
+          '${e.title}, ${fmtDate(e.start)} ${fmtTime(e.start)}. Az újragenerálás visszahozhatja.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Mégse'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Törlés'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(repoProvider).deleteLocal(e.id);
+    ref.read(syncControllerProvider.notifier).requestSync();
+    await _reload();
+  }
+
+  Future<void> _addExtra() async {
+    var day = _listFrom;
+    var night = false;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: const Text('Extra műszak'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              OutlinedButton.icon(
+                icon: const Icon(Icons.event),
+                label: Text(fmtDate(day)),
+                onPressed: () async {
+                  final d = await showDatePicker(
+                    context: c,
+                    initialDate: day,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (d != null) {
+                    set(() => day = DateTime.utc(d.year, d.month, d.day));
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              SegmentedButton<bool>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Nappali')),
+                  ButtonSegment(value: true, label: Text('Éjszakai')),
+                ],
+                selected: {night},
+                onSelectionChanged: (v) => set(() => night = v.first),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Mégse'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Hozzáadom'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (go != true) return;
+    await addExtraShift(
+      ref.read(repoProvider),
+      day,
+      night: night,
+      hours: _hours,
+      tzid: defaultTz,
+    );
+    ref.read(syncControllerProvider.notifier).requestSync();
+    await _reload();
+    if (mounted) setState(() => _msg = 'Extra műszak hozzáadva.');
+  }
+
+  Widget _upcomingList() {
+    final list = _upcoming;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Következő műszakok',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _addExtra,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Extra műszak'),
+                ),
+              ],
+            ),
+            if (list.isEmpty)
+              const Text('Nincs műszak a kiválasztott naptól.')
+            else
+              for (final e in list)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${fmtDate(e.start)} ${fmtTime(e.start)}  ${e.title}'
+                        '${isEditedShiftNotes(e.notes) ? ' (módosítva)' : ''}',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Csere nappali/éjszakai',
+                      icon: const Icon(Icons.swap_horiz),
+                      onPressed: () => _swap(e),
+                    ),
+                    IconButton(
+                      tooltip: 'Szerkesztés',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => _edit(e),
+                    ),
+                    IconButton(
+                      tooltip: 'Műszak törlése',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _remove(e),
+                    ),
+                  ],
+                ),
+            const SizedBox(height: 4),
+            Text(
+              'Az újragenerálás a módosított műszakokat megtartja, a törölteket visszahozhatja.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _summary() {
     final sum = summarizeShifts(
@@ -428,6 +642,8 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
                 ),
               const SizedBox(height: 20),
               _summary(),
+              const SizedBox(height: 12),
+              _upcomingList(),
             ],
           ),
         ),

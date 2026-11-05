@@ -319,6 +319,37 @@ void main() {
       await shutdown(tester, db);
     });
 
+    CalEvent shiftEvent() => evt(
+      'sh',
+      'Nappali műszak',
+      floating(2026, 5, 4, 6),
+    ).copyWith(notes: kShiftMarker);
+
+    testWidgets('saving a generated shift unchanged keeps it generated', (
+      tester,
+    ) async {
+      final e = shiftEvent();
+      await seed(tester, e);
+      await boot(tester, EditTarget(event: e));
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      expect((await all(tester)).single.notes, kShiftMarker);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('changing a generated shift marks it modified', (tester) async {
+      final e = shiftEvent();
+      await seed(tester, e);
+      await boot(tester, EditTarget(event: e));
+      await rename(tester, 'Nappali műszak (csere)');
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      final saved = (await all(tester)).single;
+      expect(saved.title, 'Nappali műszak (csere)');
+      expect(saved.notes, kShiftEditedMarker);
+      await shutdown(tester, db);
+    });
+
     testWidgets('plain event: confirmation then removed', (tester) async {
       final e = evt('p', 'Egyszeri', floating(2026, 5, 4, 9));
       await seed(tester, e);

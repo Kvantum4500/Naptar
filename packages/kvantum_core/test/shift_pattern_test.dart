@@ -3,6 +3,7 @@ import 'package:test/test.dart';
 
 void main() {
   summaryTests();
+  editedShiftTests();
   String d(DateTime t) => t.toIso8601String().substring(0, 16);
 
   test('default cycle: 3 nights, 3 off, 3 days, 3 off, then repeats', () {
@@ -102,5 +103,48 @@ void summaryTests() {
     final jan = summarizeShifts(ev, year: 2027, month: 1);
     expect(jan.counts, isEmpty);
     expect(dec.workDays + dec.offDays, 31);
+  });
+}
+
+void editedShiftTests() {
+  test('modified shifts are still shifts', () {
+    expect(isShiftNotes(kShiftMarker), isTrue);
+    expect(isShiftNotes(kShiftEditedMarker), isTrue);
+    expect(isShiftNotes(''), isFalse);
+    expect(isShiftNotes('Beosztás-generátor valami'), isFalse);
+    expect(isEditedShiftNotes(kShiftEditedMarker), isTrue);
+    expect(isEditedShiftNotes(kShiftMarker), isFalse);
+  });
+
+  test('an expanded modified shift carries isShift', () {
+    ensureTimeZones();
+    final e = CalEvent(
+      id: 'x',
+      calendarId: 'naptar',
+      title: 'Nappali műszak',
+      notes: kShiftEditedMarker,
+      start: floating(2026, 11, 18, 6),
+      end: floating(2026, 11, 18, 18),
+      tzid: 'Europe/Budapest',
+    );
+    final o = expand(e, floating(2026, 11, 18), floating(2026, 11, 19));
+    expect(o.single.isShift, isTrue);
+  });
+
+  test('summary counts modified shifts too', () {
+    final s = summarizeShifts(
+      [
+        (
+          title: 'Nappali műszak',
+          notes: kShiftEditedMarker,
+          start: floating(2026, 11, 18, 6),
+          end: floating(2026, 11, 18, 18),
+        ),
+      ],
+      year: 2026,
+      month: 11,
+    );
+    expect(s.counts['Nappali műszak'], 1);
+    expect(s.hours, 12);
   });
 }

@@ -50,7 +50,7 @@ List<Occurrence> expand(
         allDay: true,
         colorId: e.colorId,
         recurring: master.isRecurring,
-        isShift: e.notes == kShiftMarker,
+        isShift: isShiftNotes(e.notes),
       );
     }
     if (isOverride) {
@@ -65,7 +65,7 @@ List<Occurrence> expand(
         isOverride: true,
         colorId: e.colorId,
         recurring: true,
-        isShift: e.notes == kShiftMarker,
+        isShift: isShiftNotes(e.notes),
       );
     }
     final s = resolveWallClock(master.tzid!, wallStart);
@@ -80,7 +80,7 @@ List<Occurrence> expand(
       tzid: master.tzid,
       colorId: e.colorId,
       recurring: master.isRecurring,
-      isShift: e.notes == kShiftMarker,
+      isShift: isShiftNotes(e.notes),
     );
   }
 
