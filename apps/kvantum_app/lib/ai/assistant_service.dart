@@ -73,6 +73,7 @@ const _tools = <ToolDecl>[
         'summary': {'type': 'string', 'description': '1–2 mondat a tervről.'},
         'proposals': {
           'type': 'array',
+          'description': 'Új javasolt események. Ha csak törlést vagy áthelyezést kért a felhasználó, hagyd el vagy üres lista.',
           'items': {
             'type': 'object',
             'properties': {
@@ -135,7 +136,6 @@ const _tools = <ToolDecl>[
           'description': 'Visszakérdezések, ha kevés az adat.',
         },
       },
-      'required': ['proposals'],
     },
   ),
 ];

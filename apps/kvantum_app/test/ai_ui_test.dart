@@ -448,7 +448,6 @@ void main() {
       (_) => calls([
         tool('propose_events', {
           'summary': 'Törlés',
-          'proposals': <Object?>[],
           'deletions': [
             for (final r in refs) {'ref': r, 'reason': 'kérted'},
           ],
@@ -615,7 +614,6 @@ void main() {
           (_) => calls([
             tool('propose_events', {
               'summary': 'Áthelyezés',
-              'proposals': <Object?>[],
               'moves': [
                 for (final r in refs)
                   {'ref': r, 'start': start, 'end': end, 'reason': 'kérted'},
