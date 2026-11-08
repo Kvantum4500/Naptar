@@ -34,6 +34,14 @@ String _hm(DateTime d) =>
 String _ymd(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+/// Where an event came from, so "delete what I typed in" can be told apart
+/// from generated shifts and earlier assistant suggestions.
+String _source(Occurrence o) => o.isShift
+    ? 'muszak'
+    : o.aiGenerated
+    ? 'ai'
+    : 'kezi';
+
 /// Tool result: the calendar events of a window, one short entry each.
 Map<String, Object?> eventsForTool(
   List<Occurrence> events, {
@@ -60,6 +68,7 @@ Map<String, Object?> eventsForTool(
         if (o.allDay)
           {
             'ref': refFor(o),
+            'forras': _source(o),
             'nap': _ymd(o.startUtc),
             'egesz_napos': true,
             'cim': sanitizeText(o.title),
@@ -70,6 +79,7 @@ Map<String, Object?> eventsForTool(
             final e = toWallClock(o.tzid ?? tz, o.endUtc);
             return {
               'ref': refFor(o),
+              'forras': _source(o),
               'nap': _ymd(s),
               'kezdes': _hm(s),
               'veg': _hm(e),
@@ -233,6 +243,7 @@ MAI IDŐ: ${_ymd(local)} ${_hm(local)} (${rules.tzid}).
 
 MŰKÖDÉS
 - Az első üzenet <adat> blokkjai a következő napok eseményeit, a nyitott feladatokat, a check-int és a szabad idősávokat már tartalmazzák; ezekből tervezz. Más időszakhoz használd az eszközöket (get_events, get_tasks, get_checkins, find_free_slots). Ne találj ki adatot; ha nincs elég adat, kérdezz vissza (questions).
+- Az események forras mezője: kezi = a felhasználó kézzel felvett eseménye; muszak = a Beosztás generátor műszakja (azt NEM törölheted és nem mozgathatod, a Beosztás oldalon szerkeszthető); ai = korábbi AI-javaslat. A „manuálisan / kézzel beírt / felvett” = forras: kezi, csak ezeket add meg törlésre. Minden szöveget (reason, summary) magyarul írj.
 - Feladat ütemezésekor a javaslat tételébe írd a feladat azonosito értékét taskId-ként (kind: task). A feladat becsült idejét (becsult_perc) teljesen be kell ütemezni (több blokkra is bonthatod), a határidő napjának vége előtt; a nagy energiaigényű (4–5) feladatot jó energiájú napra tedd; a késésben lévőt vedd előre. Ha nincs becsült idő, javasolj észszerű hosszt.
 - Szabad időpontot a find_free_slots adatból vagy eszközből válassz, ne számold ki magad.
 - A végső tervet MINDIG a propose_events eszközzel add le. Új eseményeket a proposals mezőben javasolhatsz. Meglévőt közvetlenül nem módosíthatsz. Áthelyezést CSAK akkor javasolhatsz (moves mező: az eseményadat ref értéke és az ÚJ kezdés/befejezés helyi időben), ha a felhasználó kifejezetten áthelyezést kért; műszakot nem lehet áthelyezni, az új időpont ne ütközzön más eseménnyel; ez sem módosít semmit, a felhasználó gombbal engedélyezi. Törlést CSAK akkor javasolhatsz (deletions mező, az eseményadat ref értékével), ha a felhasználó a kérésében kifejezetten törlést kért; ez nem töröl semmit, a felhasználó külön gombbal engedélyezi. Egy törléshez csak a megnevezett eseményeket add meg, ne többet.

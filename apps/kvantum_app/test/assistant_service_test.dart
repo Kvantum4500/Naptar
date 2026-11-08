@@ -739,6 +739,130 @@ void main() {
     );
   });
 
+  group('deletions respect where an event came from', () {
+    FakeLlm del(List<String> refs) => FakeLlm([
+      (_) => calls([
+        tool('propose_events', {
+          'summary': 'Törlés',
+          'deletions': [
+            for (final r in refs) {'ref': r, 'reason': 'kérted'},
+          ],
+        }),
+      ]),
+      (_) => calls([tool('propose_events', {})]),
+      (_) => calls([tool('propose_events', {})]),
+    ]);
+
+    Future<void> seed() async {
+      await events.saveLocal(evt('hand', 'Fogorvos', floating(2026, 5, 5, 9)));
+      await events.saveLocal(
+        evt(
+          'shift',
+          'Nappali műszak',
+          floating(2026, 5, 5, 6),
+        ).copyWith(notes: kShiftMarker),
+      );
+      await events.saveLocal(
+        evt(
+          'ai',
+          'Futás',
+          floating(2026, 5, 5, 18),
+        ).copyWith(aiGenerated: true),
+      );
+    }
+
+    test(
+      'events are labelled kezi / muszak / ai in the first message',
+      () async {
+        await seed();
+        final llm = FakeLlm([(_) => say('ok')]);
+        await service(llm).ask('töröld', model: 'm', settings: settings);
+        final first =
+            (llm.requests.first.turns.first.parts.single as LlmText).text;
+        expect(first, contains('"forras":"kezi"'));
+        expect(first, contains('"forras":"muszak"'));
+        expect(first, contains('"forras":"ai"'));
+      },
+    );
+
+    test('a generated shift is never offered for deletion', () async {
+      await seed();
+      // e1 = first event of the window (sorted by start): the 06:00 shift
+      final llm = del(['e1']);
+      final out = await service(llm)
+          .ask('töröld a műszakot', model: 'm', settings: settings);
+      expect(out.deletions, isEmpty);
+    });
+
+    test(
+      '"töröld a kézzel felvetteket" keeps AI events out, hand events in',
+      () async {
+        await seed();
+        final llm = FakeLlm([
+          (_) => calls([
+            tool('get_events', {'from': '2026-05-04', 'to': '2026-05-10'}),
+          ]),
+          (r) {
+            final res = r.turns.last.parts
+                .whereType<LlmToolResult>()
+                .single
+                .result;
+            final list = (res['esemenyek'] as List).cast<Map>();
+            final byTitle = {for (final e in list) e['cim']: e['ref']};
+            return calls([
+              tool('propose_events', {
+                'deletions': [
+                  {'ref': byTitle['Fogorvos']},
+                  {'ref': byTitle['Futás']},
+                  {'ref': byTitle['Nappali műszak']},
+                ],
+              }),
+            ]);
+          },
+        ]);
+        final out = await service(llm).ask(
+          'Töröld a kézzel felvett eseményeket',
+          model: 'm',
+          settings: settings,
+        );
+        expect(out.deletions.map((d) => d.occurrence.title), ['Fogorvos']);
+        expect(out.dropped.join(' '), contains('műszak'));
+        expect(out.dropped.join(' '), contains('asszisztens-javaslat'));
+      },
+    );
+
+    test(
+      'without "kézzel" an old AI event can be deleted when asked for',
+      () async {
+        await seed();
+        final llm = FakeLlm([
+          (_) => calls([
+            tool('get_events', {'from': '2026-05-04', 'to': '2026-05-10'}),
+          ]),
+          (r) {
+            final res = r.turns.last.parts
+                .whereType<LlmToolResult>()
+                .single
+                .result;
+            final ref = (res['esemenyek'] as List).cast<Map>().firstWhere(
+              (e) => e['cim'] == 'Futás',
+            )['ref'];
+            return calls([
+              tool('propose_events', {
+                'deletions': [
+                  {'ref': ref},
+                ],
+              }),
+            ]);
+          },
+        ]);
+        final out = await service(llm)
+            .ask('töröld a futást', model: 'm', settings: settings);
+        expect(out.deletions.single.occurrence.title, 'Futás');
+      },
+    );
+  });
+
   group('learned habits', () {
     const def = '# Tanult szokások (az AI javasol)\n(üres – bővül)\n';
     HandbookStore store0() => HandbookStore(

@@ -34,6 +34,7 @@ void main() {
   moveTests();
   taskTests();
   scopeTests();
+  sourceTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -356,6 +357,7 @@ void main() {
       expect(ev.map((e) => e['cim']), ['Ünnep', 'Korán', 'Később']);
       expect(ev[1]['ref'], isA<String>());
       expect(ev[1]..remove('ref'), {
+        'forras': 'kezi',
         'nap': '2026-05-04',
         'kezdes': '09:00',
         'veg': '10:00',
@@ -753,5 +755,44 @@ void scopeTests() {
       expect(scopeFor('Tervezz 2 hétre előre', wed).days, 14);
       expect(scopeFor('Tervezz egy hónapra', wed).days, 21);
     });
+  });
+}
+
+void sourceTests() {
+  test('every event says where it came from', () {
+    final base = occ(
+      floating(2026, 5, 4, 9),
+      floating(2026, 5, 4, 10),
+      title: 'Fogorvos',
+    );
+    Occurrence mk({bool shift = false, bool ai = false}) => Occurrence(
+      eventId: 'e',
+      title: base.title,
+      startUtc: base.startUtc,
+      endUtc: base.endUtc,
+      originalStart: base.originalStart,
+      allDay: false,
+      tzid: bp,
+      isShift: shift,
+      aiGenerated: ai,
+    );
+    String src(Occurrence o) =>
+        (eventsForTool([o], tz: bp)['esemenyek'] as List).single['forras']
+            as String;
+    expect(src(mk()), 'kezi');
+    expect(src(mk(shift: true)), 'muszak');
+    expect(src(mk(ai: true)), 'ai');
+    expect(src(mk(shift: true, ai: true)), 'muszak');
+  });
+
+  test('the prompt tells the model what "manually entered" means', () {
+    final p = buildSystemPrompt(
+      handbook: 'H',
+      nowUtc: DateTime.utc(2026, 5, 4, 8),
+      rules: const PlanRules(),
+    );
+    expect(p, contains('forras: kezi'));
+    expect(p, contains('muszak'));
+    expect(p, contains('magyarul'));
   });
 }

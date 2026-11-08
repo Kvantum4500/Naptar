@@ -218,6 +218,8 @@ class AssistantOutcome {
 /// execute HERE on the device (respecting the user's sharing switches), and
 /// every proposal is checked by code against the hard rules before the user
 /// ever sees it.
+final _manualOnly = RegExp(r'kézzel|kézi|manuális');
+
 class AssistantService {
   AssistantService({
     required this.provider,
@@ -260,6 +262,7 @@ class AssistantService {
     _onStatus = onStatus;
     _aliasToRef.clear();
     _refToAlias.clear();
+    _prompt = prompt.toLowerCase();
     final system = buildSystemPrompt(
       handbook: await handbook.combined(),
       nowUtc: _nowUtc,
@@ -324,6 +327,8 @@ class AssistantService {
   // ------------------------------------------------------------- model call
 
   void Function(String status)? _onStatus;
+
+  String _prompt = '';
 
   // Short per-request aliases (e1, e2, ...) for event references: the long
   // `<id>@<time>` form costs tokens and is easy for a model to garble.
@@ -659,6 +664,15 @@ class AssistantService {
       if (hit == null) {
         notes.add(
           'A törlésre javasolt esemény nem található (talán már törölve van).',
+        );
+      } else if (hit.isShift) {
+        // generated shifts are managed on the Beosztás page, never here
+        notes.add(
+          '„${hit.title}” műszak, azt a Beosztás oldalon lehet törölni.',
+        );
+      } else if (hit.aiGenerated && _manualOnly.hasMatch(_prompt)) {
+        notes.add(
+          '„${hit.title}” egy korábbi asszisztens-javaslat, nem kézzel felvett esemény, ezért nem javasoltam törlésre.',
         );
       } else {
         out.add(DeletionProposal(hit, d.reason));
