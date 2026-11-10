@@ -205,6 +205,7 @@ class AssistantController extends Notifier<AssistantState> {
         handbook: ref.read(handbookStoreProvider),
         settingsStore: ref.read(aiSettingsStoreProvider),
         weather: ref.read(weatherServiceProvider),
+        finance: ref.read(financeRepoProvider),
         rules: PlanRules(
           sleepStartHour: settings.sleepStartHour,
           sleepEndHour: settings.sleepEndHour,

@@ -14,6 +14,7 @@ const _quickPrompts = [
   'Mikor férne be 45 perc mozgás ma?',
   'Tervezz könnyű napot, kevés energiám van',
   'Ütemezd a nyitott feladataimat a következő napokra',
+  'Hogy állok a költségkerettel?',
 ];
 
 /// Ask for a plan; review the proposals; accept the ones you like.

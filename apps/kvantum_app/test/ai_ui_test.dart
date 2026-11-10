@@ -536,6 +536,18 @@ void main() {
         () => ref0(tester).read(aiSettingsStoreProvider).load(),
       );
       expect((s!.events, s.tasks, s.checkins), (false, true, true));
+      expect(s.finance, isTrue); // on by default
+
+      final fin = find.text('Pénzügyek (csak olvasás)');
+      await tester.scrollUntilVisible(fin, 300, scrollable: list);
+      await tester.ensureVisible(fin);
+      await tester.pumpAndSettle();
+      await tester.tap(fin);
+      await tester.pumpAndSettle();
+      final s2 = await tester.runAsync(
+        () => ref0(tester).read(aiSettingsStoreProvider).load(),
+      );
+      expect(s2!.finance, isFalse);
       await tester.scrollUntilVisible(
         find.text('Verzió: build 7'),
         300,

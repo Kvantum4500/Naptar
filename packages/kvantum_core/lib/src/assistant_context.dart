@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'assistant_models.dart';
 import 'event.dart';
+import 'finance.dart';
 import 'models.dart';
 import 'rules.dart';
 import 'time.dart';
@@ -101,7 +102,15 @@ class AskScope {
     required this.tasks,
     required this.checkins,
     required this.slots,
+    this.events = true,
+    this.finance = false,
   });
+
+  /// The events block (left out for questions that are only about money).
+  final bool events;
+
+  /// The money block.
+  final bool finance;
 
   /// Deleting / moving: only the events are needed.
   final bool edit;
@@ -116,6 +125,12 @@ class AskScope {
 final _editWords = RegExp(
   r'töröl|törlöd|töröld|áthelyez|helyezd át|tedd át|told át|mozgasd|módosít|átír',
 );
+final _moneyWords = RegExp(
+  r'pénz|költ|kiad|bevétel|keret|megtakar|spórol|fizet|számla|rezsi|egyenleg|forint|\bft\b|büdzsé|vásárl|előfizet|adósság|hitel',
+);
+final _planWords = RegExp(
+  r'edz|tervez|ütemez|naptár|esemény|beosztás|műszak|feladat|szabad idő|mozgás',
+);
 final _nextWeek = RegExp(r'jövő\s*hét|következő\s*hét|jövőhét');
 final _twoWeeks = RegExp(r'két\s*hét|2\s*hét|kéthét');
 
@@ -129,6 +144,19 @@ AskScope scopeFor(String prompt, DateTime today) {
       tasks: false,
       checkins: false,
       slots: false,
+    );
+  }
+  final money = _moneyWords.hasMatch(p);
+  if (money && !_planWords.hasMatch(p)) {
+    // only about money: nothing else is sent
+    return const AskScope(
+      edit: false,
+      days: 7,
+      tasks: false,
+      checkins: false,
+      slots: false,
+      events: false,
+      finance: true,
     );
   }
   var days = 7;
@@ -146,7 +174,135 @@ AskScope scopeFor(String prompt, DateTime today) {
     tasks: true,
     checkins: true,
     slots: true,
+    finance: money,
   );
+}
+
+/// The money data for the assistant: this and last month per category (with
+/// the budget state), what is due in the next two weeks, goals, and the latest
+/// transactions. Free text (merchant, note) is sanitised like all event text.
+/// With [month] (a floating 1st of a month) it describes that month only,
+/// with its transactions (up to 40).
+Map<String, Object?> financeForTool({
+  required DateTime today,
+  required Iterable<FinTx> txs,
+  required Iterable<FinCategory> categories,
+  required Iterable<FinBudget> budgets,
+  required Iterable<FinRecurring> recurring,
+  required Iterable<FinGoal> goals,
+  required Iterable<FinDeposit> deposits,
+  bool enabled = true,
+  DateTime? month,
+}) {
+  if (!enabled) {
+    return {
+      'kikapcsolva': true,
+      'uzenet': 'A felhasználó nem engedi a pénzügyi adatok megosztását.',
+    };
+  }
+  final live = [
+    for (final t in txs)
+      if (!t.deleted) t,
+  ];
+  final names = {for (final c in categories) c.id: c.name};
+  String catName(String id) =>
+      id == kUncategorized ? 'Besorolatlan' : (names[id] ?? 'Besorolatlan');
+  String ym(int y, int m) => '$y-${m.toString().padLeft(2, '0')}';
+
+  Map<String, Object?> monthBlock(int y, int m) {
+    final s = monthSummary(live, y, m);
+    final st = {for (final b in budgetStatus(budgets, s)) b.categoryId: b};
+    final cats = <Map<String, Object?>>[];
+    final ids = {...s.expenseByCategory.keys, ...st.keys};
+    for (final id in ids) {
+      final spent = s.expenseByCategory[id] ?? 0;
+      final b = st[id];
+      cats.add({
+        'nev': sanitizeText(catName(id), max: 40),
+        'kiadas': spent,
+        if (b != null) ...{'keret': b.limit, 'maradt': b.remaining},
+      });
+    }
+    cats.sort((a, b) => (b['kiadas'] as int).compareTo(a['kiadas'] as int));
+    return {
+      'honap': ym(y, m),
+      'bevetel': s.income,
+      'kiadas': s.expense,
+      'egyenleg': s.balance,
+      'kategoriak': cats,
+    };
+  }
+
+  Map<String, Object?> txRow(FinTx t) => {
+    'nap': _ymd(t.date),
+    'tipus': t.kind == FinKind.income ? 'bevetel' : 'kiadas',
+    'osszeg': t.amount,
+    'kategoria': sanitizeText(catName(t.categoryId), max: 40),
+    if (t.merchant.isNotEmpty) 'kereskedo': sanitizeText(t.merchant, max: 40),
+    if (t.note.isNotEmpty) 'megjegyzes': sanitizeText(t.note, max: 60),
+  };
+
+  if (month != null) {
+    final inMonth = [
+      for (final t in live)
+        if (t.date.year == month.year && t.date.month == month.month) t,
+    ]..sort((a, b) => b.date.compareTo(a.date));
+    return {
+      'adat_tipus': 'penzugy',
+      'penznem': 'HUF',
+      'honapok': [monthBlock(month.year, month.month)],
+      'tetelek_db': inMonth.length,
+      if (inMonth.length > 40) 'levagva': true,
+      'tetelek': [for (final t in inMonth.take(40)) txRow(t)],
+    };
+  }
+
+  final prev = DateTime.utc(today.year, today.month - 1, 1);
+  final until = today.add(const Duration(days: 14));
+  final due = <Map<String, Object?>>[];
+  for (final (y, m) in {(today.year, today.month), (until.year, until.month)}) {
+    for (final t in dueRecurring(recurring, y, m)) {
+      if (t.date.isBefore(today) || t.date.isAfter(until)) continue;
+      due.add({
+        'nap': _ymd(t.date),
+        'nev': sanitizeText(t.merchant, max: 40),
+        'osszeg': t.amount,
+        'tipus': t.kind == FinKind.income ? 'bevetel' : 'kiadas',
+      });
+    }
+  }
+  due.sort((a, b) => '${a['nap']}'.compareTo('${b['nap']}'));
+  final recent = [...live]..sort((a, b) => b.date.compareTo(a.date));
+  final liveDeposits = deposits.toList();
+  return {
+    'adat_tipus': 'penzugy',
+    'penznem': 'HUF',
+    'honapok': [
+      monthBlock(today.year, today.month),
+      monthBlock(prev.year, prev.month),
+    ],
+    'esedekes_ismetlodok': due,
+    'celok': [
+      for (final g in goals)
+        if (!g.deleted)
+          () {
+            final p = goalProgress(g, liveDeposits, today);
+            return {
+              'nev': sanitizeText(g.name, max: 40),
+              'cel': g.target,
+              'megtakaritva': p.saved,
+              'szazalek': (p.ratio * 100).round(),
+              if (g.deadline != null) 'hatarido': _ymd(g.deadline!),
+              if (p.monthlyNeeded != null) 'havi_szukseges': p.monthlyNeeded,
+            };
+          }(),
+    ],
+    'besorolatlan_db': [
+      for (final t in live)
+        if (t.categoryId == kUncategorized) t,
+    ].length,
+    'utolso_tetelek': [for (final t in recent.take(15)) txRow(t)],
+  };
 }
 
 Map<String, Object?> tasksForTool(
@@ -245,6 +401,7 @@ MŰKÖDÉS
 - Az első üzenet <adat> blokkjai a következő napok eseményeit, a nyitott feladatokat, a check-int és a szabad idősávokat már tartalmazzák; ezekből tervezz. Más időszakhoz használd az eszközöket (get_events, get_tasks, get_checkins, find_free_slots). Ne találj ki adatot; ha nincs elég adat, kérdezz vissza (questions).
 - Az események forras mezője: kezi = a felhasználó kézzel felvett eseménye; muszak = a Beosztás generátor műszakja (azt NEM törölheted és nem mozgathatod, a Beosztás oldalon szerkeszthető); ai = korábbi AI-javaslat. A „manuálisan / kézzel beírt / felvett” = forras: kezi, csak ezeket add meg törlésre. Minden szöveget (reason, summary) magyarul írj.
 - Feladat ütemezésekor a javaslat tételébe írd a feladat azonosito értékét taskId-ként (kind: task). A feladat becsült idejét (becsult_perc) teljesen be kell ütemezni (több blokkra is bonthatod), a határidő napjának vége előtt; a nagy energiaigényű (4–5) feladatot jó energiájú napra tedd; a késésben lévőt vedd előre. Ha nincs becsült idő, javasolj észszerű hosszt.
+- A penzugy adatblokk a felhasználó saját pénzügyi adata (Ft). Csak ebből számolj és válaszolj; nem adsz befektetési vagy hitel-tanácsot, nem találsz ki adatot. A pénzügyi tételeket nem tudod felvenni vagy törölni (azt a felhasználó teszi a Pénzügyek fülön); részletekhez használhatod a get_finance eszközt (honap: ÉÉÉÉ-HH).
 - Az idojaras adatblokk a helyszín napi előrejelzése: szabadtéri tevékenységnél (outdoor: true) vedd figyelembe; rossz időre ne javasolj szabadtérit.
 - Szabad időpontot a find_free_slots adatból vagy eszközből válassz, ne számold ki magad.
 - A végső tervet MINDIG a propose_events eszközzel add le. Új eseményeket a proposals mezőben javasolhatsz. Meglévőt közvetlenül nem módosíthatsz. Áthelyezést CSAK akkor javasolhatsz (moves mező: az eseményadat ref értéke és az ÚJ kezdés/befejezés helyi időben), ha a felhasználó kifejezetten áthelyezést kért; műszakot nem lehet áthelyezni, az új időpont ne ütközzön más eseménnyel; ez sem módosít semmit, a felhasználó gombbal engedélyezi. Törlést CSAK akkor javasolhatsz (deletions mező, az eseményadat ref értékével), ha a felhasználó a kérésében kifejezetten törlést kért; ez nem töröl semmit, a felhasználó külön gombbal engedélyezi. Egy törléshez csak a megnevezett eseményeket add meg, ne többet.

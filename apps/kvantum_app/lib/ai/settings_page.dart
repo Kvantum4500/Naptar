@@ -482,6 +482,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onChanged: (v) =>
                       notifier.change(settings.copyWith(checkins: v)),
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Pénzügyek (csak olvasás)'),
+                  subtitle: const Text(
+                    'Összesítés és az utolsó tételek mehetnek el a modellhez; felvenni vagy törölni nem tud.',
+                  ),
+                  value: settings.finance,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(finance: v)),
+                ),
               ]),
               section('Időjárás és helyszín', [
                 const Text(

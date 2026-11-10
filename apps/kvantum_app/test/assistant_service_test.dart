@@ -12,6 +12,7 @@ import 'package:kvantum_app/ai/place.dart';
 import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -1024,6 +1025,145 @@ void main() {
           .ask('Tervezz edzést', model: 'm', settings: const AiSettings());
       expect(out.items.single.title, 'Kajak 2 óra');
     });
+  });
+
+  group('finance data for the assistant', () {
+    late FinanceRepository fin;
+
+    AssistantService svcWithFinance(FakeLlm llm) => AssistantService(
+      provider: llm,
+      events: events,
+      records: records,
+      handbook: HandbookStore(records, loader: (p) async => 'H[$p]'),
+      settingsStore: store,
+      now: () => now,
+      delay: (d) async {},
+      finance: fin,
+    );
+
+    String firstOf(FakeLlm llm) =>
+        (llm.requests.first.turns.first.parts.single as LlmText).text;
+
+    setUp(() async {
+      fin = FinanceRepository(db, clock: () => 1000);
+      await fin.ensureDefaults();
+      await fin.saveTx(
+        FinTx(
+          id: 't1',
+          date: floating(2026, 5, 3),
+          amount: 20000,
+          kind: FinKind.expense,
+          categoryId: 'cat-food',
+          merchant: 'SPAR',
+        ),
+      );
+      await fin.saveBudget(
+        const FinBudget(categoryId: 'cat-food', limit: 50000),
+      );
+      await meeting('m', floating(2026, 5, 5, 12), floating(2026, 5, 5, 13));
+    });
+
+    test('a money question sends only the finance block', () async {
+      final llm = FakeLlm([(_) => say('ok')]);
+      await svcWithFinance(llm)
+          .ask('Hogy állok a költségkerettel?', model: 'm', settings: settings);
+      final first = firstOf(llm);
+      expect(first, contains('<adat tipus="penzugy">'));
+      expect(first, contains('"keret":50000'));
+      expect(first, contains('"maradt":30000'));
+      expect(first, contains('SPAR'));
+      for (final b in [
+        'esemenyek',
+        'feladatok',
+        'check_in',
+        'szabad_idosavok',
+      ]) {
+        expect(first.contains('<adat tipus="$b">'), isFalse, reason: b);
+      }
+      expect(first.contains('Megbeszélés'), isFalse);
+    });
+
+    test('an ordinary planning request has no money block', () async {
+      final llm = FakeLlm([(_) => say('ok')]);
+      await svcWithFinance(llm)
+          .ask('Tervezz edzést', model: 'm', settings: settings);
+      expect(firstOf(llm).contains('penzugy'), isFalse);
+      expect(firstOf(llm), contains('<adat tipus="esemenyek">'));
+    });
+
+    test(
+      'with sharing switched off the model is told so and sees nothing',
+      () async {
+        final llm = FakeLlm([(_) => say('ok')]);
+        await svcWithFinance(llm).ask(
+          'Mennyit költöttem?',
+          model: 'm',
+          settings: const AiSettings(finance: false),
+        );
+        final first = firstOf(llm);
+        expect(
+          first,
+          contains('A felhasználó nem engedi a pénzügyi adatok megosztását'),
+        );
+        expect(first.contains('SPAR'), isFalse);
+        expect(first.contains('20000'), isFalse);
+      },
+    );
+
+    test('the get_finance tool gives the transactions of a month', () async {
+      final llm = FakeLlm([
+        (_) => calls([
+          tool('get_finance', {'honap': '2026-05'}),
+        ]),
+        (_) => say('Ennyit költöttél.'),
+      ]);
+      final out = await svcWithFinance(llm)
+          .ask('Mennyit költöttem?', model: 'm', settings: settings);
+      expect(out.text, 'Ennyit költöttél.');
+      final result = lastResults(llm).single;
+      expect(result['adat_tipus'], 'penzugy');
+      expect((result['tetelek'] as List).single['kereskedo'], 'SPAR');
+      expect(result['tetelek_db'], 1);
+    });
+
+    test('a bad month argument falls back to the overview', () async {
+      final llm = FakeLlm([
+        (_) => calls([
+          tool('get_finance', {'honap': 'jövő'}),
+        ]),
+        (_) => say('ok'),
+      ]);
+      await svcWithFinance(llm)
+          .ask('Mennyit költöttem?', model: 'm', settings: settings);
+      expect(lastResults(llm).single.containsKey('tetelek'), isFalse);
+      expect(lastResults(llm).single['honapok'], isNotEmpty);
+    });
+
+    test('without a finance source the tool says it is unavailable', () async {
+      final llm = FakeLlm([
+        (_) => calls([tool('get_finance')]),
+        (_) => say('ok'),
+      ]);
+      await service(llm)
+          .ask('Mennyit költöttem?', model: 'm', settings: settings);
+      expect(lastResults(llm).single['kikapcsolva'], isTrue);
+    });
+
+    test(
+      'the assistant can read but there is no way to change money data',
+      () async {
+        final llm = FakeLlm([(_) => say('ok')]);
+        await svcWithFinance(llm)
+            .ask('Mennyit költöttem?', model: 'm', settings: settings);
+        final names = llm.requests.first.tools.map((t) => t.name).toSet();
+        expect(names, contains('get_finance'));
+        expect(
+          names.any((n) => n.contains('save') || n.contains('delete')),
+          isFalse,
+        );
+        expect(llm.requests.first.system, contains('nem tudod felvenni'));
+      },
+    );
   });
 
   group('learned habits', () {

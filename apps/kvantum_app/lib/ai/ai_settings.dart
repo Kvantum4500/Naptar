@@ -65,6 +65,7 @@ class AiSettings {
     this.events = true,
     this.tasks = true,
     this.checkins = true,
+    this.finance = true,
     this.sleepStartHour = 23,
     this.sleepEndHour = 7,
     this.weather = true,
@@ -82,6 +83,9 @@ class AiSettings {
   final bool events;
   final bool tasks;
   final bool checkins;
+
+  /// The assistant may read the finance data (it never writes it).
+  final bool finance;
 
   /// Sleep window (wall-clock hours): the assistant plans nothing inside it.
   final int sleepStartHour;
@@ -101,6 +105,7 @@ class AiSettings {
     bool? events,
     bool? tasks,
     bool? checkins,
+    bool? finance,
     int? sleepStartHour,
     int? sleepEndHour,
     bool? weather,
@@ -113,6 +118,7 @@ class AiSettings {
     events: events ?? this.events,
     tasks: tasks ?? this.tasks,
     checkins: checkins ?? this.checkins,
+    finance: finance ?? this.finance,
     sleepStartHour: sleepStartHour ?? this.sleepStartHour,
     sleepEndHour: sleepEndHour ?? this.sleepEndHour,
     weather: weather ?? this.weather,
@@ -143,6 +149,7 @@ class AiSettingsStore {
       events: (await read('ai.events')) != 'off',
       tasks: (await read('ai.tasks')) != 'off',
       checkins: (await read('ai.checkins')) != 'off',
+      finance: (await read('ai.finance')) != 'off',
       sleepStartHour: _hour(await read('ai.sleepStart'), 23),
       sleepEndHour: _hour(await read('ai.sleepEnd'), 7),
       weather: (await read('ai.weather')) != 'off',
@@ -157,6 +164,7 @@ class AiSettingsStore {
     await write('ai.events', s.events ? null : 'off');
     await write('ai.tasks', s.tasks ? null : 'off');
     await write('ai.checkins', s.checkins ? null : 'off');
+    await write('ai.finance', s.finance ? null : 'off');
     await write(
       'ai.sleepStart',
       s.sleepStartHour == 23 ? null : '${s.sleepStartHour}',
