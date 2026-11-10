@@ -159,7 +159,14 @@ ParsedProposal parseProposal(
       problems.add('$n. javaslat („$title”): 12 óránál hosszabb.');
       continue;
     }
-    final kind = _kinds.contains(it['kind']) ? it['kind'] as String : 'workout';
+    var kind = _kinds.contains(it['kind']) ? it['kind'] as String : 'workout';
+    var hard = it['hard'] == true;
+    // A walk is mood-lifting movement, not a workout: it must not count
+    // towards the weekly workout cap or the hard-session rules.
+    if (kind == 'workout' && title.toLowerCase().contains('séta')) {
+      kind = 'other';
+      hard = false;
+    }
     items.add(
       ProposalItem(
         title: title,
@@ -167,7 +174,7 @@ ParsedProposal parseProposal(
         endWall: e,
         tzid: tz,
         kind: kind,
-        hard: it['hard'] == true,
+        hard: hard,
         reason: _text(it['reason'], 300),
         taskId: _text(it['taskId'], 100).isEmpty
             ? null

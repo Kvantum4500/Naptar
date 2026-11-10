@@ -35,6 +35,7 @@ void main() {
   taskTests();
   scopeTests();
   sourceTests();
+  walkTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -755,6 +756,32 @@ void scopeTests() {
       expect(scopeFor('Tervezz 2 hétre előre', wed).days, 14);
       expect(scopeFor('Tervezz egy hónapra', wed).days, 21);
     });
+  });
+}
+
+void walkTests() {
+  test('a walk is never counted as a workout, even if the model says so', () {
+    final r = parseProposal({
+      'proposals': [
+        {
+          'title': 'Könnyű séta 30 perc',
+          'start': '2026-05-05T07:00:00',
+          'end': '2026-05-05T07:30:00',
+          'kind': 'workout',
+          'hard': true,
+        },
+        {
+          'title': 'Calisthenics 45 perc',
+          'start': '2026-05-06T18:00:00',
+          'end': '2026-05-06T18:45:00',
+          'kind': 'workout',
+        },
+      ],
+    });
+    expect(r.items[0].kind, 'other');
+    expect(r.items[0].hard, isFalse);
+    expect(r.items[0].toBlock().isWorkout, isFalse);
+    expect(r.items[1].kind, 'workout');
   });
 }
 
