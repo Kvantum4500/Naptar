@@ -17,6 +17,9 @@ class OpenAiProvider implements LLMProvider {
   final String apiKey;
   final String baseUrl;
 
+  /// Upper bound for one reply (thinking + answer).
+  static const maxOutputTokens = 2048;
+
   Map<String, String> get _headers => {
     if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
     'content-type': 'application/json',
@@ -47,6 +50,18 @@ class OpenAiProvider implements LLMProvider {
         'tool_choice': 'auto',
       },
       'temperature': r.temperature,
+      // Without an explicit cap some services (Groq) use a small default that
+      // a reasoning model can spend entirely on thinking, leaving an empty
+      // answer ("length"). The cap also counts against per-minute token
+      // limits, so it is generous but not huge.
+      if (baseUrl.contains('api.openai.com'))
+        'max_completion_tokens': maxOutputTokens
+      else
+        'max_tokens': maxOutputTokens,
+      // Groq's gpt-oss models think a lot by default; "low" keeps answers
+      // short and the token budget for the actual plan.
+      if (baseUrl.contains('groq.com') && model.contains('gpt-oss'))
+        'reasoning_effort': 'low',
     };
     final json = await _send(
       () => _client.post(
@@ -133,6 +148,8 @@ class OpenAiProvider implements LLMProvider {
       throw LlmBadResponse(
         reason == 'content_filter'
             ? 'A választ a szolgáltató szűrője megállította.'
+            : reason == 'length'
+            ? 'A modell válasza elfogyott a hosszkeretben, mielőtt befejezte volna. Próbáld újra, vagy válassz másik modellt a Beállításokban.'
             : 'A modell üres választ adott${reason == null ? '' : ' ($reason)'}.',
       );
     }
