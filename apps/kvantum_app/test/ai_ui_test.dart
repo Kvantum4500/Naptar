@@ -26,6 +26,7 @@ import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_llm.dart';
+import 'support/fake_wallet.dart';
 import 'support/harness.dart';
 
 /// Lists models for the settings page and answers `generate` from a script.
@@ -67,6 +68,7 @@ void main() {
     BackupIo? io,
     LocationProvider? location,
     WeatherService? weatherSvc,
+    FakeWallet? wallet,
   }) async {
     useSize(tester);
     db = await newDb();
@@ -80,6 +82,7 @@ void main() {
           apiKeyStoreProvider.overrideWithValue(keys),
           if (io != null) backupIoProvider.overrideWithValue(io),
           if (location != null) locationProvider.overrideWithValue(location),
+          if (wallet != null) walletBridgeProvider.overrideWithValue(wallet),
           if (weatherSvc != null)
             weatherServiceProvider.overrideWithValue(weatherSvc),
           llmFactoryProvider.overrideWithValue((cfg) => llm ?? FakeGemini([])),
@@ -99,6 +102,102 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  group('wallet notification settings', () {
+    Future<void> show(WidgetTester tester, String text) async {
+      final f = find.text(text);
+      await tester.scrollUntilVisible(
+        f,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(f);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('where Wallet cannot be read it says so', (tester) async {
+      await boot(
+        tester,
+        const SettingsPage(),
+        wallet: FakeWallet(supported: false),
+      );
+      await show(tester, 'Google Wallet értesítések');
+      expect(find.textContaining('csak Androidon működik'), findsOneWidget);
+      expect(find.text('Hozzáférés megadása'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('without access it explains the restricted-settings step', (
+      tester,
+    ) async {
+      final w = FakeWallet(enabled: false);
+      await boot(tester, const SettingsPage(), wallet: w);
+      await show(tester, 'Hozzáférés megadása');
+      expect(
+        find.text('Az értesítés-hozzáférés nincs megadva.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Korlátozott beállítások engedélyezése'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Hozzáférés megadása'));
+      await tester.pump();
+      expect(w.listenerOpened, 1);
+      await tester.ensureVisible(find.text('Alkalmazás-infó megnyitása'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Alkalmazás-infó megnyitása'));
+      await tester.pump();
+      expect(w.appInfoOpened, 1);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('with access the hint is gone and the switch persists', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage(), wallet: FakeWallet());
+      await show(tester, 'Hozzáférés megadása');
+      expect(
+        find.text('Az értesítés-hozzáférés meg van adva.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Korlátozott beállítások'), findsNothing);
+      await show(tester, 'Automatikus felvétel');
+      await tester.tap(find.text('Automatikus felvétel'));
+      await tester.pumpAndSettle();
+      final off = await tester.runAsync(
+        () => ref0(tester).read(walletIngestProvider).auto,
+      );
+      expect(off, isFalse);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the log shows the received notifications, masked', (
+      tester,
+    ) async {
+      final w = FakeWallet(
+        queue: [note('SPAR', 'Mastercard •••• 1234 · 3 490 Ft', 1000)],
+      );
+      await boot(tester, const SettingsPage(), wallet: w);
+      await show(tester, 'Legutóbbi értesítések');
+      await tester.tap(find.text('Legutóbbi értesítések'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Még nem érkezett'), findsOneWidget);
+      await tester.tap(find.text('Bezár'));
+      await tester.pumpAndSettle();
+
+      await tester.runAsync(
+        () => ref0(tester).read(walletIngestProvider).run(),
+      );
+      await tester.tap(find.text('Legutóbbi értesítések'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('SPAR'), findsWidgets);
+      expect(find.textContaining('felvéve'), findsOneWidget);
+      expect(find.textContaining('1234'), findsNothing);
+      expect(find.text('Másolás'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+  });
 
   group('weather and place settings', () {
     Future<void> show(WidgetTester tester, String text) async {

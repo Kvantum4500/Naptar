@@ -303,6 +303,57 @@ class FinanceRepository {
     return true;
   }
 
+  // ------------------------------------------------------------ merchants
+
+  static const _merchantKey = 'fin.merchantCat';
+
+  Future<Map<String, String>> _merchantMap() async {
+    final text = await meta(_merchantKey);
+    if (text == null) return {};
+    try {
+      final j = jsonDecode(text);
+      return j is Map
+          ? {for (final e in j.entries) '${e.key}': '${e.value}'}
+          : {};
+    } on FormatException {
+      return {};
+    }
+  }
+
+  /// The category the user last gave this merchant, if any.
+  Future<String?> merchantCategory(String merchant) async {
+    final key = merchantKey(merchant);
+    if (key.isEmpty) return null;
+    final id = (await _merchantMap())[key];
+    if (id == null) return null;
+    // forget categories that no longer exist
+    final alive = (await categories()).any((c) => c.id == id);
+    return alive ? id : null;
+  }
+
+  /// Remembers the category for a merchant and files the transactions of that
+  /// merchant that are still uncategorized there too.
+  Future<int> rememberMerchant(String merchant, String categoryId) async {
+    final key = merchantKey(merchant);
+    if (key.isEmpty || categoryId == kUncategorized) return 0;
+    final map = await _merchantMap();
+    map[key] = categoryId;
+    while (map.length > 300) {
+      map.remove(map.keys.first);
+    }
+    await setMeta(_merchantKey, jsonEncode(map));
+    var n = 0;
+    for (final t in await txs()) {
+      if (t.categoryId == kUncategorized && merchantKey(t.merchant) == key) {
+        await saveTx(t.copyWith(categoryId: categoryId));
+        n++;
+      }
+    }
+    return n;
+  }
+
+  Future<bool> hasTx(String id) => _exists(_kTx, id);
+
   // ------------------------------------------------------ defaults, repeats
 
   Future<bool> _exists(String kind, String id) async =>

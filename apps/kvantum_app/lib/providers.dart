@@ -4,6 +4,8 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'data/db.dart';
 import 'data/event_repository.dart';
 import 'data/finance_repository.dart';
+import 'finance/wallet_bridge.dart';
+import 'finance/wallet_ingest.dart';
 import 'data/record_repository.dart';
 import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
@@ -39,6 +41,17 @@ final finGoalsProvider = StreamProvider<List<FinGoal>>(
 );
 final finDepositsProvider = StreamProvider<List<FinDeposit>>(
   (ref) => ref.watch(financeRepoProvider).watchDeposits(),
+);
+
+final walletBridgeProvider = Provider<WalletBridge>(
+  (_) => ChannelWalletBridge(),
+);
+
+final walletIngestProvider = Provider<WalletIngest>(
+  (ref) => WalletIngest(
+    ref.watch(financeRepoProvider),
+    ref.watch(walletBridgeProvider),
+  ),
 );
 
 final repoProvider = Provider<EventRepository>(

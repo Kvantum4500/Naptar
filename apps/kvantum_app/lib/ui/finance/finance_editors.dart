@@ -253,6 +253,10 @@ class _TxEditorState extends ConsumerState<TxEditor> {
               note: _note.text.trim(),
             );
     await repo.saveTx(t);
+    // the next payment at the same merchant gets this category by itself
+    if (t.merchant.isNotEmpty && t.categoryId != kUncategorized) {
+      await repo.rememberMerchant(t.merchant, t.categoryId);
+    }
     if (mounted) Navigator.pop(context);
   }
 

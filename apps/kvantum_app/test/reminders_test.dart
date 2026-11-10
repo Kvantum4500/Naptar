@@ -219,6 +219,8 @@ void main() {
         300,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(sw);
+      await tester.pumpAndSettle();
       await tester.tap(sw);
       await tester.pumpAndSettle();
       expect(
@@ -238,6 +240,8 @@ void main() {
         300,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(sw);
+      await tester.pumpAndSettle();
       await tester.tap(sw);
       await tester.pumpAndSettle();
       final s = tester.widget<SwitchListTile>(find.byType(SwitchListTile).last);

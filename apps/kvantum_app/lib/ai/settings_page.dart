@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/backup_ops.dart';
 import '../data/event_repository.dart' show kNaptarCalendar;
+import '../finance/wallet_settings.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import '../ui/backup_io.dart';
@@ -553,6 +554,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                 ],
               ]),
+              section('Google Wallet értesítések', const [WalletSettings()]),
               section('Emlékeztetők', [
                 if (!ref.watch(reminderSchedulerProvider).supported)
                   const Text(

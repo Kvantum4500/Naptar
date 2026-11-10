@@ -5,10 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
+import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import 'support/fake_wallet.dart';
 import 'support/harness.dart';
 
 void main() {
@@ -21,11 +23,23 @@ void main() {
   late AppDatabase db;
   late FinanceRepository repo;
 
-  Future<void> boot(WidgetTester tester, {Widget? home}) async {
+  Future<void> boot(
+    WidgetTester tester, {
+    Widget? home,
+    FakeWallet? wallet,
+  }) async {
     useSize(tester, size: const Size(900, 1400));
     db = await newDb();
     repo = FinanceRepository(db);
-    await tester.pumpWidget(app(home ?? const FinancePage(), db));
+    await tester.pumpWidget(
+      app(
+        home ?? const FinancePage(),
+        db,
+        extra: [
+          if (wallet != null) walletBridgeProvider.overrideWithValue(wallet),
+        ],
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -341,6 +355,60 @@ void main() {
     await tester.tap(find.text('Naptár').last);
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.add), findsWidgets);
+    await shutdown(tester, db);
+  });
+
+  testWidgets(
+    'payments collected while the app was closed are booked at start',
+    (tester) async {
+      final w = FakeWallet(
+        queue: [
+          note('SPAR', '3 490 Ft', DateTime.now().millisecondsSinceEpoch),
+          note(
+            'Google Wallet',
+            'Új ajánlat',
+            DateTime.now().millisecondsSinceEpoch + 1,
+          ),
+        ],
+      );
+      await boot(tester, home: const RootShell(), wallet: w);
+      await tester.tap(find.text('Pénzügyek').last);
+      await tester.pumpAndSettle();
+      await goTo(tester, 'Tételek');
+      expect(find.text('SPAR'), findsOneWidget);
+      expect(find.text('-3\u00a0490\u00a0Ft'), findsOneWidget);
+      expect(w.queue, isEmpty);
+      expect(
+        (await tester.runAsync(repo.txs))!.single.source,
+        FinSource.wallet,
+      );
+      await shutdown(tester, db);
+    },
+  );
+
+  testWidgets('filing a payment teaches the app the merchant', (tester) async {
+    final w = FakeWallet(
+      queue: [
+        note('SPAR', '1 000 Ft', DateTime.now().millisecondsSinceEpoch),
+        note('SPAR', '2 000 Ft', DateTime.now().millisecondsSinceEpoch + 5),
+      ],
+    );
+    await boot(tester, home: const RootShell(), wallet: w);
+    await tester.tap(find.text('Pénzügyek').last);
+    await tester.pumpAndSettle();
+    await goTo(tester, 'Áttekintés');
+    expect(find.text('2 besorolatlan tétel'), findsOneWidget);
+    await goTo(tester, 'Tételek');
+    await tester.tap(find.text('SPAR').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Élelmiszer'));
+    await tester.pump();
+    await tester.tap(find.text('Mentés'));
+    await tester.pumpAndSettle();
+    final txs = (await tester.runAsync(repo.txs))!;
+    expect(txs.every((t) => t.categoryId == 'cat-food'), isTrue);
+    await goTo(tester, 'Áttekintés');
+    expect(find.textContaining('besorolatlan'), findsNothing);
     await shutdown(tester, db);
   });
 }
