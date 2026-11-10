@@ -80,6 +80,16 @@ class FakeDrive implements DriveRemote {
   }
 
   @override
+  Future<List<DriveName>> listNames(String prefix) async {
+    if (offline) throw DriveTransientError('offline');
+    return [
+      for (final e in files.entries)
+        if (e.value.name.startsWith(prefix))
+          DriveName(id: e.key, name: e.value.name),
+    ]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  @override
   Future<String> write({
     String? fileId,
     required String name,

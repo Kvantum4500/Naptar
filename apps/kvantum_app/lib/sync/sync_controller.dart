@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../data/event_repository.dart';
 import '../drive/drive_remote.dart';
 import '../drive/drive_sync_engine.dart';
+import '../drive/finance_mailbox.dart';
 import '../drive/google_drive_remote.dart';
 import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
@@ -39,8 +40,12 @@ class SyncState {
     this.lastSync,
     this.pending = 0,
     this.error,
+    this.financeNote,
   });
   final bool configured, signedIn, syncing;
+
+  /// What the last finance mail run did (null when nothing happened).
+  final String? financeNote;
   final DateTime? lastSync;
   final int pending;
   final String? error;
@@ -52,6 +57,7 @@ class SyncState {
     int? pending,
     String? error,
     bool clearError = false,
+    String? financeNote,
   }) => SyncState(
     configured: configured,
     signedIn: signedIn ?? this.signedIn,
@@ -59,6 +65,7 @@ class SyncState {
     lastSync: lastSync ?? this.lastSync,
     pending: pending ?? this.pending,
     error: clearError ? null : (error ?? this.error),
+    financeNote: financeNote ?? this.financeNote,
   );
 }
 
@@ -68,6 +75,7 @@ class SyncState {
 class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   SyncEngine? _engine;
   DriveSyncEngine? _drive;
+  FinanceMailbox? _mail;
   Timer? _periodic, _debounce;
 
   @override
@@ -107,6 +115,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     _periodic?.cancel();
     _engine = null;
     _drive = null;
+    _mail = null;
     await ref.read(authGatewayProvider).signOut();
     state = state.copyWith(signedIn: false, syncing: false, clearError: true);
   }
@@ -116,9 +125,12 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       ref.read(repoProvider),
       ref.read(remoteFactoryProvider)(client),
     );
-    _drive = DriveSyncEngine(
-      ref.read(recordRepoProvider),
-      ref.read(driveFactoryProvider)(client),
+    final driveRemote = ref.read(driveFactoryProvider)(client);
+    _drive = DriveSyncEngine(ref.read(recordRepoProvider), driveRemote);
+    _mail = FinanceMailbox(
+      ref.read(financeRepoProvider),
+      driveRemote,
+      deviceId: await ref.read(recordRepoProvider).deviceId(),
     );
     state = state.copyWith(signedIn: true, clearError: true);
     _periodic?.cancel();
@@ -170,6 +182,31 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
         errors.add('Drive: $e');
       }
     }
+    final mail = _mail;
+    String? note;
+    if (mail != null) {
+      try {
+        final r = await mail.sync();
+        if (r.stoppedEarly) {
+          ok = false;
+          errors.add(
+            'Pénzügy: nincs kapcsolat vagy limit, később újrapróbálja.',
+          );
+        } else {
+          if (r.corrupt > 0) {
+            errors.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
+          }
+          if (r.sentLetters + r.receivedLetters > 0) {
+            note =
+                'Pénzügy: ${r.sentLetters} levél elküldve, ${r.receivedLetters} megérkezett'
+                '${r.applied > 0 ? ' (${r.applied} tétel frissült)' : ''}.';
+          }
+        }
+      } catch (e) {
+        ok = false;
+        errors.add('Pénzügy: $e');
+      }
+    }
     final pending =
         (await ref.read(repoProvider).pending()).length +
         await ref.read(recordRepoProvider).dirtyCount();
@@ -177,6 +214,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       syncing: false,
       pending: pending,
       lastSync: ok ? DateTime.now() : null,
+      financeNote: note,
       error: errors.isEmpty ? null : errors.join(' · '),
       clearError: errors.isEmpty,
     );

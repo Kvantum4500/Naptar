@@ -16,11 +16,14 @@ const _kDeposit = 'deposit';
 /// Local finance store. The database file on the device is the source of
 /// truth; [FinRows.dirty] marks what still has to be mailed to other devices.
 class FinanceRepository {
-  FinanceRepository(this.db, {int Function()? clock})
+  FinanceRepository(this.db, {int Function()? clock, this.onChanged})
     : _clock = clock ?? (() => DateTime.now().toUtc().millisecondsSinceEpoch);
 
   final AppDatabase db;
   final int Function() _clock;
+
+  /// Called after the user changes something (so a mail run can be started).
+  final void Function()? onChanged;
 
   int now() => _clock();
   String newId() => const Uuid().v4();
@@ -101,32 +104,68 @@ class FinanceRepository {
 
   Future<void> saveTx(FinTx t) {
     final x = t.copyWith(updatedAt: now());
-    return _put(_kTx, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kTx,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   Future<void> saveCategory(FinCategory c) {
     final x = c.copyWith(updatedAt: now());
-    return _put(_kCategory, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kCategory,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   Future<void> saveBudget(FinBudget b) {
     final x = b.copyWith(updatedAt: now());
-    return _put(_kBudget, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kBudget,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   Future<void> saveRecurring(FinRecurring r) {
     final x = r.copyWith(updatedAt: now());
-    return _put(_kRecurring, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kRecurring,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   Future<void> saveGoal(FinGoal g) {
     final x = g.copyWith(updatedAt: now());
-    return _put(_kGoal, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kGoal,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   Future<void> saveDeposit(FinDeposit d) {
     final x = d.copyWith(updatedAt: now());
-    return _put(_kDeposit, x.id, x.toJson(), x.updatedAt, x.deleted);
+    return _put(
+      _kDeposit,
+      x.id,
+      x.toJson(),
+      x.updatedAt,
+      x.deleted,
+    ).then((_) => onChanged?.call());
   }
 
   /// Deleting leaves a tombstone, so the deletion reaches the other devices.
@@ -182,6 +221,86 @@ class FinanceRepository {
       }
     }
     return false;
+  }
+
+  // ------------------------------------------------------------- mailing
+
+  Future<String?> meta(String key) async => (await (db.select(
+    db.metaRows,
+  )..where((t) => t.key.equals(key))).getSingleOrNull())?.value;
+
+  Future<void> setMeta(String key, String? value) async {
+    if (value == null) {
+      await (db.delete(db.metaRows)..where((t) => t.key.equals(key))).go();
+    } else {
+      await db
+          .into(db.metaRows)
+          .insertOnConflictUpdate(
+            MetaRowsCompanion.insert(key: key, value: value),
+          );
+    }
+  }
+
+  /// Records to put into a letter: the changed ones, or everything (including
+  /// deletion marks) for a new device.
+  Future<List<MailRecord>> mailRecords({required bool onlyDirty}) async {
+    final q = db.select(db.finRows);
+    if (onlyDirty) q.where((t) => t.dirty.equals(true));
+    final out = <MailRecord>[];
+    for (final r in await q.get()) {
+      try {
+        out.add(MailRecord(r.kind, r.id, jsonDecode(r.json), r.updatedAt));
+      } on FormatException {
+        // an unreadable row cannot be mailed
+      }
+    }
+    return out;
+  }
+
+  Future<int> dirtyCount() async => (await (db.select(
+    db.finRows,
+  )..where((t) => t.dirty.equals(true))).get()).length;
+
+  /// After a letter reached everybody: the records are no longer "changed",
+  /// unless they were edited again in the meantime.
+  Future<void> markClean(Iterable<MailRecord> sent) async {
+    for (final r in sent) {
+      await (db.update(db.finRows)..where(
+            (t) =>
+                t.kind.equals(r.kind) &
+                t.id.equals(r.id) &
+                t.updatedAt.equals(r.updatedAt),
+          ))
+          .write(const FinRowsCompanion(dirty: Value(false)));
+    }
+  }
+
+  /// Merges one record from a letter: the newer one wins; on equal times the
+  /// larger JSON text wins, so every device decides the same way. Returns
+  /// true when the local copy changed.
+  Future<bool> applyIncoming(String kind, Object? data) async {
+    final rec = _decodeRecord(kind, data);
+    if (rec == null) return false;
+    final existing =
+        await (db.select(db.finRows)
+              ..where((t) => t.kind.equals(kind) & t.id.equals(rec.id)))
+            .getSingleOrNull();
+    if (existing != null) {
+      if (existing.updatedAt > rec.updatedAt) return false;
+      if (existing.updatedAt == rec.updatedAt &&
+          jsonEncode(rec.json).compareTo(existing.json) <= 0) {
+        return false;
+      }
+    }
+    await _put(
+      kind,
+      rec.id,
+      rec.json,
+      rec.updatedAt,
+      rec.deleted,
+      dirty: false,
+    );
+    return true;
   }
 
   // ------------------------------------------------------ defaults, repeats
@@ -305,6 +424,17 @@ class FinanceRepository {
     }
     return null;
   }
+}
+
+/// One record as it travels in a letter.
+class MailRecord {
+  const MailRecord(this.kind, this.id, this.data, this.updatedAt);
+  final String kind;
+  final String id;
+  final Object? data;
+  final int updatedAt;
+
+  Map<String, Object?> toJson() => {'kind': kind, 'data': data};
 }
 
 class _Rec {

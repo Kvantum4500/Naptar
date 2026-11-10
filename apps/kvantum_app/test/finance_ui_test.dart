@@ -71,6 +71,8 @@ void main() {
       await boot(tester);
       expect(find.text('Pénzügyek'), findsOneWidget);
       expect(find.textContaining('még nincs tétel'), findsOneWidget);
+      expect(find.textContaining('csak ezen az eszközön'), findsOneWidget);
+      expect(find.textContaining('nincs teljes másolat'), findsOneWidget);
       expect(
         (await tester.runAsync(repo.categories))!.length,
         defaultCategories().length,

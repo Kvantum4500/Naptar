@@ -12,6 +12,13 @@ class DriveRecordFile {
   final String content;
 }
 
+/// Id and name of a file in the app folder (no content).
+class DriveName {
+  const DriveName({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
 class DrivePull {
   const DrivePull({
     required this.files,
@@ -48,6 +55,9 @@ abstract class DriveRemote {
     required String name,
     required String content,
   });
+
+  /// Files whose name starts with [prefix] (names only, oldest name first).
+  Future<List<DriveName>> listNames(String prefix);
 
   /// Deletes a duplicate file after its content has been merged elsewhere.
   Future<void> delete(String fileId);

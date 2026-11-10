@@ -5,6 +5,7 @@ import 'data/db.dart';
 import 'data/event_repository.dart';
 import 'data/finance_repository.dart';
 import 'data/record_repository.dart';
+import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
 
 final dbProvider = Provider<AppDatabase>((ref) {
@@ -14,7 +15,11 @@ final dbProvider = Provider<AppDatabase>((ref) {
 });
 
 final financeRepoProvider = Provider<FinanceRepository>(
-  (ref) => FinanceRepository(ref.watch(dbProvider)),
+  (ref) => FinanceRepository(
+    ref.watch(dbProvider),
+    // a change starts a mail run (debounced; does nothing when signed out)
+    onChanged: () => ref.read(syncControllerProvider.notifier).requestSync(),
+  ),
 );
 
 final finTxProvider = StreamProvider<List<FinTx>>(

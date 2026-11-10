@@ -58,6 +58,8 @@ class DriveSyncEngine {
       }
       final seen = <String>{};
       for (final entry in byName.entries) {
+        // finance mailbox files (peers, letters) are handled by FinanceMailbox
+        if (entry.key.startsWith('fin-')) continue;
         final files = entry.value..sort((a, b) => a.id.compareTo(b.id));
         final canonical = files.first;
         for (final f in files) {

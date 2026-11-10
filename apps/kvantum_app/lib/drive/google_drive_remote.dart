@@ -141,6 +141,31 @@ class GoogleDriveRemote implements DriveRemote {
   }
 
   @override
+  Future<List<DriveName>> listNames(String prefix) async {
+    final out = <DriveName>[];
+    String? page;
+    do {
+      final res = await _guard(
+        () => _api.files.list(
+          spaces: _space,
+          q: 'trashed = false',
+          pageSize: 200,
+          pageToken: page,
+          $fields: 'nextPageToken,files(id,name)',
+        ),
+      );
+      for (final f in res.files ?? const <d.File>[]) {
+        if (f.id != null && f.name != null && f.name!.startsWith(prefix)) {
+          out.add(DriveName(id: f.id!, name: f.name!));
+        }
+      }
+      page = res.nextPageToken;
+    } while (page != null);
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  @override
   Future<String> write({
     String? fileId,
     required String name,

@@ -168,7 +168,13 @@ void main() {
         final s = c.read(syncControllerProvider);
         expect(s.error, isNull);
         expect(s.pending, 0);
-        expect(drive.files.values.single.name, 'task-t1.json');
+        expect(
+          drive.files.values
+              .where((f) => !f.name.startsWith('fin-'))
+              .single
+              .name,
+          'task-t1.json',
+        );
         c.read(syncControllerProvider.notifier).signOut();
         await db.close();
       },
@@ -195,7 +201,10 @@ void main() {
         s = c.read(syncControllerProvider);
         expect(s.error, isNull);
         expect(s.pending, 0);
-        expect(drive.files.length, 1);
+        expect(
+          drive.files.values.where((f) => !f.name.startsWith('fin-')).length,
+          1,
+        );
         ctl.signOut();
         await db.close();
       },
@@ -211,7 +220,10 @@ void main() {
       final ctl = c.read(syncControllerProvider.notifier);
       await ctl.signIn();
       final s = c.read(syncControllerProvider);
-      expect(drive.files.length, 1);
+      expect(
+        drive.files.values.where((f) => !f.name.startsWith('fin-')).length,
+        1,
+      );
       expect(s.error, contains('Naptár'));
       ctl.signOut();
       await db.close();

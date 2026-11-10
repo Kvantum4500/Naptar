@@ -96,6 +96,7 @@ class SyncStatusButton extends ConsumerWidget {
                     'Utolsó sikeres szinkron: ${s.lastSync == null ? 'még nem volt' : '${fmtDate(s.lastSync!)} ${_hm(s.lastSync!)}'}\n'
                     'Függő módosítás: ${s.pending}\n'
                     'Naptár: Google „Naptar”\n'
+                    '${s.financeNote == null ? '' : '${s.financeNote}\n'}'
                     '${s.error == null ? 'Hiba: nincs' : 'Hiba: ${s.error}'}',
               );
             }();

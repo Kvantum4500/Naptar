@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../providers.dart';
+import '../../sync/sync_controller.dart';
 import '../format.dart';
 import 'finance_editors.dart';
 import 'finance_tabs.dart';
@@ -144,6 +145,8 @@ class OverviewTab extends ConsumerWidget {
             t.date.month == month.month)
           t,
     ];
+    final sync = ref.watch(syncControllerProvider);
+    final signedIn = sync.signedIn;
     final scheme = Theme.of(context).colorScheme;
 
     Widget card(String label, int value, Color color) => Expanded(
@@ -237,7 +240,14 @@ class OverviewTab extends ConsumerWidget {
           ),
         const SizedBox(height: 16),
         Text(
-          'Az adatok ezen az eszközön vannak elmentve. A Beállítások → Mentés és visszaállítás oldalon pénzügyi mentést is készíthetsz.',
+          signedIn
+              ? 'Az adatok ezen az eszközön vannak elmentve, a változások „levélben” átmennek a másik eszközre is (a Drive-ban csak a még át nem vett levelek vannak). ${sync.financeNote ?? ''}'
+              : 'Az adatok csak ezen az eszközön vannak. Belépve a változások átmennek a másik eszközre is.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'A Drive-ban nincs teljes másolat: időnként készíts mentést a Beállítások → Mentés és visszaállítás oldalon.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
