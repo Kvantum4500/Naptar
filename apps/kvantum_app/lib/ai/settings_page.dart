@@ -201,6 +201,42 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  Future<void> _exportFinance() async {
+    try {
+      final text = await ref.read(financeRepoProvider).exportJson();
+      final d = DateTime.now();
+      final name =
+          'penzugyek-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.json';
+      final ok = await ref.read(backupIoProvider).save(name, text);
+      if (ok) _toast('A pénzügyi adatok elmentve.');
+    } catch (e) {
+      _toast('A mentés nem sikerült: $e', error: true);
+    }
+  }
+
+  Future<void> _importFinance() async {
+    try {
+      final text = await ref.read(backupIoProvider).pick();
+      if (text == null) return;
+      final r = await ref.read(financeRepoProvider).importJson(text);
+      final any = r.added + r.updated > 0;
+      if (!r.recognized) {
+        _toast('Ez nem pénzügyi mentésfájl.', error: true);
+        return;
+      }
+      _toast(
+        any
+            ? 'Pénzügyi adat visszaállítva: ${r.added} új, ${r.updated} frissítve${r.skipped > 0 ? ', ${r.skipped} elem kihagyva' : ''}.'
+            : r.skipped > 0
+            ? 'Nem találtam használható pénzügyi adatot a fájlban.'
+            : 'Nincs mit visszaállítani: minden adat naprakész.',
+        error: !any && r.skipped > 0,
+      );
+    } catch (e) {
+      _toast('A visszaállítás nem sikerült: $e', error: true);
+    }
+  }
+
   Future<void> _import() async {
     try {
       final text = await ref.read(backupIoProvider).pick();
@@ -571,7 +607,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Visszaállítás fájlból'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _exportFinance,
+                      icon: const Icon(Icons.account_balance_wallet_outlined),
+                      label: const Text('Pénzügyek mentése'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _importFinance,
+                      icon: const Icon(Icons.restore),
+                      label: const Text('Pénzügyek visszaállítása'),
+                    ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'A pénzügyi adatok csak az eszközödön vannak meg (a Drive-ba csak a változások kerülnek), ezért érdemes időnként elmenteni őket.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ]),
               section('Alvási sáv', [

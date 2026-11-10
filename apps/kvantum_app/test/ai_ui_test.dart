@@ -268,6 +268,53 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('finance data can be saved and restored from a file', (
+      tester,
+    ) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      final fin = ref0(tester).read(financeRepoProvider);
+      await tester.runAsync(
+        () => fin.saveTx(
+          FinTx(
+            id: 'f1',
+            date: floating(2026, 11, 8),
+            amount: 3490,
+            kind: FinKind.expense,
+            merchant: 'SPAR',
+          ),
+        ),
+      );
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Pénzügyek mentése'),
+        200,
+        scrollable: scroll,
+      );
+      await tester.ensureVisible(find.text('Pénzügyek mentése'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pénzügyek mentése'));
+      await tester.pumpAndSettle();
+      expect(io.saved, contains('SPAR'));
+      expect(find.text('A pénzügyi adatok elmentve.'), findsOneWidget);
+
+      await tester.runAsync(() => fin.deleteTx('f1'));
+      io.toPick = io.saved;
+      await tester.ensureVisible(find.text('Pénzügyek visszaállítása'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pénzügyek visszaállítása'));
+      await tester.pumpAndSettle();
+      // the tombstone is newer than the backup, so nothing is resurrected
+      expect(find.textContaining('naprakész'), findsOneWidget);
+      expect((await tester.runAsync(fin.txs))!, isEmpty);
+
+      io.toPick = 'ez nem pénzügyi adat';
+      await tester.tap(find.text('Pénzügyek visszaállítása'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ez nem pénzügyi mentésfájl.'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
     testWidgets('restoring a changed event keeps its Google link', (
       tester,
     ) async {

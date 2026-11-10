@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
-import 'ui/home_page.dart';
+import 'ui/root_shell.dart';
 import 'update/update_service.dart' show cleanupOldFiles;
 
 Future<void> main() async {
@@ -36,6 +36,6 @@ class KvantumApp extends StatelessWidget {
       brightness: Brightness.dark,
       useMaterial3: true,
     ),
-    home: const HomePage(),
+    home: const RootShell(),
   );
 }

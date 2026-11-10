@@ -64,6 +64,21 @@ class DriveFileRows extends Table {
   Set<Column> get primaryKey => {name};
 }
 
+/// Finance records (transactions, categories, budgets, recurring rules, goals,
+/// deposits) as JSON, one row each. The local file is the source of truth;
+/// [dirty] marks changes that still have to be mailed to the other devices.
+class FinRows extends Table {
+  TextColumn get kind => text()();
+  TextColumn get id => text()();
+  TextColumn get json => text()();
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  BoolColumn get dirty => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column> get primaryKey => {kind, id};
+}
+
 class MetaRows extends Table {
   TextColumn get key => text()();
   TextColumn get value => text()();
@@ -72,14 +87,14 @@ class MetaRows extends Table {
 }
 
 @DriftDatabase(
-  tables: [EventRows, OutboxRows, MetaRows, RecordRows, DriveFileRows],
+  tables: [EventRows, OutboxRows, MetaRows, RecordRows, DriveFileRows, FinRows],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
   AppDatabase.open() : super(driftDatabase(name: 'kvantum'));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -104,6 +119,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         await m.createTable(recordRows);
         await m.createTable(driveFileRows);
+      }
+      if (from < 4) {
+        await m.createTable(finRows);
       }
     },
   );

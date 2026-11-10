@@ -1,0 +1,317 @@
+import 'dart:convert';
+
+import 'package:drift/drift.dart';
+import 'package:kvantum_core/kvantum_core.dart';
+import 'package:uuid/uuid.dart';
+
+import 'db.dart';
+
+const _kTx = 'tx';
+const _kCategory = 'category';
+const _kBudget = 'budget';
+const _kRecurring = 'recurring';
+const _kGoal = 'goal';
+const _kDeposit = 'deposit';
+
+/// Local finance store. The database file on the device is the source of
+/// truth; [FinRows.dirty] marks what still has to be mailed to other devices.
+class FinanceRepository {
+  FinanceRepository(this.db, {int Function()? clock})
+    : _clock = clock ?? (() => DateTime.now().toUtc().millisecondsSinceEpoch);
+
+  final AppDatabase db;
+  final int Function() _clock;
+
+  int now() => _clock();
+  String newId() => const Uuid().v4();
+
+  // ----------------------------------------------------------------- reads
+
+  Stream<List<T>> _watch<T>(String kind, T? Function(Object?) parse) =>
+      (db.select(db.finRows)..where((t) => t.kind.equals(kind))).watch().map(
+        (rows) => [
+          for (final r in rows)
+            if (!r.deleted) ?_parse(r.json, parse),
+        ],
+      );
+
+  Future<List<T>> _all<T>(
+    String kind,
+    T? Function(Object?) parse, {
+    bool deleted = false,
+  }) async {
+    final rows = await (db.select(
+      db.finRows,
+    )..where((t) => t.kind.equals(kind))).get();
+    return [
+      for (final r in rows)
+        if (deleted || !r.deleted) ?_parse(r.json, parse),
+    ];
+  }
+
+  T? _parse<T>(String json, T? Function(Object?) parse) {
+    try {
+      return parse(jsonDecode(json));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Stream<List<FinTx>> watchTx() => _watch(_kTx, FinTx.fromJson);
+  Stream<List<FinCategory>> watchCategories() =>
+      _watch(_kCategory, FinCategory.fromJson);
+  Stream<List<FinBudget>> watchBudgets() =>
+      _watch(_kBudget, FinBudget.fromJson);
+  Stream<List<FinRecurring>> watchRecurring() =>
+      _watch(_kRecurring, FinRecurring.fromJson);
+  Stream<List<FinGoal>> watchGoals() => _watch(_kGoal, FinGoal.fromJson);
+  Stream<List<FinDeposit>> watchDeposits() =>
+      _watch(_kDeposit, FinDeposit.fromJson);
+
+  Future<List<FinTx>> txs() => _all(_kTx, FinTx.fromJson);
+  Future<List<FinCategory>> categories() =>
+      _all(_kCategory, FinCategory.fromJson);
+  Future<List<FinBudget>> budgets() => _all(_kBudget, FinBudget.fromJson);
+  Future<List<FinRecurring>> recurring() =>
+      _all(_kRecurring, FinRecurring.fromJson);
+  Future<List<FinGoal>> goals() => _all(_kGoal, FinGoal.fromJson);
+  Future<List<FinDeposit>> deposits() => _all(_kDeposit, FinDeposit.fromJson);
+
+  // ---------------------------------------------------------------- writes
+
+  Future<void> _put(
+    String kind,
+    String id,
+    Map<String, Object?> json,
+    int updatedAt,
+    bool deleted, {
+    bool dirty = true,
+  }) => db
+      .into(db.finRows)
+      .insertOnConflictUpdate(
+        FinRowsCompanion.insert(
+          kind: kind,
+          id: id,
+          json: jsonEncode(json),
+          updatedAt: Value(updatedAt),
+          deleted: Value(deleted),
+          dirty: Value(dirty),
+        ),
+      );
+
+  Future<void> saveTx(FinTx t) {
+    final x = t.copyWith(updatedAt: now());
+    return _put(_kTx, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  Future<void> saveCategory(FinCategory c) {
+    final x = c.copyWith(updatedAt: now());
+    return _put(_kCategory, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  Future<void> saveBudget(FinBudget b) {
+    final x = b.copyWith(updatedAt: now());
+    return _put(_kBudget, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  Future<void> saveRecurring(FinRecurring r) {
+    final x = r.copyWith(updatedAt: now());
+    return _put(_kRecurring, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  Future<void> saveGoal(FinGoal g) {
+    final x = g.copyWith(updatedAt: now());
+    return _put(_kGoal, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  Future<void> saveDeposit(FinDeposit d) {
+    final x = d.copyWith(updatedAt: now());
+    return _put(_kDeposit, x.id, x.toJson(), x.updatedAt, x.deleted);
+  }
+
+  /// Deleting leaves a tombstone, so the deletion reaches the other devices.
+  Future<void> deleteTx(String id) async {
+    for (final t in await _all(_kTx, FinTx.fromJson)) {
+      if (t.id == id) return saveTx(t.copyWith(deleted: true));
+    }
+  }
+
+  Future<void> deleteBudget(String categoryId) async {
+    for (final b in await budgets()) {
+      if (b.id == categoryId) return saveBudget(b.copyWith(deleted: true));
+    }
+  }
+
+  Future<void> deleteRecurring(String id) async {
+    for (final r in await recurring()) {
+      if (r.id == id) return saveRecurring(r.copyWith(deleted: true));
+    }
+  }
+
+  /// Deleting a goal also removes its deposits.
+  Future<void> deleteGoal(String id) async {
+    for (final g in await goals()) {
+      if (g.id == id) await saveGoal(g.copyWith(deleted: true));
+    }
+    for (final d in await deposits()) {
+      if (d.goalId == id) await saveDeposit(d.copyWith(deleted: true));
+    }
+  }
+
+  Future<void> deleteDeposit(String id) async {
+    for (final d in await deposits()) {
+      if (d.id == id) return saveDeposit(d.copyWith(deleted: true));
+    }
+  }
+
+  /// How many live transactions / rules still use a category.
+  Future<int> categoryUsage(String id) async {
+    final t = (await txs()).where((x) => x.categoryId == id).length;
+    final r = (await recurring()).where((x) => x.categoryId == id).length;
+    return t + r;
+  }
+
+  /// Deletes a category only when nothing uses it. Returns false otherwise.
+  Future<bool> deleteCategory(String id) async {
+    if (await categoryUsage(id) > 0) return false;
+    for (final c in await categories()) {
+      if (c.id == id) {
+        await saveCategory(c.copyWith(deleted: true));
+        await deleteBudget(id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------ defaults, repeats
+
+  Future<bool> _exists(String kind, String id) async =>
+      await (db.select(db.finRows)
+            ..where((t) => t.kind.equals(kind) & t.id.equals(id)))
+          .getSingleOrNull() !=
+      null;
+
+  /// Seeds the default categories. Their ids are fixed, so every device
+  /// creates the same rows and nothing needs to be mailed for them.
+  Future<void> ensureDefaults() async {
+    for (final c in defaultCategories()) {
+      if (!await _exists(_kCategory, c.id)) {
+        await _put(_kCategory, c.id, c.toJson(), 0, false, dirty: false);
+      }
+    }
+  }
+
+  /// Creates the transactions the recurring rules expect in [year]/[month]
+  /// that do not exist yet (a deleted one is NOT brought back). Generated
+  /// rows have a fixed id and need no mailing: every device derives them.
+  Future<int> ensureRecurring(int year, int month) async {
+    var created = 0;
+    for (final t in dueRecurring(await recurring(), year, month)) {
+      if (await _exists(_kTx, t.id)) continue;
+      await _put(_kTx, t.id, t.toJson(), t.updatedAt, false, dirty: false);
+      created++;
+    }
+    return created;
+  }
+
+  // ------------------------------------------------------- backup (JSON)
+
+  /// All live records as one JSON text (the manual backup).
+  Future<String> exportJson() async {
+    final rows = await (db.select(
+      db.finRows,
+    )..where((t) => t.deleted.equals(false))).get();
+    return jsonEncode({
+      'format': 'kvantum-finance',
+      'version': 1,
+      'records': [
+        for (final r in rows) {'kind': r.kind, 'data': jsonDecode(r.json)},
+      ],
+    });
+  }
+
+  /// Restores a backup: creates missing records and updates older ones; never
+  /// deletes. Unusable records are counted and skipped.
+  Future<({int added, int updated, int skipped, bool recognized})> importJson(
+    String text,
+  ) async {
+    Object? root;
+    try {
+      root = jsonDecode(text);
+    } on FormatException {
+      return (added: 0, updated: 0, skipped: 0, recognized: false);
+    }
+    final list = root is Map ? root['records'] : null;
+    if (list is! List) {
+      return (added: 0, updated: 0, skipped: 0, recognized: false);
+    }
+    var added = 0, updated = 0, skipped = 0;
+    for (final item in list) {
+      final kind = item is Map ? item['kind'] : null;
+      final data = item is Map ? item['data'] : null;
+      final rec = _decodeRecord('$kind', data);
+      if (rec == null) {
+        skipped++;
+        continue;
+      }
+      final existing =
+          await (db.select(db.finRows)
+                ..where((t) => t.kind.equals(rec.kind) & t.id.equals(rec.id)))
+              .getSingleOrNull();
+      if (existing == null) {
+        await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+        added++;
+      } else if (rec.updatedAt > existing.updatedAt) {
+        await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+        updated++;
+      }
+    }
+    return (added: added, updated: updated, skipped: skipped, recognized: true);
+  }
+
+  _Rec? _decodeRecord(String kind, Object? data) {
+    switch (kind) {
+      case _kTx:
+        final x = FinTx.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+      case _kCategory:
+        final x = FinCategory.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+      case _kBudget:
+        final x = FinBudget.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+      case _kRecurring:
+        final x = FinRecurring.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+      case _kGoal:
+        final x = FinGoal.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+      case _kDeposit:
+        final x = FinDeposit.fromJson(data);
+        return x == null
+            ? null
+            : _Rec(kind, x.id, x.toJson(), x.updatedAt, x.deleted);
+    }
+    return null;
+  }
+}
+
+class _Rec {
+  const _Rec(this.kind, this.id, this.json, this.updatedAt, this.deleted);
+  final String kind;
+  final String id;
+  final Map<String, Object?> json;
+  final int updatedAt;
+  final bool deleted;
+}

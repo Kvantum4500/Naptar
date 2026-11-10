@@ -3,6 +3,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'data/db.dart';
 import 'data/event_repository.dart';
+import 'data/finance_repository.dart';
 import 'data/record_repository.dart';
 import 'ui/day_utils.dart';
 
@@ -11,6 +12,29 @@ final dbProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+
+final financeRepoProvider = Provider<FinanceRepository>(
+  (ref) => FinanceRepository(ref.watch(dbProvider)),
+);
+
+final finTxProvider = StreamProvider<List<FinTx>>(
+  (ref) => ref.watch(financeRepoProvider).watchTx(),
+);
+final finCategoriesProvider = StreamProvider<List<FinCategory>>(
+  (ref) => ref.watch(financeRepoProvider).watchCategories(),
+);
+final finBudgetsProvider = StreamProvider<List<FinBudget>>(
+  (ref) => ref.watch(financeRepoProvider).watchBudgets(),
+);
+final finRecurringProvider = StreamProvider<List<FinRecurring>>(
+  (ref) => ref.watch(financeRepoProvider).watchRecurring(),
+);
+final finGoalsProvider = StreamProvider<List<FinGoal>>(
+  (ref) => ref.watch(financeRepoProvider).watchGoals(),
+);
+final finDepositsProvider = StreamProvider<List<FinDeposit>>(
+  (ref) => ref.watch(financeRepoProvider).watchDeposits(),
+);
 
 final repoProvider = Provider<EventRepository>(
   (ref) => EventRepository(ref.watch(dbProvider)),
