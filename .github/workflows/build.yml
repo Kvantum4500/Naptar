@@ -5,6 +5,12 @@ name: Build apps
 # Runs: on every push to main, on version tags, manually, and on feature
 # branches only when the commit message contains "[build]" (saves minutes).
 #
+# Channels: a build of main or of a v* tag is a STABLE release (GitHub's
+# "latest"). A build of any other branch (or a manual run elsewhere) is a
+# PRE-RELEASE: the app offers it only when "Előzetes verziókat is keressen" is
+# on. Secrets are readable by every branch workflow; to make a release wait for
+# a human, move them into a GitHub Environment with required reviewers.
+#
 # The toolchain is pinned (Flutter 3.47.9 = Dart 3.13.7, the version the tests
 # run with); move it deliberately, not by accident of the "stable" channel.
 #
@@ -134,15 +140,27 @@ jobs:
             echo "apk=out/naptar-android-${BUILD_NUMBER}.apk" >> "$GITHUB_OUTPUT"
             echo "apksha=out/naptar-android-${BUILD_NUMBER}.apk.sha256" >> "$GITHUB_OUTPUT"
           fi
+      - name: Stable or preview?
+        id: channel
+        run: |
+          # GITHUB_REF / GITHUB_REF_NAME come from the environment, never pasted into the script
+          if [ "$GITHUB_REF" = "refs/heads/main" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+            echo "title=" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "title= (előzetes: $GITHUB_REF_NAME)" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: Build ${{ github.run_number }}
+          name: Build ${{ github.run_number }}${{ steps.channel.outputs.title }}
           body: |
             Build ${{ github.run_number }} (${{ github.sha }})
             ${{ github.event.head_commit.message }}
-          make_latest: true
+          prerelease: ${{ steps.channel.outputs.stable != 'true' }}
+          make_latest: ${{ steps.channel.outputs.stable == 'true' }}
           files: |
             out/naptar-windows-${{ github.run_number }}.zip
             out/naptar-windows-${{ github.run_number }}.zip.sha256
