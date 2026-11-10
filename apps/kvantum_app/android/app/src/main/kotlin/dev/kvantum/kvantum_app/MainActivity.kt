@@ -15,6 +15,14 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isEnabled" -> result.success(listenerEnabled())
                     "drain" -> result.success(WalletNotificationListener.drain(applicationContext))
+                    "ack" -> {
+                        WalletNotificationListener.ack(applicationContext)
+                        result.success(null)
+                    }
+                    "clear" -> {
+                        WalletNotificationListener.clear(applicationContext)
+                        result.success(null)
+                    }
                     "openListenerSettings" -> {
                         openSettings(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                         result.success(null)

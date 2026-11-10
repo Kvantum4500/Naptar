@@ -71,6 +71,10 @@ final aiUsageProvider = FutureProvider.autoDispose<int>(
   (ref) => ref.watch(aiSettingsStoreProvider).usageToday(),
 );
 
+/// The clock the assistant plans with (proposals must lie ahead of it).
+/// Tests replace it so their fixed dates stay valid.
+final aiClockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
+
 /// Colour of events the assistant creates (Google "Sage"): easy to tell apart.
 const aiEventColorId = '2';
 
@@ -147,6 +151,8 @@ class AssistantState {
     movedCount: movedCount,
     notice: notice,
     errorDetail: errorDetail,
+    askWhy: askWhy,
+    habitSaved: habitSaved,
     busy: busy ?? this.busy,
     outcome: clearOutcome ? null : (outcome ?? this.outcome),
     error: clearError ? null : (error ?? this.error),
@@ -154,6 +160,8 @@ class AssistantState {
     selected: selected ?? this.selected,
     acceptedCount: clearAccepted ? null : (acceptedCount ?? this.acceptedCount),
     prompt: prompt ?? this.prompt,
+    // the progress line ("waiting for the rate limit…") used to be dropped here
+    status: clearStatus ? null : (status ?? this.status),
   );
 }
 
@@ -183,7 +191,8 @@ class AssistantController extends Notifier<AssistantState> {
         LlmConfig(
           provider: info.id,
           apiKey: key ?? '',
-          baseUrl: settings.customBaseUrl,
+          // only the custom provider has an address of its own
+          baseUrl: info.id == 'custom' ? settings.customBaseUrl : null,
         ),
       );
       final settingsNotifier = ref.read(aiSettingsProvider.notifier);
@@ -199,6 +208,7 @@ class AssistantController extends Notifier<AssistantState> {
         await settingsNotifier.change(settings);
       }
       final service = AssistantService(
+        now: ref.read(aiClockProvider),
         provider: provider,
         events: ref.read(repoProvider),
         records: ref.read(recordRepoProvider),

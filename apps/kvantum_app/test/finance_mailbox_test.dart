@@ -306,6 +306,35 @@ void main() {
     expect(letters(drive), 0);
   });
 
+  test(
+    'a device that returns after being written off gets the whole snapshot',
+    () async {
+      final c = await Device('cccc3333', drive).open();
+      addTearDown(c.close);
+      for (final d in [a, b, c, a, b, c]) {
+        await d.mail.sync(); // everyone announces itself and greets the others
+      }
+      const day = 24 * 3600 * 1000;
+
+      // B stays away for 200 days; A and C carry on and count it as gone
+      a.now += 200 * day;
+      c.now += 200 * day;
+      await c.mail.sync();
+      await a.addTx('t9', 900);
+      await a.mail.sync(); // delivered to C only; A's change is now "clean"
+      await c.mail.sync();
+      expect(await c.amounts(), {'t9': 900});
+      expect(await b.amounts(), isEmpty);
+
+      // B comes back: it must not be left with the gap
+      b.now = a.now;
+      await b.mail.sync();
+      await a.mail.sync();
+      await b.mail.sync();
+      expect(await b.amounts(), {'t9': 900});
+    },
+  );
+
   test('the presence note is refreshed only now and then', () async {
     await a.mail.sync();
     final w = drive.writes;

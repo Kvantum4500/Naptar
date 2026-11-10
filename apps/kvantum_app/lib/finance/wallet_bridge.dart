@@ -23,8 +23,16 @@ abstract class WalletBridge {
   /// Whether the user has granted "notification access" to this app.
   Future<bool> isEnabled();
 
-  /// The notifications collected since the last call (the queue is emptied).
+  /// The notifications collected so far. They are handed out, but NOT forgotten
+  /// until [ack]: if the app dies while booking them, the next call returns
+  /// them again (booking is idempotent).
   Future<List<WalletNotification>> drain();
+
+  /// Everything [drain] returned has been booked: forget it.
+  Future<void> ack();
+
+  /// Throws the queue away (the feature is switched off).
+  Future<void> clear();
 
   Future<void> openListenerSettings();
 
@@ -70,8 +78,20 @@ class ChannelWalletBridge implements WalletBridge {
             ),
       ];
     } on FormatException {
+      // an unreadable queue would come back forever: drop it
+      await ack();
       return const [];
     }
+  }
+
+  @override
+  Future<void> ack() async {
+    await _call<void>('ack');
+  }
+
+  @override
+  Future<void> clear() async {
+    await _call<void>('clear');
   }
 
   @override

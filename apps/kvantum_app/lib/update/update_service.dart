@@ -101,8 +101,14 @@ class UpdateService {
     'X-GitHub-Api-Version': '2022-11-28',
   };
 
-  /// Compares the running [currentBuild] with the latest release.
-  Future<UpdateStatus> check(int currentBuild) async {
+  /// Compares the running [currentBuild] with the latest release. With
+  /// [includePreviews] the newest published build counts, pre-releases (builds
+  /// of work-in-progress branches) included; without it only the release
+  /// GitHub marks as "latest" does.
+  Future<UpdateStatus> check(
+    int currentBuild, {
+    bool includePreviews = false,
+  }) async {
     if (token.isEmpty) {
       return const UpdateFailed(
         UpdateErrorKind.notConfigured,
@@ -119,7 +125,11 @@ class UpdateService {
     try {
       res = await client
           .get(
-            Uri.parse('$apiBase/repos/$repo/releases/latest'),
+            Uri.parse(
+              includePreviews
+                  ? '$apiBase/repos/$repo/releases?per_page=20'
+                  : '$apiBase/repos/$repo/releases/latest',
+            ),
             headers: {..._auth, 'Accept': 'application/vnd.github+json'},
           )
           .timeout(const Duration(seconds: 20));
@@ -157,7 +167,30 @@ class UpdateService {
         'Váratlan válasz a GitHubtól (${res.statusCode}).',
       );
     }
-    final json = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    final Map<String, dynamic> json;
+    if (includePreviews) {
+      // the newest build among the published releases, pre-releases included
+      Map<String, dynamic>? best;
+      var bestBuild = -1;
+      for (final r in decoded is List ? decoded : const []) {
+        if (r is! Map<String, dynamic> || r['draft'] == true) continue;
+        final b = buildFromTag('${r['tag_name']}');
+        if (b != null && b > bestBuild) {
+          best = r;
+          bestBuild = b;
+        }
+      }
+      if (best == null) {
+        return const UpdateFailed(
+          UpdateErrorKind.noRelease,
+          'Még nincs kiadott verzió (vagy a token nem éri el a tárolót).',
+        );
+      }
+      json = best;
+    } else {
+      json = decoded as Map<String, dynamic>;
+    }
     final build = buildFromTag('${json['tag_name']}');
     if (build == null) {
       return UpdateFailed(

@@ -103,6 +103,10 @@ class GoogleCalendarRemote implements RemoteCalendar {
     final changes = <RemoteChange>[];
     String? page;
     String? next;
+    // Computed once: every page of one listing must use the same filter.
+    final timeMin = syncToken == null
+        ? DateTime.now().toUtc().subtract(window)
+        : null;
     do {
       final g.Events res;
       try {
@@ -110,9 +114,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
           () => _api.events.list(
             real,
             syncToken: syncToken,
-            timeMin: syncToken == null
-                ? DateTime.now().toUtc().subtract(window)
-                : null,
+            timeMin: timeMin,
             showDeleted: true,
             singleEvents: false,
             maxResults: 250,
@@ -129,7 +131,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
       page = res.nextPageToken;
       next = res.nextSyncToken ?? next;
     } while (page != null);
-    return PullResult(changes, next);
+    return PullResult(changes, next, windowStartUtc: timeMin);
   }
 
   RemoteChange? _toChange(g.Event e, String calendarId, String defaultTz) {

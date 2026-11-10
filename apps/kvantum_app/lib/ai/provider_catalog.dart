@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 
+import 'endpoint_policy.dart';
 import 'gemini_provider.dart';
 import 'llm_provider.dart';
 import 'openai_provider.dart';
@@ -107,7 +108,19 @@ class LlmConfig {
 
 LLMProvider buildProvider(LlmConfig c, http.Client client) {
   if (c.provider == 'gemini') return GeminiProvider(client, apiKey: c.apiKey);
-  final base = c.baseUrl ?? providerById(c.provider).baseUrl;
+  // Only the "custom" provider has an address chosen by the user. A leftover
+  // custom address must never redirect the key and the data of Groq, Mistral…
+  final String? base;
+  if (c.provider == 'custom') {
+    final text = c.baseUrl?.trim() ?? '';
+    if (text.isNotEmpty) {
+      final check = checkCustomEndpoint(text);
+      if (!check.ok) throw LlmBadResponse(check.error!);
+    }
+    base = text;
+  } else {
+    base = providerById(c.provider).baseUrl;
+  }
   if (base == null || base.trim().isEmpty) {
     throw const LlmBadResponse('Add meg a szolgáltató címét a Beállításokban.');
   }

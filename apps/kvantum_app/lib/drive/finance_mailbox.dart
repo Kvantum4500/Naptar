@@ -109,6 +109,10 @@ class FinanceMailbox {
       final peers = await _activePeers();
       peerCount = peers.length;
       final known = await _known();
+      // A device that has been silent long enough to count as gone missed
+      // everything sent to the others meanwhile. Forget it, so that it is
+      // greeted with the whole snapshot when it shows up again.
+      known.removeWhere((id) => !peers.contains(id));
       final changed = await repo.mailRecords(onlyDirty: true);
       List<MailRecord>? everything;
       var allDelivered = false;

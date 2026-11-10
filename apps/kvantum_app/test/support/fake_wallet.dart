@@ -12,6 +12,11 @@ class FakeWallet implements WalletBridge {
   bool enabled;
   final List<WalletNotification> queue;
   int drains = 0;
+  int acks = 0;
+  int clears = 0;
+
+  /// Handed out by [drain] but not yet acknowledged.
+  final List<WalletNotification> inflight = [];
   int listenerOpened = 0;
   int appInfoOpened = 0;
 
@@ -21,9 +26,25 @@ class FakeWallet implements WalletBridge {
   @override
   Future<List<WalletNotification>> drain() async {
     drains++;
-    final out = [...queue];
+    final out = [...inflight, ...queue];
+    inflight
+      ..clear()
+      ..addAll(out);
     queue.clear();
     return out;
+  }
+
+  @override
+  Future<void> ack() async {
+    acks++;
+    inflight.clear();
+  }
+
+  @override
+  Future<void> clear() async {
+    clears++;
+    inflight.clear();
+    queue.clear();
   }
 
   @override

@@ -42,6 +42,15 @@ Map<String, Object?> release(int build, {List<String>? names}) => {
   ],
 };
 
+class _MemoryPrefs implements UpdatePrefs {
+  _MemoryPrefs(this.on);
+  bool on;
+  @override
+  Future<bool> previews() async => on;
+  @override
+  Future<void> setPreviews(bool v) async => on = v;
+}
+
 UpdateService svc(
   MockClientHandler h, {
   String token = 'tok',
@@ -460,16 +469,21 @@ void main() {
           platform: UpdatePlatform.windows,
         );
 
-    Widget host(UpdateService s, {UpdateInstaller? installer, int build = 5}) =>
-        ProviderScope(
-          overrides: [
-            currentBuildProvider.overrideWith((ref) async => build),
-            updateServiceProvider.overrideWithValue(s),
-            if (installer != null)
-              updateInstallerProvider.overrideWithValue(installer),
-          ],
-          child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
-        );
+    Widget host(
+      UpdateService s, {
+      UpdateInstaller? installer,
+      int build = 5,
+      bool previews = false,
+    }) => ProviderScope(
+      overrides: [
+        currentBuildProvider.overrideWith((ref) async => build),
+        updatePrefsProvider.overrideWithValue(_MemoryPrefs(previews)),
+        updateServiceProvider.overrideWithValue(s),
+        if (installer != null)
+          updateInstallerProvider.overrideWithValue(installer),
+      ],
+      child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
+    );
 
     testWidgets('up to date', (tester) async {
       await tester.pumpWidget(host(service((_) async => _json(release(5)))));
@@ -543,6 +557,95 @@ void main() {
         expect(find.text('Kész, újraindítás…'), findsOneWidget);
       },
     );
+  });
+
+  group('preview builds', () {
+    List<Object?> releases() => [
+      {...release(5), 'prerelease': false},
+      {...release(7), 'prerelease': true},
+      {...release(9), 'draft': true},
+    ];
+
+    test('with previews the newest published build wins, a pre-release '
+        'included, a draft never', () async {
+      Uri? asked;
+      final r = await svc((req) async {
+        asked = req.url;
+        return _json(releases());
+      }).check(5, includePreviews: true);
+      expect(asked.toString(), endsWith('/repos/o/r/releases?per_page=20'));
+      expect((r as UpdateAvailable).info.build, 7);
+    });
+
+    test(
+      'without previews only the release marked latest is asked for',
+      () async {
+        Uri? asked;
+        await svc((req) async {
+          asked = req.url;
+          return _json(release(5));
+        }).check(5);
+        expect(asked.toString(), endsWith('/repos/o/r/releases/latest'));
+      },
+    );
+
+    test(
+      'a preview that is not newer than the installed build is no update',
+      () async {
+        final r = await svc((_) async => _json(releases()))
+            .check(7, includePreviews: true);
+        expect(r, isA<UpToDate>());
+      },
+    );
+
+    test('no published release at all', () async {
+      final empty = await svc((_) async => _json([]))
+          .check(1, includePreviews: true);
+      expect((empty as UpdateFailed).kind, UpdateErrorKind.noRelease);
+      final onlyDraft = await svc(
+        (_) async => _json([
+          {...release(3), 'draft': true},
+        ]),
+      ).check(1, includePreviews: true);
+      expect((onlyDraft as UpdateFailed).kind, UpdateErrorKind.noRelease);
+    });
+
+    testWidgets('the dialog switch changes what is asked and is remembered', (
+      tester,
+    ) async {
+      final asked = <String>[];
+      final prefs = _MemoryPrefs(true);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentBuildProvider.overrideWith((ref) async => 5),
+            updatePrefsProvider.overrideWithValue(prefs),
+            updateServiceProvider.overrideWithValue(
+              UpdateService(
+                client: MockClient((req) async {
+                  asked.add(req.url.toString());
+                  return req.url.path.endsWith('/latest')
+                      ? _json(release(5))
+                      : _json([release(7)]);
+                }),
+                repo: 'o/r',
+                token: 'tok',
+                platform: UpdatePlatform.windows,
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Új verzió érhető el: 7'), findsOneWidget);
+
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pumpAndSettle();
+      expect(prefs.on, isFalse);
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
+      expect(asked.last, endsWith('/releases/latest'));
+    });
   });
 }
 

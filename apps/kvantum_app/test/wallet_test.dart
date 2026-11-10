@@ -132,15 +132,52 @@ void main() {
     expect(await repo.rememberMerchant('SPAR', kUncategorized), 0);
   });
 
-  test('switched off: the queue is left alone and nothing is booked', () async {
-    await ingest.setAuto(false);
-    bridge.queue.add(note('SPAR', '3 490 Ft', t0));
+  test(
+    'switched off: nothing is booked and no raw text is kept on the phone',
+    () async {
+      await ingest.setAuto(false);
+      bridge.queue.add(note('SPAR', '3 490 Ft', t0));
+      final r = await ingest.run();
+      expect(r.seen, 0);
+      expect(bridge.drains, 0);
+      expect(bridge.clears, 1);
+      expect(bridge.queue, isEmpty);
+      expect(bridge.inflight, isEmpty);
+      // switched on again: only what arrives from now on is booked
+      await ingest.setAuto(true);
+      expect((await ingest.run()).booked, 0);
+      bridge.queue.add(note('SPAR', '3 490 Ft', t0 + 1000));
+      expect((await ingest.run()).booked, 1);
+    },
+  );
+
+  test('the queue is forgotten only after the payments are booked', () async {
+    bridge.queue
+      ..add(note('SPAR', '3 490 Ft', t0))
+      ..add(note('Lidl', '1 200 Ft', t0 + 1000));
     final r = await ingest.run();
-    expect(r.seen, 0);
-    expect(bridge.drains, 0);
-    expect(bridge.queue.length, 1);
-    await ingest.setAuto(true);
-    expect((await ingest.run()).booked, 1);
+    expect(r.booked, 2);
+    expect(bridge.acks, 1);
+    expect(bridge.inflight, isEmpty);
+  });
+
+  test('a crash while booking loses nothing and books nothing twice', () async {
+    final flaky = _FlakyRepo(db, clock: () => 5000);
+    bridge.queue
+      ..add(note('SPAR', '3 490 Ft', t0))
+      ..add(note('Lidl', '1 200 Ft', t0 + 1000));
+    final run = WalletIngest(flaky, bridge);
+
+    flaky.failOn = 'Lidl'; // the second payment cannot be saved
+    await expectLater(run.run(), throwsStateError);
+    expect(bridge.acks, 0, reason: 'not acknowledged: the queue must stay');
+    expect(bridge.inflight.length, 2);
+
+    flaky.failOn = null; // the next start
+    final again = await run.run();
+    expect(again.booked, 1); // the Lidl payment; SPAR was booked already
+    expect(bridge.inflight, isEmpty);
+    expect((await repo.txs()).length, 2);
   });
 
   test('on a platform without Wallet access nothing happens', () async {
@@ -175,4 +212,18 @@ void main() {
     expect(a, isNot(WalletIngest.idFor(note('X', 'y', 2))));
     expect(a, startsWith('wal-'));
   });
+}
+
+/// A repository whose save fails for one merchant: a disk problem half way.
+class _FlakyRepo extends FinanceRepository {
+  _FlakyRepo(super.db, {super.clock});
+  String? failOn;
+
+  @override
+  Future<void> saveTx(FinTx tx) {
+    if (failOn != null && tx.merchant.contains(failOn!)) {
+      throw StateError('disk full');
+    }
+    return super.saveTx(tx);
+  }
 }

@@ -92,16 +92,28 @@ class SyncEngine {
     if (isFull) {
       // Mirror: anything we had linked to Google that Google no longer lists
       // was deleted remotely (only when we have no pending local change for it).
+      // A windowed listing never contained what started before the window, so
+      // the older history is kept instead of being mistaken for deletions.
+      final since = res.windowStartUtc;
       for (final l in await repo.all()) {
         if (l.calendarId == calendarId &&
             l.googleId != null &&
             !seenGoogleIds.contains(l.googleId) &&
             !pendingIds.contains(l.id)) {
+          if (since != null && _startsBefore(l, since)) continue;
           await repo.removeFromRemote(l.id);
         }
       }
     }
     await repo.setMeta(_tokenKey(calendarId), res.nextSyncToken);
+  }
+
+  static bool _startsBefore(CalEvent e, DateTime t) {
+    try {
+      return e.startUtc.isBefore(t);
+    } catch (_) {
+      return false; // an event we cannot place in time is judged like any other
+    }
   }
 
   Future<void> _apply(

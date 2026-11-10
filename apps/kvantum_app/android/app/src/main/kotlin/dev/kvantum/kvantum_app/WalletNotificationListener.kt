@@ -12,6 +12,10 @@ import org.json.JSONObject
  * into a small local queue. The Flutter side drains the queue when the app is
  * open, so nothing is lost while it is closed. Only title, text and the time
  * are kept; the queue never leaves the device by itself.
+ *
+ * Handing the queue out is a two-step affair ([drain], then [ack]) so that a
+ * crash while the app books the payments loses nothing. Text that nobody picked
+ * up for [MAX_AGE_MS] is thrown away, so raw notification text cannot linger.
  */
 class WalletNotificationListener : NotificationListenerService() {
 
@@ -27,8 +31,8 @@ class WalletNotificationListener : NotificationListenerService() {
             applicationContext,
             JSONObject()
                 .put("pkg", n.packageName)
-                .put("title", title.take(200))
-                .put("text", text.take(500))
+                .put("title", mask(title).take(200))
+                .put("text", mask(text).take(500))
                 .put("time", n.postTime)
         )
     }
@@ -39,41 +43,100 @@ class WalletNotificationListener : NotificationListenerService() {
 
         private const val PREFS = "wallet_queue"
         private const val KEY = "items"
+
+        /** Handed out by [drain], waiting for [ack]. */
+        private const val INFLIGHT = "inflight"
         private const val MAX = 200
+        private const val MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
         private val lock = Any()
+
+        /**
+         * 11 or more digits (single separators allowed) are a card, account or
+         * phone number, never a forint amount: they are not stored at all.
+         */
+        private val LONG_DIGITS = Regex("""\d(?:[ \-.]?\d){10,}""")
+
+        fun mask(s: String): String = s.replace(LONG_DIGITS, "••••")
+
+        private fun read(context: Context, key: String): JSONArray {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return try {
+                JSONArray(prefs.getString(key, "[]"))
+            } catch (e: Exception) {
+                JSONArray()
+            }
+        }
+
+        private fun same(a: JSONObject, b: JSONObject): Boolean =
+            a.optLong("time") == b.optLong("time") &&
+                a.optString("title") == b.optString("title") &&
+                a.optString("text") == b.optString("text")
+
+        private fun contains(list: JSONArray, item: JSONObject): Boolean {
+            for (i in 0 until list.length()) {
+                val o = list.optJSONObject(i) ?: continue
+                if (same(o, item)) return true
+            }
+            return false
+        }
 
         fun enqueue(context: Context, item: JSONObject) {
             synchronized(lock) {
                 val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                val list = try {
-                    JSONArray(prefs.getString(KEY, "[]"))
-                } catch (e: Exception) {
-                    JSONArray()
-                }
+                val list = read(context, KEY)
                 // the same notification can be posted twice (updates): skip exact repeats
+                if (contains(list, item)) return
+                list.put(item)
+                // keep the newest MAX, and nothing older than MAX_AGE_MS
+                val cutoff = System.currentTimeMillis() - MAX_AGE_MS
+                val kept = ArrayList<JSONObject>()
                 for (i in 0 until list.length()) {
                     val o = list.optJSONObject(i) ?: continue
-                    if (o.optLong("time") == item.optLong("time") &&
-                        o.optString("title") == item.optString("title") &&
-                        o.optString("text") == item.optString("text")
-                    ) return
+                    if (o.optLong("time") >= cutoff) kept.add(o)
                 }
-                list.put(item)
-                // keep the newest MAX
+                val from = maxOf(0, kept.size - MAX)
                 val trimmed = JSONArray()
-                val from = maxOf(0, list.length() - MAX)
-                for (i in from until list.length()) trimmed.put(list.get(i))
+                for (i in from until kept.size) trimmed.put(kept[i])
                 prefs.edit().putString(KEY, trimmed.toString()).apply()
             }
         }
 
-        /** Returns the queued notifications as JSON text and empties the queue. */
+        /**
+         * Returns everything queued so far as JSON text. It is NOT forgotten
+         * yet: it stays until [ack], so a crash in between loses nothing (the
+         * app books idempotently, so seeing an item twice is harmless).
+         */
         fun drain(context: Context): String {
             synchronized(lock) {
                 val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                val s = prefs.getString(KEY, "[]") ?: "[]"
-                prefs.edit().remove(KEY).apply()
-                return s
+                val cutoff = System.currentTimeMillis() - MAX_AGE_MS
+                val merged = JSONArray()
+                for (key in arrayOf(INFLIGHT, KEY)) {
+                    val part = read(context, key)
+                    for (i in 0 until part.length()) {
+                        val o = part.optJSONObject(i) ?: continue
+                        if (o.optLong("time") < cutoff) continue
+                        if (!contains(merged, o)) merged.put(o)
+                    }
+                }
+                prefs.edit().putString(INFLIGHT, merged.toString()).remove(KEY).apply()
+                return merged.toString()
+            }
+        }
+
+        /** What [drain] returned has been booked: forget it. */
+        fun ack(context: Context) {
+            synchronized(lock) {
+                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(INFLIGHT).apply()
+            }
+        }
+
+        /** Throws everything away (the feature is switched off). */
+        fun clear(context: Context) {
+            synchronized(lock) {
+                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(KEY).remove(INFLIGHT).apply()
             }
         }
     }

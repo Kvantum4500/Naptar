@@ -86,6 +86,8 @@ void main() {
           if (weatherSvc != null)
             weatherServiceProvider.overrideWithValue(weatherSvc),
           llmFactoryProvider.overrideWithValue((cfg) => llm ?? FakeGemini([])),
+          // Monday 2026-05-04, 10:00 Budapest: the plan fixtures lie after it
+          aiClockProvider.overrideWithValue(() => DateTime.utc(2026, 5, 4, 8)),
           currentBuildProvider.overrideWith((ref) async => 7),
           // The bundled assets are covered by the handbook page test; the
           // assistant tests use a stub so they do not depend on the test

@@ -104,6 +104,7 @@ const _kinds = {'workout', 'task', 'rest', 'other'};
 ParsedProposal parseProposal(
   Object? json, {
   String defaultTz = 'Europe/Budapest',
+  int maxItems = 20,
 }) {
   final problems = <String>[];
   final items = <ProposalItem>[];
@@ -128,6 +129,12 @@ ParsedProposal parseProposal(
   final list = raw is List ? raw : const [];
   for (var i = 0; i < list.length; i++) {
     final n = i + 1;
+    if (items.length >= maxItems) {
+      problems.add(
+        'Egyszerre legfeljebb $maxItems javaslatot fogadok el, a többit ($n. javaslattól) kihagytam.',
+      );
+      break;
+    }
     final it = list[i];
     if (it is! Map) {
       problems.add('$n. javaslat: nem objektum.');

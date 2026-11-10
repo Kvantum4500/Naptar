@@ -16,6 +16,7 @@ import '../notify/reminders.dart';
 import 'shift_page.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
+import 'unreadable_events_banner.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -243,6 +244,7 @@ class HomePage extends ConsumerWidget {
       body: Column(
         children: [
           const CheckInBanner(),
+          const UnreadableEventsBanner(),
           Expanded(child: body),
         ],
       ),

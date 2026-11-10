@@ -5,6 +5,7 @@ import 'event.dart';
 import 'finance.dart';
 import 'models.dart';
 import 'rules.dart';
+import 'text_safety.dart';
 import 'time.dart';
 
 /// Which data the assistant may see (each can be switched off by the user).
@@ -17,17 +18,6 @@ class AssistantSources {
   final bool events;
   final bool tasks;
   final bool checkins;
-}
-
-/// Makes free text safe to hand to the model as DATA: no control characters,
-/// no markup that could imitate our own delimiters, bounded length.
-String sanitizeText(String s, {int max = 80}) {
-  final clean = s
-      .replaceAll(RegExp(r'[\u0000-\u001F\u007F]'), ' ')
-      .replaceAll(RegExp(r'[<>`]'), '')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return clean.length > max ? '${clean.substring(0, max)}…' : clean;
 }
 
 String _hm(DateTime d) =>
@@ -328,7 +318,7 @@ Map<String, Object?> tasksForTool(
     'feladatok': [
       for (final t in open.take(max))
         {
-          'azonosito': t.id,
+          'azonosito': safeId(t.id),
           'cim': sanitizeText(t.title),
           if (t.due != null) 'hatarido': _ymd(t.due!),
           if (t.isOverdue(today)) 'keses': true,

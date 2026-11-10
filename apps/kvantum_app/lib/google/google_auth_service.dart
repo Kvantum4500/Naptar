@@ -8,6 +8,8 @@ import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../sync/timeout_client.dart';
+
 /// OAuth client values come from `--dart-define-from-file=secrets.json`
 /// (git-ignored). They never live in the repository.
 class GoogleConfig {
@@ -81,11 +83,23 @@ AccessCredentials? decodeCredentials(String? s) {
   }
 }
 
+/// The sign-in could not be completed; [message] is Hungarian and shown as is.
+class SignInException implements Exception {
+  const SignInException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class GoogleAuthService implements AuthGateway {
   GoogleAuthService(this._store);
   final CredentialStore _store;
   AutoRefreshingAuthClient? _client;
+  http.Client? _base;
   StreamSubscription<AccessCredentials>? _sub;
+
+  /// How long the browser step may take before the attempt is given up.
+  static const signInPatience = Duration(minutes: 10);
 
   ClientId get _id =>
       ClientId(GoogleConfig.clientId, GoogleConfig.clientSecret);
@@ -94,20 +108,52 @@ class GoogleAuthService implements AuthGateway {
   Future<http.Client?> restore() async {
     final creds = decodeCredentials(await _store.read());
     if (creds == null || creds.refreshToken == null) return null;
-    return _adopt(autoRefreshingClient(_id, creds, http.Client()));
+    final base = TimeoutClient(http.Client());
+    return _adopt(autoRefreshingClient(_id, creds, base), base);
   }
 
   @override
   Future<http.Client> signIn() async {
-    final c = await clientViaUserConsent(_id, GoogleConfig.scopes, (url) {
-      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-    });
+    final base = TimeoutClient(http.Client());
+    final browserFailed = Completer<AutoRefreshingAuthClient>();
+    void fail() {
+      if (!browserFailed.isCompleted) {
+        browserFailed.completeError(
+          const SignInException(
+            'Nem sikerült megnyitni a böngészőt a bejelentkezéshez.',
+          ),
+        );
+      }
+    }
+
+    final flow = clientViaUserConsent(_id, GoogleConfig.scopes, (url) {
+      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication).then((
+        opened,
+      ) {
+        if (!opened) fail();
+      }, onError: (Object _) => fail());
+    }, baseClient: base);
+    final AutoRefreshingAuthClient c;
+    try {
+      c = await Future.any([flow, browserFailed.future]).timeout(
+        signInPatience,
+        onTimeout: () => throw const SignInException(
+          'A bejelentkezés nem fejeződött be 10 percen belül. Próbáld újra.',
+        ),
+      );
+    } catch (_) {
+      base.close();
+      rethrow;
+    }
     await _store.write(encodeCredentials(c.credentials));
-    return _adopt(c);
+    return _adopt(c, base);
   }
 
-  http.Client _adopt(AutoRefreshingAuthClient c) {
+  http.Client _adopt(AutoRefreshingAuthClient c, http.Client base) {
     _sub?.cancel();
+    _client?.close();
+    _base?.close();
+    _base = base;
     _client = c;
     // Persist refreshed access tokens so a restart does not need a new login.
     _sub = c.credentialUpdates.listen(
@@ -121,6 +167,8 @@ class GoogleAuthService implements AuthGateway {
     await _sub?.cancel();
     _client?.close();
     _client = null;
+    _base?.close();
+    _base = null;
     await _store.write(null);
   }
 }

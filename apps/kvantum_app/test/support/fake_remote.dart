@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:kvantum_app/sync/remote.dart';
 
@@ -12,6 +14,14 @@ class FakeRemote implements RemoteCalendar {
   int _nextId = 1;
   bool isCancelled(String g) => _cancelled[g] ?? false;
   bool offline = false;
+
+  /// When set, a FULL listing only returns events ending after this instant
+  /// and reports the window, like the real adapter's "reduced data mode".
+  DateTime? windowStartUtc;
+
+  /// While set, `pull` waits for it: a slow or hung connection.
+  Completer<void>? gate;
+  int pullCalls = 0;
 
   /// Makes every call fail with this error (e.g. an expired login).
   Object? failWith;
@@ -46,6 +56,8 @@ class FakeRemote implements RemoteCalendar {
 
   @override
   Future<PullResult> pull(String calendarId, String? syncToken) async {
+    pullCalls++;
+    if (gate != null) await gate!.future;
     if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
     if (expireToken && syncToken != null) {
@@ -59,6 +71,11 @@ class FakeRemote implements RemoteCalendar {
       final cancelled = _cancelled[g] ?? false;
       if (syncToken == null && cancelled) continue; // full list omits deleted
       final e = events[g]!;
+      if (syncToken == null &&
+          windowStartUtc != null &&
+          !e.endUtc.isAfter(windowStartUtc!)) {
+        continue; // outside the requested window
+      }
       out.add(
         RemoteChange(
           ref: RemoteEvent(
@@ -77,7 +94,11 @@ class FakeRemote implements RemoteCalendar {
         ),
       );
     }
-    return PullResult(out, '$_clock');
+    return PullResult(
+      out,
+      '$_clock',
+      windowStartUtc: syncToken == null ? windowStartUtc : null,
+    );
   }
 
   @override

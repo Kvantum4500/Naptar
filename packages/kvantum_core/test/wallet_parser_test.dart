@@ -139,6 +139,38 @@ void main() {
       );
     });
 
+    test('grouped and compact card, account and phone numbers are hidden', () {
+      for (final s in [
+        '1234 5678 9012 3456',
+        '1234-5678-9012-3456',
+        'HU42 1177 3016 1111 1018 0000 0000',
+        'HU42117730161111101800000000',
+        '11773016-11111018-00000000',
+        '+36 30 123 4567',
+      ]) {
+        final out = maskSensitive('szám: $s vége');
+        expect(RegExp(r'\d{4}').hasMatch(out), isFalse, reason: '$s -> $out');
+      }
+    });
+
+    test('the other usual wordings for the last four digits are hidden', () {
+      for (final s in [
+        'Kártya vége: 1234',
+        'ending in 1234',
+        'Visa …1234',
+        'Visa ·1234',
+        'Mastercard **1234',
+      ]) {
+        expect(maskSensitive(s).contains('1234'), isFalse, reason: s);
+      }
+    });
+
+    test('big amounts and dates survive', () {
+      expect(maskSensitive('12 345 678 Ft'), '12 345 678 Ft');
+      expect(maskSensitive('1 234 567,89 Ft'), '1 234 567,89 Ft');
+      expect(maskSensitive('2026-11-08 14:32'), '2026-11-08 14:32');
+    });
+
     test('amounts survive the masking', () {
       expect(maskSensitive('Fizetés 3490 Ft'), 'Fizetés 3490 Ft');
       expect(maskSensitive('12 990 Ft'), '12 990 Ft');

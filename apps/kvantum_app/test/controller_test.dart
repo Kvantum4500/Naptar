@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -297,7 +299,69 @@ void main() {
       );
       expect(SyncController.isAuthExpired(Exception('offline')), isFalse);
       expect(SyncController.isAuthExpired(const FormatException('x')), isFalse);
+      // the auth library uses this wording for ANY failed token request,
+      // a Google 5xx / 429 included: that is not an expired login
+      expect(
+        SyncController.isAuthExpired(
+          Exception('Failed to obtain access credentials. Status code: 503'),
+        ),
+        isFalse,
+      );
+      expect(
+        SyncController.isAuthExpired(
+          Exception(
+            'Failed to obtain access credentials. Error: temporarily_unavailable Status code: 429',
+          ),
+        ),
+        isFalse,
+      );
     });
+
+    test('a Google 5xx at token refresh does not sign the user out', () async {
+      final auth = FakeAuth();
+      final c = make(auth);
+      await EventRepoHelper(db).save(ev('a'));
+      remote.failWith = Exception(
+        'Failed to obtain access credentials. Status code: 503',
+      );
+      final ctl = c.read(syncControllerProvider.notifier);
+      await ctl.signIn();
+      final s = c.read(syncControllerProvider);
+      expect(auth.signedOut, isFalse);
+      expect(s.signedIn, isTrue);
+      expect(s.error, isNotNull);
+      expect(s.error, isNot(contains('lejárt')));
+      // and it recovers by itself once Google answers again
+      remote.failWith = null;
+      await ctl.syncNow();
+      expect(c.read(syncControllerProvider).error, isNull);
+      expect(remote.events.length, 1);
+    });
+
+    test(
+      'calls during a running sync fold into ONE follow-up run, not a queue',
+      () async {
+        final c = make(FakeAuth());
+        final ctl = c.read(syncControllerProvider.notifier);
+        await ctl.signIn();
+        remote.pullCalls = 0;
+        remote.gate = Completer<void>();
+        final first = ctl.syncNow(); // blocks at the gate: a slow connection
+        await Future<void>.delayed(Duration.zero);
+        expect(remote.pullCalls, 1);
+
+        // the minute timer, coming back to the app, saved edits …
+        await Future.wait([ctl.syncNow(), ctl.syncNow(), ctl.syncNow()]);
+        expect(remote.pullCalls, 1, reason: 'nobody started a second sync');
+
+        final gate = remote.gate!;
+        remote.gate = null; // the follow-up run must not wait
+        gate.complete();
+        await first;
+        expect(remote.pullCalls, 2, reason: 'exactly one follow-up run');
+        expect(c.read(syncControllerProvider).syncing, isFalse);
+      },
+    );
 
     test('sign-out clears state and credentials', () async {
       final auth = FakeAuth();

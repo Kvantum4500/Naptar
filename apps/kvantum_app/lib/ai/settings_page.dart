@@ -14,6 +14,7 @@ import 'location_service.dart';
 import 'place.dart';
 import '../notify/reminders.dart';
 import 'ai_settings.dart';
+import 'endpoint_policy.dart';
 import 'handbook_page.dart';
 import 'llm_provider.dart';
 import 'provider_catalog.dart';
@@ -80,6 +81,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       _say('Add meg a szolgáltató címét.', error: true);
       return;
     }
+    String? warning;
+    if (base != null) {
+      // the key and the data go there: public servers need https
+      final check = checkCustomEndpoint(base);
+      if (!check.ok) {
+        _say(check.error!, error: true);
+        return;
+      }
+      warning = check.warning;
+    }
     setState(() => _busy = true);
     try {
       final models = await ref
@@ -111,7 +122,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         _hasKey = key != null;
         _models = models;
       });
-      _say('Rendben van, elmentve. ${models.length} modell érhető el.');
+      _say(
+        'Rendben van, elmentve. ${models.length} modell érhető el.'
+        '${warning == null ? '' : ' $warning'}',
+      );
     } on LlmException catch (e) {
       _say(e.message, error: true);
     } catch (e) {

@@ -71,16 +71,24 @@ int? parseHufNumber(String raw) {
   return n > 0 && n <= 1000000000 ? n : null;
 }
 
-/// Hides what must never be stored or shown: card digits and long numbers.
+// the last four digits of a card, after the usual markers
+final _cardTail = RegExp(
+  r'((?:[*•·xX]{2,}\s*)|(?:[•·…]\s*)|(?:végződésű\s*)|(?:vége[:\s]+)|(?:ending in\s*)|(?:card\s+)|(?:kártya\s+))(\d{4})\b',
+  caseSensitive: false,
+);
+// IBAN, written with or without spaces
+final _iban = RegExp(r'\b[A-Za-z]{2}\d{2}(?: ?[A-Za-z0-9]{4}){3,8}\b');
+// 11+ digits, even when grouped by spaces, dashes or dots: a card number, an
+// account number or a phone number. A forint amount never has that many.
+final _longGroups = RegExp(r'\d(?:[ \-.]?\d){10,}');
+
+/// Hides what must never be stored or shown: card digits, IBANs, account and
+/// phone numbers and any other long number.
 String maskSensitive(String s) => s
-    .replaceAllMapped(
-      RegExp(
-        r'((?:[*•·xX]{2,}\s*)|(?:végződésű\s*)|(?:ending in\s*)|(?:card\s+)|(?:kártya\s+))(\d{4})\b',
-        caseSensitive: false,
-      ),
-      (m) => '${m[1]}••••',
-    )
-    .replaceAll(RegExp(r'\b\d{8,}\b'), '••••');
+    .replaceAllMapped(_cardTail, (m) => '${m[1]}••••')
+    .replaceAll(_iban, '••••')
+    .replaceAll(_longGroups, '••••')
+    .replaceAll(RegExp(r'\d{8,}'), '••••');
 
 String _cleanMerchant(String s) {
   var t = s

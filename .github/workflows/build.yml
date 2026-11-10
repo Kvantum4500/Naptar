@@ -5,6 +5,9 @@ name: Build apps
 # Runs: on every push to main, on version tags, manually, and on feature
 # branches only when the commit message contains "[build]" (saves minutes).
 #
+# The toolchain is pinned (Flutter 3.47.9 = Dart 3.13.7, the version the tests
+# run with); move it deliberately, not by accident of the "stable" channel.
+#
 # Repository secrets used:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   Google sign-in
 #   UPDATE_TOKEN                             read-only token the app uses to find updates
@@ -30,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: '3.47.9', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - name: Write local config
@@ -65,7 +68,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: '3.47.9', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - name: Signing key (only if the secrets exist)

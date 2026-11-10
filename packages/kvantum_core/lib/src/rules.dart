@@ -1,4 +1,5 @@
 import 'event.dart';
+import 'text_safety.dart';
 import 'time.dart';
 import 'weather.dart';
 
@@ -61,6 +62,25 @@ class Violation {
   const Violation(this.code, this.message);
   final String code;
   final String message;
+
+  /// The text that may go back to the model. [events] / [checkins] say which
+  /// of the user's own data it is allowed to learn about: details that come
+  /// from a source the user switched off are replaced by a generic sentence,
+  /// and everything else is sanitised like any other free text.
+  String forModel({required bool events, required bool checkins}) {
+    switch (code) {
+      case 'conflict':
+      case 'shift_rest':
+        if (!events) {
+          return 'Ütközik egy meglévő eseménnyel, vagy túl közel van egy műszakhoz.';
+        }
+      case 'low_energy':
+      case 'no_data_hard':
+        if (!checkins) return 'Erre a napra nehéz edzés nem javasolható.';
+    }
+    return sanitizeText(message, max: 300);
+  }
+
   @override
   String toString() => '$code: $message';
 }

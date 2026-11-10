@@ -220,9 +220,29 @@ class EventRepository {
     }
     final out = <Occurrence>[];
     for (final e in events.where((e) => !e.isException)) {
-      out.addAll(expand(e, from, to, overrides: overrides[e.id] ?? const []));
+      try {
+        out.addAll(expand(e, from, to, overrides: overrides[e.id] ?? const []));
+      } catch (_) {
+        // An unreadable rule or time zone hides THAT event only (see
+        // [unreadableEvents]); it must never blank the whole calendar.
+      }
     }
     out.sort((a, b) => a.startUtc.compareTo(b.startUtc));
+    return out;
+  }
+
+  /// Events the app cannot expand (unreadable rule, unknown time zone …).
+  /// They stay stored untouched but are not shown, so the user is told.
+  Future<List<CalEvent>> unreadableEvents() async {
+    final out = <CalEvent>[];
+    for (final e in await all()) {
+      if (e.isException || e.cancelled) continue;
+      try {
+        expand(e, e.startUtc, e.startUtc.add(const Duration(days: 1)));
+      } catch (_) {
+        out.add(e);
+      }
+    }
     return out;
   }
 }

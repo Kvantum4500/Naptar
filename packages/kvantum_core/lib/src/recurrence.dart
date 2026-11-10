@@ -7,9 +7,19 @@ import 'time.dart';
 
 const _maxIterations = 20000; // hard stop for runaway/infinite rules
 
+/// Parses an RRULE. The `rrule` package only understands `WKST=MO`, while
+/// other calendars (Google's web UI, Apple, Outlook) routinely write
+/// `WKST=SU`. The week start only changes the result of weekly rules with an
+/// interval above 1, so it is ignored instead of letting one such event make
+/// every calendar view throw.
 RecurrenceRule parseRule(String rule) {
-  final s = rule.trim();
-  return RecurrenceRule.fromString(s.startsWith('RRULE:') ? s : 'RRULE:$s');
+  var s = rule.trim();
+  if (s.startsWith('RRULE:')) s = s.substring('RRULE:'.length);
+  final parts = s.split(';').where((p) {
+    final u = p.trim().toUpperCase();
+    return !(u.startsWith('WKST=') && u != 'WKST=MO');
+  });
+  return RecurrenceRule.fromString('RRULE:${parts.join(';')}');
 }
 
 /// Expands [master] (+ its exception instances) into occurrences overlapping

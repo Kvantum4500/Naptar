@@ -1,43 +1,56 @@
 # Kvantum Naptár
 
-Személyes naptárapp (Windows + Android, Flutter), szerver nélkül: Google Calendar (események) + Google Drive `appDataFolder` (saját adat) + Gemini (AI). Teljes terv: lásd a munkamenet tervfájlját; a lényeg lent.
+Személyes naptár- és életvezetési app (Windows + Android, Flutter), **saját szerver nélkül**: a Google Calendar, a Google Drive és (kérésre) egy általad választott AI-szolgáltató a háttér. Magyar felület.
 
-## Állapot
-| Rész | Állapot |
+## Mit tud
+
+| Terület | Állapot |
 |---|---|
-| `packages/kvantum_core` – tiszta Dart mag: időzóna/DST, ismétlődés, ISO-hét, duplikáció-védelem, AI szabályellenőrző | **kész, 23 teszt zöld** |
-| `apps/kvantum_app/assets/handbook/` – Gemini kézikönyv | **első verzió** |
-| `apps/kvantum_app` – Flutter app: helyi SQLite (drift), hónapnézet + napi lista, eseményszerkesztő (ismétlődéssel), outbox | **kész, tesztelve** |
-| Szinkronmotor (`lib/sync`): pull → reconcile → push, syncToken, teljes újraszinkron, ütközéskezelés, idempotens újrapróbálás | **kész, 9 teszt (hamis távoli naptárral)** |
-| Google Calendar adapter (`GoogleCalendarRemote`), Google belépés (OAuth, biztonságos tároló), szinkronvezérlő (60 mp + mentés után + előtérbe lépéskor) | **kész, 21 teszt hamis HTTP-vel; élő fiókkal még nem próbálva** |
-| Windows zip + Android APK építés, GitHub-kiadás (`build.yml`) | kész |
-| Nézetek (hónap/hét/nap), színek, szerkesztő teljes ismétlődéssel, szinkronállapot | kész, 109 app teszt |
-| Önfrissítés (Windows kész, Android a kulcs beállítása után) | kész, éles próba kell |
-| Feladatok és napi check-in a Drive `appDataFolder`-ben (mezőnkénti összefésülés, duplikáció-védelem, offline sor), felület | **kész, 150 app teszt** |
-| Gemini-asszisztens: kulcs és modell a Beállításokban, adatforrás-kapcsolók, kézikönyv-szerkesztő (Drive-szinkronnal), javaslat → jóváhagyás → Naptar naptár; szabályokat kód ellenőrzi | **kész, 219 app + 81 mag teszt; élő Gemini-hívás még nincs kipróbálva** |
-| Turbo mód (Cloudflare Worker + FCM) | következő lépés |
+| **Naptár** – hónap-, hét- és napnézet időskálával, színek, teljes ismétlődés-szerkesztő (kivételekkel), kétirányú szinkron a Google Calendar saját „Naptar” naptárával, offline sor, `.ics` mentés/visszaállítás | kész |
+| **Beosztás** – műszakciklus-generátor (pl. 3 éjszaka – 3 szabad – 3 nappal – 3 szabad), műszakcsere, extra műszak, havi összesítő | kész |
+| **Feladatok és napi check-in** – a Drive `appDataFolder`-ben, mezőnkénti összefésüléssel, több eszközön | kész |
+| **Asszisztens** – Gemini / Groq / Mistral / OpenRouter / OpenAI / egyéni (OpenAI-kompatibilis) szolgáltató, szerkeszthető kézikönyv, javaslat → jóváhagyás; áthelyezés és törlés csak jóváhagyással; feladat-ütemezés; időjárás (Open-Meteo) és helyszín; a kemény szabályokat **kód** ellenőrzi, az AI csak javasol | kész, élő modellel a felhasználó próbálja |
+| **Pénzügyek** – napló, havi keretek, ismétlődő tételek, megtakarítási célok; telefon ↔ gép „postalevél” szinkron a Drive-on; Google Wallet értesítések automatikus felvétele (Android) | kész |
+| **Emlékeztetők** – műszak és napi check-in (Android) | kész (Windowson nincs) |
+| **Önfrissítés** – Windows: csere + visszaállítás hibánál; Android: a rendszertelepítő; stabil és előzetes csatorna | kész |
 
-## Futtatás
+A részletes ellenőrzés és a fejlesztési terv: [`docs/audit-es-fejlesztesi-terv.md`](docs/audit-es-fejlesztesi-terv.md). Változások: [`CHANGELOG.md`](CHANGELOG.md).
+
+## Futtatás fejlesztéshez
+
+Flutter **3.47.9** (Dart 3.13.7) kell; a CI is ezt használja.
+
 ```bash
-# mag
+# mag (tiszta Dart)
 cd packages/kvantum_core && dart pub get && dart analyze && dart test
-# app (Flutter 3.47+)
-cd apps/kvantum_app && flutter pub get && dart run build_runner build && flutter analyze && flutter test
-cp secrets.example.json secrets.json   # töltsd ki (git kizárja)
+# app
+cd apps/kvantum_app && flutter pub get && dart run build_runner build --delete-conflicting-outputs && flutter analyze && flutter test
+# titkok: másold, töltsd ki (a secrets.json git-ből kizárt)
+cp secrets.example.json secrets.json
 flutter run -d windows --dart-define-from-file=secrets.json   # vagy -d <android-eszköz>
 ```
-Ismert korlát: egy ismétlődő esemény szerkesztése az egész sorozatra vonatkozik (az „csak ez a példány” szerkesztés a következő lépés; a mag már támogatja).
+
+A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Cloud OAuth-kliens), `UPDATE_TOKEN` (csak olvasó GitHub-token az önfrissítéshez). Ezek a buildbe kerülnek, ezért **soha** ne kerüljenek a repóba.
 
 ## Fő tervezési döntések
-- Időpont tárolás: **falióra + IANA zóna** (mint a Google), az instant származtatott. Ismétlődés falióra-időben fut (DST-biztos), az esemény időtartama valós eltelt idő.
-- DST: tavaszi hiányzó idő előre tolódik, őszi dupla idő az első előfordulást kapja.
-- Duplikáció: `reconcile()` sorrend: tárolt link → `appEventId` (saját írás visszhangja) → iCalUID → új.
-- AI: Gemini a kézikönyvvel; a szabad idősávokat és a kemény szabályokat **kód** ellenőrzi (`validateProposal`), az AI csak választ és indokol.
-- Titkok (API-kulcs, tokenek) soha nem kerülnek a repóba; az eszköz biztonságos tárolójában élnek.
 
-## Önfrissítés és kiadás
-- Minden `main`-re küldött változás (és a `[build]` jelű commit feature ágon) megépíti a Windows-zipet és az Android-APK-t, és létrehoz egy GitHub Release-t (`build-<szám>`), SHA-256 összeggel.
-- Az app „Frissítés keresése” menüpontja ezt a kiadást nézi meg a csak olvasási `UPDATE_TOKEN`-nel, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit.
+- **Idő:** falióra + IANA zóna (mint a Google); az ismétlődés falióra-időben fut (DST-biztos), az esemény időtartama valós eltelt idő.
+- **Duplikáció-védelem:** `reconcile()` sorrend: tárolt link → `appEventId` (saját írás visszhangja) → iCalUID → új.
+- **AI:** a modell csak javasol. Minden írás (új esemény, áthelyezés, törlés, megjegyzett szokás) külön gombnyomásra történik; a szabályokat (alvás, puffer, energia, műszak, időjárás, határidő) a `validateProposal` kóddal ellenőrzi. A modellnek szánt szöveg adatként, jelölt blokkban megy, tisztítva.
+- **Adatok helye:** az események a Google Calendarban és a helyi adatbázisban; a feladatok, check-inek, kézikönyv a Drive `appDataFolder`-ben; a pénzügyi adat **helyben**, a gépek között rövid életű „levelekkel” (a megérkezett levél törlődik). A Drive-ban a pénzügyről nincs teljes másolat: a rendszeres mentés (Beállítások → Mentés) fontos.
+- **Titkok:** az eszköz biztonságos tárolójában (Windows DPAPI / Android Keystore); az API-kulcs csak fejlécben utazik; nincs telemetria, nincs naplózott kulcs.
+- **Android:** az automatikus (felhő-/eszközátvitel) mentés ki van kapcsolva; az adat a Google-fiókból és a többi eszközről áll helyre.
+
+## Kiadás és önfrissítés
+
+- A `build.yml` megépíti a Windows-zipet és az Android-APK-t, SHA-256 összeggel, és GitHub-kiadást (`build-<szám>`) készít belőle.
+- **Stabil kiadás:** a `main`-re és a `v*` címkére küldött változás. **Előzetes kiadás** (pre-release): a munkaágakról (`[build]` a commit üzenetben, vagy kézi indítás) készült build; ezt az app csak akkor ajánlja fel, ha a Frissítés ablakban az „Előzetes verziókat is keressen” be van kapcsolva.
+- Az app „Frissítés keresése” menüpontja a csak olvasó `UPDATE_TOKEN`-nel kérdezi le a kiadásokat, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit. Az ellenőrzés csak kézi indításra fut.
 - Az első indításnál a Windows figyelmeztet („ismeretlen kiadó”): a ZIP tulajdonságainál jelöld be a **Feloldás** (Unblock) négyzetet kicsomagolás előtt. A frissítések már nem figyelmeztetnek.
-- A build az `UPDATE_TOKEN` titokkal együtt készül; token nélkül a „Frissítés keresése” csak azt jelzi, hogy nincs token. Az első, tokent tartalmazó verziót kézzel kell telepíteni, onnantól az app magát frissíti.
-- Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja).
+- Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja; a kulcsot **őrizd meg**, elvesztése után újra kell telepíteni az appot). Aláírt kulcs nélkül az APK nem kerül a kiadásba.
+
+## Mit tegyek, ha…
+
+- **„A Google-bejelentkezés lejárt”:** koppints a „Belépés szükséges” gombra (az adat megvan, a függő módosítások utána feltöltődnek). Ha hetente ismétlődik: a Google Cloud OAuth-hozzájárulási képernyő „Testing” állapotban van, állítsd „In production”-re.
+- **A naptár egyik eseménye nem látszik, sárga/piros sáv jelzi:** az ismétlődési szabálya nem olvasható; a sáv „Részletek” gombjával egyszeri eseménnyé alakítható, vagy kijavítható a Google Naptárban.
+- **Az asszisztens limitet jelez:** az ingyenes szintek percenkénti/napi tokenkerete kicsi (Groq: 8 000 token/perc); várj, vagy válts szolgáltatót a Beállításokban.

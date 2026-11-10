@@ -293,6 +293,7 @@ class AssistantService {
     _refToAlias.clear();
     _prompt = prompt.toLowerCase();
     _settings = settings;
+    _editIntent = scopeFor(prompt, _today).edit;
     _forecast = null;
     _forecastTried = false;
     final system = buildSystemPrompt(
@@ -362,6 +363,11 @@ class AssistantService {
 
   String _prompt = '';
   AiSettings _settings = const AiSettings();
+
+  /// The user's own words asked to delete / move / change something. Without
+  /// that, anything the model proposes in that direction is dropped (a hostile
+  /// event title must not be able to summon a deletion card).
+  bool _editIntent = false;
   List<DayWeather>? _forecast;
   bool _forecastTried = false;
 
@@ -643,7 +649,10 @@ class AssistantService {
   _propose(Map<String, Object?> args, {required int repairsLeft}) async {
     final raw = parseProposal(args, defaultTz: _tz);
     final dropped = [...raw.problems];
-    final linked = await _attachTasks(raw.items, dropped);
+    final linked = _withinHorizon(
+      await _attachTasks(raw.items, dropped),
+      dropped,
+    );
     final parsed = ParsedProposal(
       summary: raw.summary,
       items: linked,
@@ -676,7 +685,9 @@ class AssistantService {
       );
     }
 
-    final doomed = {for (final d in parseDeletions(args).items) d.ref};
+    final doomed = _editIntent
+        ? {for (final d in parseDeletions(args).items) d.ref}
+        : <String>{};
     final existing = [
       for (final o in await _existingAround(parsed.items))
         // events the user is asked to delete do not block the new plan
@@ -711,7 +722,13 @@ class AssistantService {
       return (
         outcome: null,
         feedback: {
-          'szabalysertesek': [for (final v in all) v.message],
+          'szabalysertesek': {
+            for (final v in all)
+              v.forModel(
+                events: _settings.events,
+                checkins: _settings.checkins,
+              ),
+          }.toList(),
           'feladat': 'Javítsd a javaslatot úgy, hogy ne sértse a szabályokat (használd a find_free_slots eszközt), majd hívd újra a propose_events eszközt.',
         },
       );
@@ -765,6 +782,15 @@ class AssistantService {
     final parsed = parseDeletions(args);
     final notes = [...parsed.problems];
     final out = <DeletionProposal>[];
+    if (parsed.items.isNotEmpty && !_editIntent) {
+      return (
+        items: out,
+        notes: [
+          ...notes,
+          'Törlést csak akkor javaslok, ha kifejezetten kéred (pl. „töröld a holnapi edzést”).',
+        ],
+      );
+    }
     if (parsed.items.isNotEmpty && !settings.events) {
       return (
         items: out,
@@ -847,6 +873,15 @@ class AssistantService {
     final parsed = parseMoves(args, defaultTz: _tz);
     final notes = [...parsed.problems];
     final out = <MoveProposal>[];
+    if (parsed.items.isNotEmpty && !_editIntent) {
+      return (
+        items: out,
+        notes: [
+          ...notes,
+          'Áthelyezést csak akkor javaslok, ha kifejezetten kéred (pl. „told át az edzést 19 órára”).',
+        ],
+      );
+    }
     if (parsed.items.isNotEmpty && !settings.events) {
       return (
         items: out,
@@ -905,6 +940,31 @@ class AssistantService {
       out.add(MoveProposal(hit, m.startWall, m.endWall, m.reason));
     }
     return (items: out, notes: notes);
+  }
+
+  /// Proposals must lie ahead of "now" and within 60 days: a wrong year or a
+  /// runaway list can never reach the calendar with one tap.
+  List<ProposalItem> _withinHorizon(
+    List<ProposalItem> items,
+    List<String> notes,
+  ) {
+    final from = _nowUtc;
+    final to = from.add(const Duration(days: 60));
+    final keep = <ProposalItem>[];
+    for (final i in items) {
+      if (!i.endUtc.isAfter(from)) {
+        notes.add(
+          '„${i.title}”: a javasolt időpont már elmúlt, ezért kihagytam.',
+        );
+      } else if (i.startUtc.isAfter(to)) {
+        notes.add(
+          '„${i.title}”: a javasolt időpont több mint 60 nap múlva van, ezért kihagytam.',
+        );
+      } else {
+        keep.add(i);
+      }
+    }
+    return keep;
   }
 
   Future<List<Occurrence>> _existingAround(List<ProposalItem> items) {

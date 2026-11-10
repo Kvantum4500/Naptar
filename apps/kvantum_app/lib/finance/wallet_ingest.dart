@@ -99,7 +99,12 @@ class WalletIngest {
 
   /// Collects what the listener queued and books it. Safe to call often.
   Future<WalletImport> run() async {
-    if (!bridge.supported || !await auto) return const WalletImport();
+    if (!bridge.supported) return const WalletImport();
+    if (!await auto) {
+      // switched off: the raw notification text must not pile up on the phone
+      await bridge.clear();
+      return const WalletImport();
+    }
     final items = await bridge.drain();
     if (items.isEmpty) return const WalletImport();
     var booked = 0, ignored = 0, foreign = 0;
@@ -169,6 +174,8 @@ class WalletIngest {
       }
     }
     await _appendLog(log);
+    // only now is the queue forgotten: a crash above leaves it for the next run
+    await bridge.ack();
     return WalletImport(booked: booked, ignored: ignored, foreign: foreign);
   }
 }

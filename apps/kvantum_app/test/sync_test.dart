@@ -137,6 +137,32 @@ void main() {
     },
   );
 
+  test('a windowed full resync keeps the old history but still mirrors deletions inside the window', () async {
+    await repo.saveLocal(
+      CalEvent(
+        id: 'old',
+        calendarId: cal,
+        title: 'Régi',
+        tzid: bp,
+        start: floating(2026, 3, 2, 9),
+        end: floating(2026, 3, 2, 10),
+      ),
+    );
+    await repo.saveLocal(ev('new', 'Friss', day: 20));
+    await engine.sync(cal);
+    expect((await repo.all()).length, 2);
+    final gNew = (await repo.all()).firstWhere((e) => e.id == 'new').googleId!;
+
+    // the next full listing only covers May on; the May event is gone remotely
+    remote.windowStartUtc = DateTime.utc(2026, 5, 1);
+    remote.events.remove(gNew);
+    remote.expireToken = true;
+    final r = await engine.sync(cal);
+
+    expect(r.fullResync, isTrue);
+    expect((await repo.all()).map((e) => e.id), ['old']);
+  });
+
   test('exception instances attach to their series master', () async {
     final master = ev('m', 'Series').copyWith(rrule: 'FREQ=DAILY;COUNT=3');
     final gm = remote.externalCreate(master);

@@ -14,6 +14,7 @@ export 'src/rules.dart';
 export 'src/series_ops.dart';
 export 'src/shift_pattern.dart';
 export 'src/sync_record.dart';
+export 'src/text_safety.dart';
 export 'src/time.dart';
 export 'src/weather.dart';
 export 'src/wallet_parser.dart';

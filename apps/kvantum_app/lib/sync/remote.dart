@@ -16,9 +16,14 @@ class RemoteChange {
 }
 
 class PullResult {
-  const PullResult(this.changes, this.nextSyncToken);
+  const PullResult(this.changes, this.nextSyncToken, {this.windowStartUtc});
   final List<RemoteChange> changes;
   final String? nextSyncToken;
+
+  /// Set when a FULL listing only covered events ending after this instant
+  /// (the remote is asked for a window to save data). Events that started
+  /// before it were never listed, so their absence says nothing about them.
+  final DateTime? windowStartUtc;
 }
 
 class PushResult {

@@ -138,13 +138,16 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     await syncNow();
   }
 
-  /// The saved Google login no longer works (refresh token expired or
-  /// revoked; with an OAuth app in "Testing" mode this happens after 7 days).
+  /// The saved Google login no longer works: the token endpoint answered
+  /// `invalid_grant` (refresh token expired or revoked; with an OAuth app in
+  /// "Testing" mode this happens after 7 days). Deliberately NOT matched: the
+  /// generic "Failed to obtain access credentials", which the auth library
+  /// also uses for a Google 5xx/429, a problem that goes away by itself and
+  /// must not sign the user out.
   static bool isAuthExpired(Object e) {
     final t = '$e'.toLowerCase();
     return t.contains('invalid_grant') ||
-        t.contains('expired or revoked') ||
-        t.contains('failed to obtain access credentials');
+        t.contains('token has been expired or revoked');
   }
 
   /// Drops the dead session once and asks for a new sign-in. Local data and
@@ -174,9 +177,31 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     _debounce = Timer(const Duration(seconds: 2), syncNow);
   }
 
+  bool _running = false, _again = false;
+
+  /// One run at a time: calls that arrive meanwhile (the minute timer, coming
+  /// back to the app, a saved edit) are folded into ONE follow-up run instead
+  /// of piling up behind a slow request.
+  Future<void> syncNow() async {
+    if (_engine == null) return;
+    if (_running) {
+      _again = true;
+      return;
+    }
+    _running = true;
+    try {
+      do {
+        _again = false;
+        await _syncOnce();
+      } while (_again && _engine != null);
+    } finally {
+      _running = false;
+    }
+  }
+
   /// Calendar and Drive data sync independently: a problem with one never
   /// blocks the other.
-  Future<void> syncNow() async {
+  Future<void> _syncOnce() async {
     final engine = _engine;
     if (engine == null) return;
     state = state.copyWith(syncing: true);
