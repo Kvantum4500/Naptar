@@ -229,6 +229,76 @@ void main() {
       await db.close();
     });
 
+    const expiredMsg =
+        'Failed to obtain access credentials. Error: invalid_grant Token has been expired or revoked. Status code: 400';
+
+    test(
+      'an expired Google login is reported once, signs out and keeps the queue',
+      () async {
+        final auth = FakeAuth();
+        final c = make(auth);
+        await EventRepoHelper(db).save(ev('a'));
+        remote.failWith = Exception(expiredMsg);
+        drive.failWith = Exception(expiredMsg);
+        final ctl = c.read(syncControllerProvider.notifier);
+        await ctl.signIn();
+        final s = c.read(syncControllerProvider);
+        expect(s.signedIn, isFalse);
+        expect(s.syncing, isFalse);
+        expect(auth.signedOut, isTrue);
+        expect(s.error, contains('lejárt'));
+        expect(s.error, isNot(contains('invalid_grant')));
+        // the unsent change is still queued locally
+        expect((await EventRepoHelper(db).pendingCount()), 1);
+
+        // after signing in again everything goes up
+        remote.failWith = null;
+        drive.failWith = null;
+        await ctl.signIn();
+        final after = c.read(syncControllerProvider);
+        expect(after.signedIn, isTrue);
+        expect(after.error, isNull);
+        expect(after.pending, 0);
+        await ctl.signOut();
+        await db.close();
+      },
+    );
+
+    test('the expiry is recognised on Drive alone, too', () async {
+      final auth = FakeAuth();
+      final c = make(auth);
+      drive.failWith = Exception(expiredMsg);
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.signedIn, isFalse);
+      expect(s.error, contains('lejárt'));
+      await db.close();
+    });
+
+    test('a plain network problem does not sign out', () async {
+      final c = make(FakeAuth());
+      remote.offline = true;
+      drive.offline = true;
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.signedIn, isTrue);
+      expect(s.error, isNotNull);
+      expect(s.error, isNot(contains('lejárt')));
+      await c.read(syncControllerProvider.notifier).signOut();
+      await db.close();
+    });
+
+    test('what counts as an expired login', () {
+      expect(SyncController.isAuthExpired(Exception(expiredMsg)), isTrue);
+      expect(SyncController.isAuthExpired('Error: invalid_grant'), isTrue);
+      expect(
+        SyncController.isAuthExpired('Token has been expired or revoked'),
+        isTrue,
+      );
+      expect(SyncController.isAuthExpired(Exception('offline')), isFalse);
+      expect(SyncController.isAuthExpired(const FormatException('x')), isFalse);
+    });
+
     test('sign-out clears state and credentials', () async {
       final auth = FakeAuth();
       final c = make(auth);
@@ -246,4 +316,6 @@ class EventRepoHelper {
   EventRepoHelper(this.db);
   final AppDatabase db;
   Future<void> save(CalEvent e) => EventRepository(db).saveLocal(e);
+  Future<int> pendingCount() async =>
+      (await EventRepository(db).pending()).length;
 }

@@ -138,6 +138,35 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     await syncNow();
   }
 
+  /// The saved Google login no longer works (refresh token expired or
+  /// revoked; with an OAuth app in "Testing" mode this happens after 7 days).
+  static bool isAuthExpired(Object e) {
+    final t = '$e'.toLowerCase();
+    return t.contains('invalid_grant') ||
+        t.contains('expired or revoked') ||
+        t.contains('failed to obtain access credentials');
+  }
+
+  /// Drops the dead session once and asks for a new sign-in. Local data and
+  /// the queue of unsent changes are untouched; they upload after signing in.
+  Future<void> _expireLogin() async {
+    _periodic?.cancel();
+    _debounce?.cancel();
+    _engine = null;
+    _drive = null;
+    _mail = null;
+    try {
+      await ref.read(authGatewayProvider).signOut();
+    } catch (_) {
+      // nothing more to clean up
+    }
+    state = state.copyWith(
+      signedIn: false,
+      syncing: false,
+      error: 'A Google-bejelentkezés lejárt. Jelentkezz be újra, az adataid megvannak, a függő módosítások utána feltöltődnek.',
+    );
+  }
+
   /// Call after any local change; coalesces bursts of edits into one run.
   void requestSync() {
     if (!state.signedIn) return;
@@ -162,6 +191,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
         errors.add('Naptár: ${r.failed} módosítást nem sikerült elküldeni.');
       }
     } catch (e) {
+      if (isAuthExpired(e)) return _expireLogin();
       ok = false;
       errors.add('Naptár: $e');
     }
@@ -178,6 +208,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
           errors.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
         }
       } catch (e) {
+        if (isAuthExpired(e)) return _expireLogin();
         ok = false;
         errors.add('Drive: $e');
       }
@@ -203,6 +234,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
           }
         }
       } catch (e) {
+        if (isAuthExpired(e)) return _expireLogin();
         ok = false;
         errors.add('Pénzügy: $e');
       }

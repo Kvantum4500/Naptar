@@ -8,6 +8,9 @@ class FakeDrive implements DriveRemote {
   int _next = 1;
 
   bool offline = false;
+
+  /// Makes every call fail with this error (e.g. an expired login).
+  Object? failWith;
   bool expireToken = false;
   int writes = 0;
   int creates = 0;
@@ -35,6 +38,7 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<DrivePull> pull(String? pageToken) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     if (expireToken && pageToken != null) {
       expireToken = false;
@@ -66,12 +70,14 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<String?> read(String fileId) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     return files[fileId]?.content;
   }
 
   @override
   Future<List<String>> findByName(String name) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     return [
       for (final e in files.entries)
@@ -81,6 +87,7 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<List<DriveName>> listNames(String prefix) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     return [
       for (final e in files.entries)
@@ -95,6 +102,7 @@ class FakeDrive implements DriveRemote {
     required String name,
     required String content,
   }) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     if (duringWrite != null) {
       final f = duringWrite!;
@@ -114,6 +122,7 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<void> delete(String fileId) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     deletes++;
     files.remove(fileId);

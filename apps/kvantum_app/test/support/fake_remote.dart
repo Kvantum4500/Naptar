@@ -12,6 +12,9 @@ class FakeRemote implements RemoteCalendar {
   int _nextId = 1;
   bool isCancelled(String g) => _cancelled[g] ?? false;
   bool offline = false;
+
+  /// Makes every call fail with this error (e.g. an expired login).
+  Object? failWith;
   bool expireToken = false;
   int upsertCalls = 0;
   final Map<String, int> _changedAt = {};
@@ -43,6 +46,7 @@ class FakeRemote implements RemoteCalendar {
 
   @override
   Future<PullResult> pull(String calendarId, String? syncToken) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
     if (expireToken && syncToken != null) {
       expireToken = false;
@@ -78,6 +82,7 @@ class FakeRemote implements RemoteCalendar {
 
   @override
   Future<PushResult> upsert(CalEvent event, {String? masterGoogleId}) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
     upsertCalls++;
     final existing = appIdToGoogle[event.id] ?? event.googleId;
@@ -98,6 +103,7 @@ class FakeRemote implements RemoteCalendar {
 
   @override
   Future<void> delete(CalEvent event) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
     final g = event.googleId ?? appIdToGoogle[event.id];
     if (g != null && events.containsKey(g)) {

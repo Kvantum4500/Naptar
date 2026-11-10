@@ -42,6 +42,23 @@ class SyncStatusButton extends ConsumerWidget {
               label: const Text('Nincs Google'),
             );
     }
+    if (!s.signedIn && s.error != null) {
+      // the login expired: say so, one tap signs in again
+      return compact
+          ? IconButton(
+              tooltip: s.error,
+              onPressed: ctl.signIn,
+              icon: Icon(Icons.error_outline, color: scheme.error),
+            )
+          : TextButton.icon(
+              onPressed: ctl.signIn,
+              icon: Icon(Icons.error_outline, size: 18, color: scheme.error),
+              label: Text(
+                'Belépés szükséges',
+                style: TextStyle(color: scheme.error),
+              ),
+            );
+    }
     if (!s.signedIn) {
       return compact
           ? IconButton(
