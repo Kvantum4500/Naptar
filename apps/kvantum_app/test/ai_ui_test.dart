@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ai/ai_providers.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
@@ -10,6 +14,9 @@ import 'package:kvantum_app/ai/handbook_page.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
+import 'package:kvantum_app/ai/location_service.dart';
+import 'package:kvantum_app/ai/place.dart';
+import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/backup_ops.dart';
 import 'package:kvantum_app/data/db.dart';
@@ -58,6 +65,8 @@ void main() {
     String? key,
     bool stubHandbook = true,
     BackupIo? io,
+    LocationProvider? location,
+    WeatherService? weatherSvc,
   }) async {
     useSize(tester);
     db = await newDb();
@@ -70,6 +79,9 @@ void main() {
         extra: [
           apiKeyStoreProvider.overrideWithValue(keys),
           if (io != null) backupIoProvider.overrideWithValue(io),
+          if (location != null) locationProvider.overrideWithValue(location),
+          if (weatherSvc != null)
+            weatherServiceProvider.overrideWithValue(weatherSvc),
           llmFactoryProvider.overrideWithValue((cfg) => llm ?? FakeGemini([])),
           currentBuildProvider.overrideWith((ref) async => 7),
           // The bundled assets are covered by the handbook page test; the
@@ -87,6 +99,122 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  group('weather and place settings', () {
+    Future<void> show(WidgetTester tester, String text) async {
+      final f = find.text(text);
+      await tester.scrollUntilVisible(
+        f,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(f);
+      await tester.pumpAndSettle();
+    }
+
+    Future<Place?> savedPlace(WidgetTester tester) async =>
+        (await tester.runAsync(
+          () => ref0(tester).read(aiSettingsStoreProvider).load(),
+        ))!.place;
+
+    testWidgets('GPS sets the place (rounded) and it can be cleared', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        const SettingsPage(),
+        location: _FakeLocation(
+          LocationResult.ok(Place(name: '', lat: 47.49801, lon: 19.04021)),
+        ),
+      );
+      await show(tester, 'Helyzet meghatározása (GPS)');
+      expect(find.textContaining('nincs megadva'), findsOneWidget);
+      await tester.tap(find.text('Helyzet meghatározása (GPS)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Helyszín: 47.50, 19.04'), findsOneWidget);
+      expect((await savedPlace(tester))!.lat, 47.5);
+
+      await tester.tap(find.text('Helyszín törlése'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('nincs megadva'), findsOneWidget);
+      expect(await savedPlace(tester), isNull);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a refused or unavailable GPS explains itself and sets nothing',
+      (tester) async {
+        for (final c in [
+          (LocationFailure.denied, 'nem engedélyezted'),
+          (LocationFailure.deniedForever, 'tiltva van'),
+          (LocationFailure.serviceOff, 'ki van kapcsolva'),
+          (LocationFailure.unavailable, 'Gépen gyakran nincs GPS'),
+        ]) {
+          await boot(
+            tester,
+            const SettingsPage(),
+            location: _FakeLocation(LocationResult.fail(c.$1)),
+          );
+          await show(tester, 'Helyzet meghatározása (GPS)');
+          await tester.tap(find.text('Helyzet meghatározása (GPS)'));
+          await tester.pumpAndSettle();
+          expect(find.textContaining(c.$2), findsOneWidget, reason: '${c.$1}');
+          expect(await savedPlace(tester), isNull);
+          await shutdown(tester, db);
+        }
+      },
+    );
+
+    testWidgets('a typed city is searched and picked', (tester) async {
+      final svc = WeatherService(
+        MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'results': [
+                {
+                  'name': 'Győr',
+                  'country': 'Magyarország',
+                  'latitude': 47.68333,
+                  'longitude': 17.63512,
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      await boot(tester, const SettingsPage(), weatherSvc: svc);
+      await show(tester, 'Vagy keress rá a városodra');
+      await tester.enterText(find.byType(TextField).last, 'Győr');
+      await tester.tap(find.byTooltip('Keresés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Győr, Magyarország'));
+      await tester.pumpAndSettle();
+      expect(find.text('Helyszín: Győr, Magyarország'), findsOneWidget);
+      final p = (await savedPlace(tester))!;
+      expect((p.name, p.lat, p.lon), ('Győr, Magyarország', 47.68, 17.64));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the switch turns weather off and hides the place controls', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      await show(tester, 'Időjárás használata a tervezéshez');
+      expect(find.text('Helyzet meghatározása (GPS)'), findsOneWidget);
+      await tester.tap(find.text('Időjárás használata a tervezéshez'));
+      await tester.pumpAndSettle();
+      expect(find.text('Helyzet meghatározása (GPS)'), findsNothing);
+      expect(
+        (await tester.runAsync(
+          () => ref0(tester).read(aiSettingsStoreProvider).load(),
+        ))!.weather,
+        isFalse,
+      );
+      await shutdown(tester, db);
+    });
+  });
 
   group('backup', () {
     testWidgets('export saves an .ics, import restores it without duplicates', (
@@ -1206,4 +1334,12 @@ class _MemoryIo implements BackupIo {
 
   @override
   Future<String?> pick() async => toPick;
+}
+
+class _FakeLocation implements LocationProvider {
+  _FakeLocation(this.result);
+  final LocationResult result;
+
+  @override
+  Future<LocationResult> current() async => result;
 }

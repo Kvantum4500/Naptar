@@ -15,6 +15,8 @@ import 'gemini_provider.dart';
 import 'provider_catalog.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
+import 'location_service.dart';
+import 'weather_service.dart';
 
 final apiKeyStoreProvider = Provider<ApiKeyStore>((_) => SecureApiKeyStore());
 
@@ -27,6 +29,16 @@ final aiSettingsStoreProvider = Provider<AiSettingsStore>((ref) {
   final r = ref.watch(recordRepoProvider);
   return AiSettingsStore(read: r.meta, write: r.setMeta);
 });
+
+final weatherServiceProvider = Provider<WeatherService>((ref) {
+  final c = http.Client();
+  ref.onDispose(c.close);
+  return WeatherService(c);
+});
+
+final locationProvider = Provider<LocationProvider>(
+  (ref) => const GeolocatorLocationProvider(),
+);
 
 final handbookStoreProvider = Provider<HandbookStore>(
   (ref) => HandbookStore(ref.watch(recordRepoProvider)),
@@ -192,6 +204,7 @@ class AssistantController extends Notifier<AssistantState> {
         records: ref.read(recordRepoProvider),
         handbook: ref.read(handbookStoreProvider),
         settingsStore: ref.read(aiSettingsStoreProvider),
+        weather: ref.read(weatherServiceProvider),
         rules: PlanRules(
           sleepStartHour: settings.sleepStartHour,
           sleepEndHour: settings.sleepEndHour,

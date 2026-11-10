@@ -14,4 +14,5 @@ export 'src/series_ops.dart';
 export 'src/shift_pattern.dart';
 export 'src/sync_record.dart';
 export 'src/time.dart';
+export 'src/weather.dart';
 export 'src/week.dart';

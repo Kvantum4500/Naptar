@@ -1,5 +1,6 @@
 import 'event.dart';
 import 'time.dart';
+import 'weather.dart';
 
 /// Hard constraints the AI may never violate. Enforced in code, not by prompt.
 class PlanRules {
@@ -36,7 +37,12 @@ class ProposedBlock {
     this.taskDue,
     this.taskEstimateMin,
     this.taskEnergy,
+    this.outdoor = false,
   });
+
+  /// Done outside (set by the model or recognised from the title): the
+  /// forecast of that day is checked.
+  final bool outdoor;
 
   /// Set when the block works on a task: enables the deadline / length /
   /// energy checks. [taskDue] is a floating date, inclusive.
@@ -66,6 +72,7 @@ List<Violation> validateProposal(
   required List<Occurrence> existing,
   required PlanRules rules,
   Map<DateTime, int> energyByDate = const {},
+  Map<DateTime, DayWeather> weatherByDate = const {},
 }) {
   final v = <Violation>[];
   final buffer = Duration(minutes: rules.bufferMinutes);
@@ -110,6 +117,20 @@ List<Violation> validateProposal(
           '„${b.title}” átfedi ezt: „${sorted[i - 1].title}”',
         ),
       );
+    }
+    // Outdoor activities need fitting weather (when a forecast is known).
+    if (b.outdoor || outdoorSport(b.title)) {
+      final day = floating(s.year, s.month, s.day);
+      final w = weatherByDate[day];
+      final why = w == null ? null : weatherProblem(w, title: b.title);
+      if (why != null) {
+        v.add(
+          Violation(
+            'weather',
+            '„${b.title}” szabadtéri, de ${day.toIso8601String().substring(0, 10)}-n az időjárás nem alkalmas: $why',
+          ),
+        );
+      }
     }
     // Energy gate for hard sessions.
     if (b.isHard) {

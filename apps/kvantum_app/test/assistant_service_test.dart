@@ -1,9 +1,15 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/assistant_service.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
+import 'package:kvantum_app/ai/place.dart';
+import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
@@ -861,6 +867,163 @@ void main() {
         expect(out.deletions.single.occurrence.title, 'Futás');
       },
     );
+  });
+
+  group('weather', () {
+    final bp0 = Place(name: 'Budapest', lat: 47.5, lon: 19.04);
+
+    // 14 days from 2026-05-04; the 5th is a rainy day
+    Map<String, Object?> forecast() => {
+      'daily': {
+        'time': [
+          for (var i = 0; i < 14; i++)
+            '2026-05-${(4 + i).toString().padLeft(2, '0')}',
+        ],
+        'temperature_2m_max': [for (var i = 0; i < 14; i++) 18.0],
+        'temperature_2m_min': [for (var i = 0; i < 14; i++) 9.0],
+        'precipitation_sum': [for (var i = 0; i < 14; i++) i == 1 ? 8.0 : 0.0],
+        'precipitation_probability_max': [
+          for (var i = 0; i < 14; i++) i == 1 ? 90 : 10,
+        ],
+        'wind_speed_10m_max': [for (var i = 0; i < 14; i++) 12.0],
+        'weather_code': [for (var i = 0; i < 14; i++) i == 1 ? 63 : 1],
+      },
+    };
+
+    var fetched = 0;
+    AssistantService svc(FakeLlm llm, {bool online = true}) => AssistantService(
+      provider: llm,
+      events: events,
+      records: records,
+      handbook: HandbookStore(records, loader: (p) async => 'H[$p]'),
+      settingsStore: store,
+      now: () => now,
+      delay: (d) async {},
+      weather: WeatherService(
+        MockClient((_) async {
+          fetched++;
+          if (!online) return http.Response('down', 503);
+          return http.Response(
+            jsonEncode(forecast()),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      ),
+    );
+
+    String firstOf(FakeLlm llm) =>
+        (llm.requests.first.turns.first.parts.single as LlmText).text;
+
+    setUp(() => fetched = 0);
+
+    test('a planning request carries the forecast of the window', () async {
+      final llm = FakeLlm([(_) => say('ok')]);
+      await svc(llm).ask(
+        'Tervezz edzést',
+        model: 'm',
+        settings: AiSettings(place: bp0),
+      );
+      final first = firstOf(llm);
+      expect(first, contains('<adat tipus="idojaras">'));
+      expect(first, contains('"helyszin":"Budapest"'));
+      expect(first, contains('csapadék 90%'));
+      expect(fetched, 1);
+    });
+
+    test(
+      'no block for delete requests, with weather off, or without a place',
+      () async {
+        for (final c in [
+          ('töröld a fogorvost', AiSettings(place: bp0)),
+          ('Tervezz edzést', AiSettings(place: bp0, weather: false)),
+          ('Tervezz edzést', const AiSettings()),
+        ]) {
+          final llm = FakeLlm([(_) => say('ok')]);
+          await svc(llm).ask(c.$1, model: 'm', settings: c.$2);
+          expect(firstOf(llm).contains('idojaras'), isFalse, reason: c.$1);
+        }
+        expect(fetched, 0, reason: 'nothing is requested when it is not used');
+      },
+    );
+
+    test(
+      'an unreachable forecast is said so, and the plan still works',
+      () async {
+        final llm = FakeLlm([
+          (_) => calls([
+            propose([
+              item('Gym', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            ]),
+          ]),
+        ]);
+        final out = await svc(llm, online: false).ask(
+          'Tervezz edzést',
+          model: 'm',
+          settings: AiSettings(place: bp0),
+        );
+        expect(
+          firstOf(llm),
+          contains('időjárás-előrejelzés most nem érhető el'),
+        );
+        expect(firstOf(llm).contains('<adat tipus="idojaras">'), isFalse);
+        expect(out.items.single.title, 'Gym');
+      },
+    );
+
+    test('an outdoor sport on a rainy day goes back and is replaced', () async {
+      final llm = FakeLlm([
+        (_) => calls([
+          propose([
+            item('Kajak 2 óra', '2026-05-05T17:00:00', '2026-05-05T19:00:00'),
+          ]),
+        ]),
+        (_) => calls([
+          propose([item('Gym', '2026-05-05T17:00:00', '2026-05-05T18:00:00')]),
+        ]),
+      ]);
+      final out = await svc(llm).ask(
+        'Tervezz edzést',
+        model: 'm',
+        settings: AiSettings(place: bp0),
+      );
+      expect(out.items.single.title, 'Gym');
+      final told = llm.requests[1].turns.last.parts
+          .whereType<LlmToolResult>()
+          .map((r) => r.result.toString())
+          .join();
+      expect(told, contains('időjárás'));
+      expect(told, contains('Kajak'));
+    });
+
+    test('the same outdoor sport on a dry day is accepted', () async {
+      final llm = FakeLlm([
+        (_) => calls([
+          propose([
+            item('Kerékpározás', '2026-05-06T17:00:00', '2026-05-06T18:30:00'),
+          ]),
+        ]),
+      ]);
+      final out = await svc(llm).ask(
+        'Tervezz edzést',
+        model: 'm',
+        settings: AiSettings(place: bp0),
+      );
+      expect(out.items.single.title, 'Kerékpározás');
+    });
+
+    test('without a place the weather rule does not block anything', () async {
+      final llm = FakeLlm([
+        (_) => calls([
+          propose([
+            item('Kajak 2 óra', '2026-05-05T17:00:00', '2026-05-05T19:00:00'),
+          ]),
+        ]),
+      ]);
+      final out = await svc(llm)
+          .ask('Tervezz edzést', model: 'm', settings: const AiSettings());
+      expect(out.items.single.title, 'Kajak 2 óra');
+    });
   });
 
   group('learned habits', () {

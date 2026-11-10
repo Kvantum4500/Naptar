@@ -1,3 +1,5 @@
+import 'place.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Where the API keys live (one per provider). The real implementation uses
@@ -65,6 +67,8 @@ class AiSettings {
     this.checkins = true,
     this.sleepStartHour = 23,
     this.sleepEndHour = 7,
+    this.weather = true,
+    this.place,
   });
 
   /// Provider id from the catalog (gemini, groq, mistral, openrouter, openai, custom).
@@ -83,6 +87,12 @@ class AiSettings {
   final int sleepStartHour;
   final int sleepEndHour;
 
+  /// Use the forecast of [place] when planning (needs a place to do anything).
+  final bool weather;
+
+  /// Where the weather is looked up (set from GPS or a typed city).
+  final Place? place;
+
   AiSettings copyWith({
     String? provider,
     String? model,
@@ -93,6 +103,9 @@ class AiSettings {
     bool? checkins,
     int? sleepStartHour,
     int? sleepEndHour,
+    bool? weather,
+    Place? place,
+    bool clearPlace = false,
   }) => AiSettings(
     provider: provider ?? this.provider,
     model: clearModel ? null : (model ?? this.model),
@@ -102,6 +115,8 @@ class AiSettings {
     checkins: checkins ?? this.checkins,
     sleepStartHour: sleepStartHour ?? this.sleepStartHour,
     sleepEndHour: sleepEndHour ?? this.sleepEndHour,
+    weather: weather ?? this.weather,
+    place: clearPlace ? null : (place ?? this.place),
   );
 }
 
@@ -130,6 +145,8 @@ class AiSettingsStore {
       checkins: (await read('ai.checkins')) != 'off',
       sleepStartHour: _hour(await read('ai.sleepStart'), 23),
       sleepEndHour: _hour(await read('ai.sleepEnd'), 7),
+      weather: (await read('ai.weather')) != 'off',
+      place: Place.decode(await read('ai.place')),
     );
   }
 
@@ -148,6 +165,8 @@ class AiSettingsStore {
       'ai.sleepEnd',
       s.sleepEndHour == 7 ? null : '${s.sleepEndHour}',
     );
+    await write('ai.weather', s.weather ? null : 'off');
+    await write('ai.place', s.place?.encode());
   }
 
   static int _hour(String? v, int fallback) {

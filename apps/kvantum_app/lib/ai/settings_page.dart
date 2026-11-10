@@ -9,6 +9,8 @@ import '../sync/sync_controller.dart';
 import '../ui/backup_io.dart';
 import '../update/update_dialog.dart';
 import 'ai_providers.dart';
+import 'location_service.dart';
+import 'place.dart';
 import '../notify/reminders.dart';
 import 'ai_settings.dart';
 import 'handbook_page.dart';
@@ -32,11 +34,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _messageIsError = false;
   List<LlmModel> _models = const [];
   String? _loadedFor;
+  final _city = TextEditingController();
+  var _found = const <Place>[];
+  var _locBusy = false;
 
   @override
   void dispose() {
     _key.dispose();
     _base.dispose();
+    _city.dispose();
     super.dispose();
   }
 
@@ -114,6 +120,60 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  Future<void> _useGps() async {
+    setState(() => _locBusy = true);
+    final r = await ref.read(locationProvider).current();
+    if (!mounted) return;
+    setState(() => _locBusy = false);
+    final p = r.place;
+    if (p != null) {
+      await ref
+          .read(aiSettingsProvider.notifier)
+          .change(
+            (ref.read(aiSettingsProvider).value ?? const AiSettings()).copyWith(
+              place: p,
+            ),
+          );
+      _toast('Helyszín beállítva: ${p.label} (kb.).');
+      return;
+    }
+    _toast(switch (r.failure) {
+      LocationFailure.serviceOff =>
+        'A helymeghatározás ki van kapcsolva az eszközön.',
+      LocationFailure.denied => 'A helyhozzáférést nem engedélyezted.',
+      LocationFailure.deniedForever => 'A helyhozzáférés tiltva van. Engedélyezd a rendszer beállításaiban (Alkalmazások → Kvantum Naptár → Engedélyek → Hely).',
+      _ => 'Nem sikerült meghatározni a helyzetet. Gépen gyakran nincs GPS: keress rá a városodra.',
+    }, error: true);
+  }
+
+  Future<void> _searchCity() async {
+    setState(() => _locBusy = true);
+    final found = await ref.read(weatherServiceProvider).search(_city.text);
+    if (!mounted) return;
+    setState(() {
+      _found = found;
+      _locBusy = false;
+    });
+    if (found.isEmpty) {
+      _toast('Nem találtam ilyen helyet (vagy nincs kapcsolat).', error: true);
+    }
+  }
+
+  Future<void> _pickPlace(Place p) async {
+    await ref
+        .read(aiSettingsProvider.notifier)
+        .change(
+          (ref.read(aiSettingsProvider).value ?? const AiSettings()).copyWith(
+            place: p,
+          ),
+        );
+    if (!mounted) return;
+    setState(() {
+      _found = const [];
+      _city.clear();
+    });
+  }
+
   /// The backup buttons sit far below the key section, where [_say] is not
   /// visible, so their results appear as a snack bar.
   void _toast(String m, {bool error = false}) {
@@ -173,7 +233,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (next.any) {
       final ok = await ref.read(reminderSchedulerProvider).ensurePermission();
       if (!ok) {
-        _say(
+        _toast(
           'Az értesítések le vannak tiltva. Engedélyezd az Android beállításaiban (Alkalmazások → Kvantum Naptár → Értesítések).',
           error: true,
         );
@@ -386,6 +446,66 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onChanged: (v) =>
                       notifier.change(settings.copyWith(checkins: v)),
                 ),
+              ]),
+              section('Időjárás és helyszín', [
+                const Text(
+                  'A szabadtéri hobbisportokat (kajak, kerékpár, falmászás…) az időjárás-előrejelzés alapján javasolja. Az előrejelzést az Open-Meteo adja (ingyenes, kulcs nélkül). Csak a kerekített koordináta (kb. 1 km pontosságú) megy ki, a naptáradatod nem.',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Időjárás használata a tervezéshez'),
+                  value: settings.weather,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(weather: v)),
+                ),
+                if (settings.weather) ...[
+                  Text(
+                    settings.place == null
+                        ? 'Helyszín: nincs megadva (időjárás nélkül tervez).'
+                        : 'Helyszín: ${settings.place!.label}',
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _locBusy ? null : _useGps,
+                        icon: const Icon(Icons.my_location),
+                        label: const Text('Helyzet meghatározása (GPS)'),
+                      ),
+                      if (settings.place != null)
+                        TextButton(
+                          onPressed: () => notifier.change(
+                            settings.copyWith(clearPlace: true),
+                          ),
+                          child: const Text('Helyszín törlése'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _city,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _searchCity(),
+                    decoration: InputDecoration(
+                      labelText: 'Vagy keress rá a városodra',
+                      suffixIcon: IconButton(
+                        tooltip: 'Keresés',
+                        icon: const Icon(Icons.search),
+                        onPressed: _locBusy ? null : _searchCity,
+                      ),
+                    ),
+                  ),
+                  for (final p in _found)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.place_outlined),
+                      title: Text(p.label),
+                      onTap: () => _pickPlace(p),
+                    ),
+                ],
               ]),
               section('Emlékeztetők', [
                 if (!ref.watch(reminderSchedulerProvider).supported)

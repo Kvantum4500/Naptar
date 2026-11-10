@@ -17,7 +17,11 @@ class ProposalItem {
     this.taskDue,
     this.taskEstimateMin,
     this.taskEnergy,
+    this.outdoor = false,
   });
+
+  /// The model said it is done outside.
+  final bool outdoor;
 
   /// Task this block works on (named by the model, details filled in by the
   /// app from the real task record).
@@ -45,6 +49,7 @@ class ProposalItem {
     taskDue: due,
     taskEstimateMin: estimateMin,
     taskEnergy: energy,
+    outdoor: outdoor,
   );
 
   final String title;
@@ -70,6 +75,7 @@ class ProposalItem {
     taskDue: taskDue,
     taskEstimateMin: taskEstimateMin,
     taskEnergy: taskEnergy,
+    outdoor: outdoor,
   );
 }
 
@@ -175,6 +181,7 @@ ParsedProposal parseProposal(
         tzid: tz,
         kind: kind,
         hard: hard,
+        outdoor: it['outdoor'] == true,
         reason: _text(it['reason'], 300),
         taskId: _text(it['taskId'], 100).isEmpty
             ? null

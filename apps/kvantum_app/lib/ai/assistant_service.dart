@@ -5,6 +5,7 @@ import '../data/record_repository.dart';
 import 'ai_settings.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
+import 'weather_service.dart';
 
 const _tools = <ToolDecl>[
   ToolDecl(
@@ -92,6 +93,11 @@ const _tools = <ToolDecl>[
                 'enum': ['workout', 'task', 'rest', 'other'],
               },
               'hard': {'type': 'boolean', 'description': 'Nehéz edzés-e.'},
+              'outdoor': {
+                'type': 'boolean',
+                'description':
+                    'Szabadtéri tevékenység-e (az időjárást ellenőrizzük).',
+              },
               'reason': {'type': 'string', 'description': 'Miért ide került.'},
             },
             'required': ['title', 'start', 'end'],
@@ -232,6 +238,7 @@ class AssistantService {
     Future<void> Function(Duration)? delay,
     this.maxCalls = 7,
     this.maxRepairs = 2,
+    this.weather,
   }) : _now = now ?? DateTime.now,
        _delay = delay ?? Future.delayed;
 
@@ -241,6 +248,9 @@ class AssistantService {
   final HandbookStore handbook;
   final AiSettingsStore settingsStore;
   final PlanRules rules;
+
+  /// Forecast source; null means the assistant works without weather.
+  final WeatherService? weather;
   final int maxCalls;
   final int maxRepairs;
   final DateTime Function() _now;
@@ -263,6 +273,9 @@ class AssistantService {
     _aliasToRef.clear();
     _refToAlias.clear();
     _prompt = prompt.toLowerCase();
+    _settings = settings;
+    _forecast = null;
+    _forecastTried = false;
     final system = buildSystemPrompt(
       handbook: await handbook.combined(),
       nowUtc: _nowUtc,
@@ -329,6 +342,20 @@ class AssistantService {
   void Function(String status)? _onStatus;
 
   String _prompt = '';
+  AiSettings _settings = const AiSettings();
+  List<DayWeather>? _forecast;
+  bool _forecastTried = false;
+
+  /// The forecast for the next two weeks, fetched at most once per request.
+  /// Null when weather is off, no place is set, or the service is unreachable.
+  Future<List<DayWeather>?> _forecastFor(AiSettings s) async {
+    final svc = weather;
+    final place = s.place;
+    if (svc == null || !s.weather || place == null) return null;
+    if (_forecastTried) return _forecast;
+    _forecastTried = true;
+    return _forecast = await svc.forecast(place, days: 14);
+  }
 
   // Short per-request aliases (e1, e2, ...) for event references: the long
   // `<id>@<time>` form costs tokens and is easy for a model to garble.
@@ -419,6 +446,7 @@ class AssistantService {
           'check_in',
           await _runTool(LlmToolCall('get_checkins', const {}), s),
         ),
+      ...await _weatherBlock(s, scope.days, scope.slots),
       if (scope.slots)
         dataBlock(
           'szabad_idosavok',
@@ -428,6 +456,30 @@ class AssistantService {
           ),
         ),
     ].join('\n');
+  }
+
+  /// The weather block for planning requests: the forecast of the window, or
+  /// one line saying it is missing so the model stays cautious outdoors.
+  Future<List<String>> _weatherBlock(
+    AiSettings s,
+    int days,
+    bool planning,
+  ) async {
+    if (!planning || !s.weather || s.place == null || weather == null) {
+      return const [];
+    }
+    final f = await _forecastFor(s);
+    if (f == null) {
+      return const [
+        'Az időjárás-előrejelzés most nem érhető el: szabadtéri hobbisportot csak akkor javasolj, ha az évszak egyértelműen megfelelő, és jelezd az indoklásban.',
+      ];
+    }
+    return [
+      dataBlock(
+        'idojaras',
+        weatherForTool(f.take(days).toList(), place: s.place!.label),
+      ),
+    ];
   }
 
   // ------------------------------------------------------------------ tools
@@ -568,11 +620,16 @@ class AssistantService {
         if (!doomed.contains(occurrenceRef(o))) o,
     ];
     final energy = await _energyByDate();
+    final forecast = await _forecastFor(_settings);
+    final weatherByDate = {
+      for (final w in forecast ?? <DayWeather>[]) w.day: w,
+    };
     List<Violation> check(List<ProposalItem> items) => validateProposal(
       [for (final i in items) i.toBlock()],
       existing: existing,
       rules: rules,
       energyByDate: energy,
+      weatherByDate: weatherByDate,
     );
 
     final all = check(parsed.items);
