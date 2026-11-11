@@ -362,7 +362,13 @@ class _DayColumn extends StatelessWidget {
                     1,
                 left: 0,
                 right: 0,
-                child: Container(height: 2, color: scheme.error),
+                // Only a marker: a tap or drag goes through to the event (or the
+                // empty hour) under it. Without this, the 2 pixels of the line
+                // swallowed the tap whenever it lay over an event's title.
+                child: IgnorePointer(
+                  key: const Key('now-line'),
+                  child: Container(height: 2, color: scheme.error),
+                ),
               ),
           ],
         ),

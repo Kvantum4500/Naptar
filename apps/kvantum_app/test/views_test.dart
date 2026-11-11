@@ -152,6 +152,16 @@ void main() {
       expect(find.text('${hh((h + 2).clamp(1, 23))}:00'), findsWidgets);
       expect(find.text('1 esemény'), findsOneWidget);
 
+      // the red "now" line is a marker only: it must never take a tap meant
+      // for the event under it (it used to, for two minutes of every hour,
+      // when it happened to cross the title)
+      expect(
+        tester
+            .widget<IgnorePointer>(find.byKey(const Key('now-line')))
+            .ignoring,
+        isTrue,
+      );
+
       // tapping the block opens the editor directly, no view switch needed
       await tester.tap(find.text('Panel esemény'));
       await tester.pumpAndSettle();
