@@ -2,6 +2,42 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 1b. fázis – az adatréteg megbízhatósága: biztonságos frissítés, egy egység az összetartozó írás, újabb formátum védelme
+
+**Adatbázis és Windows**
+- **A frissítés nem tud félúton megállni (REL-17):** az adatbázis-migráció egyetlen tranzakció (a hiba visszagörget, a verziószám marad), és **minden frissítés előtt biztonsági másolat készül** `kvantum.sqlite.bak-v<régi verzió>` néven (`VACUUM INTO`, a legutóbbi kettő marad). Eddig a lépések külön futottak, mentés nem volt.
+- **Újabb alkalmazás adatbázisát nem rontja el a régebbi (REL-16):** ha az adatbázis egy újabb verzióé, ez a verzió **nem nyitja meg és nem „frissíti” visszafelé**, hanem érthető magyar képernyőt mutat (az adat érintetlen, telepíteni kell az újabb verziót). Sérült fájlnál nem nyúl hozzá, megnevezi a fájlt és a mentések helyét.
+- **Gyorsabb keresések (REL-18):** a szinkron által soronként végzett keresésekhez indexek készülnek (induláskor, egyszer és ártalmatlanul; **nincs séma-verzióváltás**).
+- **Windows: az adatbázis a `%LOCALAPPDATA%\KvantumNaptar` mappába költözik (SEC-6):** eddig a Dokumentumokban volt, amelyet a OneDrive tükrözhet. Az áthelyezés kétlépcsős: másolás → ellenőrzés (megnyílik, `integrity_check`, azonos séma-verzió, **azonos sorszám minden táblában**) → jelölőfájl; a régi fájl csak a **következő sikeres induláskor** törlődik, és bármi hiba esetén a régi hely marad használatban.
+- **Windows: egyszerre egy példány fut (REL-25):** a második indítás a már futó ablakot hozza előre (a frissítő által indított új példány 3 másodpercet vár, amíg a régi kilép). Eddig két példány írhatta ugyanazt az adatbázist.
+
+**Összetartozó írások egy egységben (REL-14/15)**
+- A **műszak-generálás**, a **sorozat törlése**, a **szerkesztés ismétlődéssel** és az **.ics visszaállítás** egy tranzakció és egy képernyőfrissítés (eddig ≈ 90 külön írás: villogás, és félbeszakadva fél eredmény maradt).
+- A feladatok / check-inek szerkesztése, törlése és a Drive-ról érkező változat olvas-módosít-ír tranzakcióban fut; az eszköz-azonosítót **egyszer** hozza létre (két egyidejű hívás nem csinál kettőt); a pénzügyi mentések bélyegzése és az érkező levelek (egy levél = egy tranzakció) is tranzakcióban vannak.
+
+**Az újabb formátumot nem rontja el a régebbi verzió (REL-16)**
+- A levél, a rekord és a Drive-fájl `v` mezőjét az app olvassa. Az **újabb formátumú levél nem törlődik** (megmarad, amíg ez a verzió frissül), az **újabb Drive-fájl nem íródik felül**, az ismeretlen fajtájú tételt tartalmazó levélből az ismert tételek alkalmazódnak, a levél marad. Újabb verzió pénzügyi mentése: magyar üzenet („frissítsd az alkalmazást”) a félig sikeres visszaállítás helyett. A szinkron állapota jelzi: „N elemet az alkalmazás egy újabb verziója írt; ezeket nem bántom…”.
+
+**.ics (REL-13)**
+- **Az ismétlődés vége helyes marad:** az importnál az UTC-ben megadott `UNTIL` a helyi időre (egész napos eseménynél a nap végére) alakul, exportnál vissza UTC-re (eddig a sorozat egy nappal korábban végződhetett, vagy az exportált `UNTIL` mást jelentett más naptárban).
+- **A törölt előfordulás nem tér vissza:** exportnál a sorozat `EXDATE`-je lesz (eddig kimaradt, ezért visszaállítva az előfordulás újra megjelent).
+- **Korlátok magyar jelentéssel:** fájl ≤ 5 millió karakter, időponthoz kötött esemény ≤ 366 nap, egész napos ≤ 3 660 nap, 1970–2100 közötti év (eddig egy 9999-es végű esemény lefagyaszthatta a felületet); a sok, hosszú összefűzött sor pufferben épül (nem négyzetes idő).
+- **Visszaállítás előnézettel:** ha a fájlban olyan esemény van, amely az eszközön azóta módosult, a program **nem ír felül kérdés nélkül**: párbeszéd mutatja az érintett eseményeket, és kérdez: **Mind** (felülír) / **Csak az újak** / **Mégse**. (A fájlban nincs eseményenkénti módosítási idő, ezért az „újabb nyer” nem dönthető el.) A visszaállított esemény megtartja a Google-kapcsolatát. A 200 000 karakternél nagyobb fájlt külön szálon olvassa be.
+
+**Ismétlődések, emlékeztetők, „ma”**
+- **Gyorsabb ismétlődés-bővítés (REL-20):** az időtartam sorozatonként egyszer számolódik, az ablak előtti példányok zónaszámítás nélkül kiesnek, az elemzett szabályok gyorsítótárban vannak (legfeljebb 256). Egy valósághű terhelésen (30 évek óta futó sorozat, 6 hetes ablak) **kb. 3× gyorsabb**; az eredmény a régi megvalósítással **mezőről mezőre azonos** (6000 véletlen összevetés, DST-határokkal, többféle időzónával).
+- **Az emlékeztetők nem íródnak újra feleslegesen (REL-19):** eddig minden naptárváltozás mindent letörölt és újraütemezett (és ha az app közben leállt, az emlékeztetők elvesztek). Most az app megnézi, mi van az eszközön, és **csak a különbséget** módosítja (új / elmozdult / megszűnt); a változásokat 1,5 másodpercig összegyűjti, így egy 90 eseményes szinkron egyetlen menet.
+- **A „ma” a megjelenítési zóna (Budapest) napja (REL-21):** eddig az eszköz zónája, ezért külföldön vagy más zónára állított gépen elcsúszhatott a „Ma” gomb, a mai feladatok, a check-in dátuma és a pénzügyi hónap. Az app **éjfélkor magától átlép az új napra** (és előtérbe visszatéréskor is megnézi az órát, mert az időzítő alvás közben megállhat); aki a „mai” napot nézte, az új napra lép, aki másikat, ott marad.
+
+**Takarítás (REL-18)**
+- Naponta egyszer, az első kép után: az **1 évnél régebben törölt** feladat-, check-in- és napló-jelölők (a Drive-fájllal együtt, és csak ami már fel van töltve) és pénzügyi jelölők törlődnek; a félbeszakadt futás hátrahagyta sorok rendbe kerülnek: a Google-hivatkozású, de sorban nem lévő törlés **újra sorba kerül** (te töröltél), a hivatkozás nélküli jelölő törlődik, a nem létező eseményhez tartozó sorbejegyzés törlődik. A takarítás eredménye a helyi adatban megőrződik (az 1c Diagnosztikája mutatja).
+
+**Szándékos eltérések az audit szövegétől:** nincs séma-verzióváltás (az indexek induláskor, idempotensen készülnek; a migráció tranzakciós és mentéses akkor is, ha később jön új verzió); az újabb formátumú elemet az app **meghagyja** (nem törli, nem írja felül) – a régi verzió ezért soha nem rongálja az újabb adatát; a 20 000-es ismétlődés-plafon eléréséről szóló jelzés az 1c-ben készülő naplóba kerül (itt még nincs napló); az .ics importnál nincs „újabb nyer” (nincs hozzá adat), helyette előnézet és megerősítés.
+
+Tesztek: mag 456 (volt 422), app 974 (volt 865); 54 szándékos elrontást mind elkapnak a tesztek (a próba több hiányt hozott felszínre: az adatbázis-megnyitó kampó „újabb fájl” elutasítása és az áthelyezés ellenőrzése (sorszám / séma-verzió / táblák) nem volt tesztelve – mindkettő kapott tesztet (ehhez a másolás cserélhetővé vált); a visszaállításnál a Google-kapcsolat külön másolása felesleges volt (a mentés megtartja), ezt egyszerűsítettem).
+
+**Nem ellenőrizhető itt:** a Windows-mutex és az ablak előtérbe hozása; az áthelyezés valódi, OneDrive-os Dokumentumokkal; a `VACUUM INTO` Android-eszközön; az emlékeztetők ütemezése doze-ban (az Android-natív rész csak a CI-fordításig ellenőrzött); a nagy .ics beolvasása külön szálon valódi eszközön; hogy a „ma” éjféli váltása alvó gépen is időben megtörténik-e (előtérbe visszatéréskor mindenképp).
+
 ## 1a. fázis – a szinkron a hibákat az okuk szerint kezeli
 
 **Mit javít**
