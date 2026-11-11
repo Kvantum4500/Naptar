@@ -405,8 +405,25 @@ void main() {
         expect(await repo.meta(syncBindingKey), 'other@example.com|cal-OTHER');
         expect(st().pending, 0);
         await ctl.syncNow();
+        expect(st().mismatch, isNull, reason: 'the new link is remembered');
         expect(remote.events.length, 2, reason: 'no duplicates');
         expect(await repo.all(), hasLength(2));
+      },
+    );
+
+    test(
+      'a deletion that waited for the old calendar is not sent to the new one',
+      () async {
+        await signedInWithOneEvent();
+        await repo.saveLocal(ev('c', day: 6));
+        await ctl.syncNow(); // both events are in Google now
+        switchAccount();
+        await ctl.syncNow(); // the question appears
+        await repo.deleteLocal('c'); // the deletion waits
+        await ctl.keepLocalAfterMismatch();
+        expect(remote.pushLog.where((e) => e.$1 == 'delete'), isEmpty);
+        expect(await repo.byId('c'), isNull);
+        expect(remote.events.length, 1, reason: 'only the event still here');
       },
     );
 
@@ -461,6 +478,9 @@ void main() {
         final creates = drive.creates;
         expect(before.values, everyElement(isNotNull));
 
+        // old events are not part of the (windowed) listing: only the cut
+        // link and the lookup by their own id can find them again
+        remote.windowStartUtc = DateTime.utc(2026, 11, 1);
         await ctl.resetSync();
 
         expect(remote.events.length, 2, reason: 'no duplicates in Google');
@@ -476,12 +496,34 @@ void main() {
         expect(taskFile(), taskBefore, reason: 'identical content: no rewrite');
         expect(drive.creates, creates, reason: 'and no new file');
         expect(
+          remote.upsertLinks.skip(2),
+          everyElement(isNull),
+          reason: 'the links were cut before the uploads',
+        );
+        expect(
+          remote.pullTokens.skip(1),
+          contains(null),
+          reason: 'the listing started from the beginning',
+        );
+        expect(
           await repo.meta('syncToken:naptar'),
           isNotNull,
           reason: 'and a fresh token afterwards',
         );
       },
     );
+
+    test('a record file that Drive lost comes back', () async {
+      await c
+          .read(recordRepoProvider)
+          .edit(kindTask, 't1', taskFields(title: 'Feladat'));
+      await ctl.signIn();
+      drive.files.clear(); // Drive lost it without telling anyone
+      await ctl.syncNow();
+      expect(drive.files.values.any((f) => f.name == 'task-t1.json'), isFalse);
+      await ctl.resetSync();
+      expect(drive.files.values.any((f) => f.name == 'task-t1.json'), isTrue);
+    });
 
     test('it also gives parked uploads a new chance', () async {
       await repo.saveLocal(ev('a'));

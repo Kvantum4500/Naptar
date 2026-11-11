@@ -7,6 +7,25 @@ import 'db.dart';
 /// The meta key of the Drive change token (where the record sync left off).
 const driveTokenKey = 'drivePageToken';
 
+/// The stamp for a write of [keys] on top of [base]: the clock, unless one of
+/// the fields it replaces already carries that stamp or a later one.
+int stampAfter(SyncRecord base, Iterable<String> keys, int clock) {
+  var ts = clock;
+  for (final k in keys) {
+    final old = base.fields[k]?.ts;
+    if (old != null && old >= ts) ts = old + 1;
+  }
+  return ts;
+}
+
+/// How far a stamp is ahead of the clock, when it is far enough to suspect a
+/// wrong clock on the device that wrote it (otherwise null).
+Duration? clockAhead(int? stampMs, int nowMs) {
+  if (stampMs == null) return null;
+  final ahead = Duration(milliseconds: stampMs - nowMs);
+  return ahead > const Duration(days: 2) ? ahead : null;
+}
+
 /// Local store of the Drive-synced records (tasks, check-ins).
 class RecordRepository {
   RecordRepository(this.db, {String? deviceId, int Function()? clock})
@@ -64,13 +83,23 @@ class RecordRepository {
   }
 
   /// Creates or edits a record locally (marks it for upload).
+  ///
+  /// The write is stamped with the clock, but never earlier than one
+  /// millisecond after the value it replaces: the last writer wins by stamp,
+  /// so an edit made on top of what this device has seen must beat it even if
+  /// another device's clock runs ahead (otherwise that device's value would
+  /// silently outlive every later edit until the real time caught up).
   Future<SyncRecord> edit(
     String kind,
     String id,
     Map<String, Object?> changes,
   ) async {
     final base = await get(kind, id) ?? SyncRecord(id: id, kind: kind);
-    final next = base.edit(changes, ts: now(), dev: await deviceId());
+    final next = base.edit(
+      changes,
+      ts: stampAfter(base, changes.keys, now()),
+      dev: await deviceId(),
+    );
     await _put(next, dirty: true);
     return next;
   }
@@ -80,10 +109,22 @@ class RecordRepository {
     final base = await get(kind, id);
     if (base == null) return;
     await _put(
-      base.edit({'deleted': true}, ts: now(), dev: await deviceId()),
+      base.edit(
+        {'deleted': true},
+        ts: stampAfter(base, const ['deleted'], now()),
+        dev: await deviceId(),
+      ),
       dirty: true,
     );
   }
+
+  /// The newest write stamp of any record, in milliseconds (null: none yet).
+  Future<int?> newestStamp() async =>
+      (await (db.selectOnly(
+        db.recordRows,
+      )..addColumns([db.recordRows.updatedAt.max()])).getSingle()).read(
+        db.recordRows.updatedAt.max(),
+      );
 
   /// Merges a record read from Drive. The row stays dirty only when the local
   /// side still has information the remote copy lacks.

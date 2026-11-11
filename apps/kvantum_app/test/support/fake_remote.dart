@@ -45,6 +45,12 @@ class FakeRemote implements RemoteCalendar {
   /// instance of a series carries a COPY of the series' appEventId).
   final Map<String, String> inheritedAppId = {};
 
+  /// The sync token of every pull (null: a full listing).
+  final List<String?> pullTokens = [];
+
+  /// The Google id each upload carried (null: it was not linked).
+  final List<String?> upsertLinks = [];
+
   /// Pushes in the order they arrived: (op, local id).
   final List<(String, String)> pushLog = [];
 
@@ -87,6 +93,7 @@ class FakeRemote implements RemoteCalendar {
   @override
   Future<PullResult> pull(String calendarId, String? syncToken) async {
     pullCalls++;
+    pullTokens.add(syncToken);
     if (gate != null) await gate!.future;
     if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
@@ -143,6 +150,7 @@ class FakeRemote implements RemoteCalendar {
     if (offline) throw TransientSyncError('offline');
     upsertCalls++;
     pushLog.add(('upsert', event.id));
+    upsertLinks.add(event.googleId);
     final failure = failUpsertAt[upsertCalls];
     if (failure != null) throw failure;
     var existing = appIdToGoogle[event.id] ?? event.googleId;

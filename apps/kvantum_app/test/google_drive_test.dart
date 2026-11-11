@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/drive/google_drive_remote.dart';
+import 'package:kvantum_app/sync/api_errors.dart';
+import 'package:kvantum_app/sync/retry_after_client.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
   jsonEncode(body),
@@ -155,6 +157,128 @@ void main() {
         expect(res.removedIds, ['gone', 'tr']);
       },
     );
+
+    group('does the finance mail have news?', () {
+      Future<DrivePull> pullWith(List<Map<String, Object?>> changes) {
+        final f = Fake((r) {
+          if (r.url.path.endsWith('/drive/v3/changes')) {
+            return _json({'newStartPageToken': '90', 'changes': changes});
+          }
+          if (_isMedia(r)) return _media('{"hello":1}');
+          return http.Response('', 404);
+        });
+        return GoogleDriveRemote(f.client).pull('80');
+      }
+
+      Map<String, Object?> file(String id, String name) => {
+        'fileId': id,
+        'removed': false,
+        'file': {'id': id, 'name': name, 'trashed': false},
+      };
+
+      test('only record files changed: no news for the mailbox', () async {
+        final res = await pullWith([file('a', 'task-1.json')]);
+        expect(res.finChanged, isFalse);
+        expect((await pullWith([])).finChanged, isFalse);
+      });
+
+      test('a letter or a peer note appeared: news', () async {
+        expect(
+          (await pullWith([file('l', 'fin-letter-aaaa-to-bbbb-1-0.json')]))
+              .finChanged,
+          isTrue,
+        );
+        expect(
+          (await pullWith([file('p', 'fin-peer-aaaa.json')])).finChanged,
+          isTrue,
+        );
+      });
+
+      test(
+        'a file disappeared (a letter may have been collected): news',
+        () async {
+          final res = await pullWith([
+            {'fileId': 'gone', 'removed': true},
+          ]);
+          expect(res.finChanged, isTrue);
+        },
+      );
+
+      test('a full listing always says so', () async {
+        final f = Fake((r) {
+          if (r.url.path.endsWith('/drive/v3/changes/startPageToken')) {
+            return _json({'startPageToken': '5'});
+          }
+          return _json({'files': []});
+        });
+        expect(
+          (await GoogleDriveRemote(f.client).pull(null)).finChanged,
+          isTrue,
+        );
+      });
+    });
+
+    group('failures keep their meaning (limits are not rejections)', () {
+      test(
+        'a usage limit is transient, throttled, with the server\'s wish',
+        () async {
+          final inner = MockClient(
+            (r) async => http.Response(
+              jsonEncode({
+                'error': {
+                  'code': 403,
+                  'message': 'x',
+                  'errors': [
+                    {
+                      'reason': 'userRateLimitExceeded',
+                      'domain': 'usageLimits',
+                    },
+                  ],
+                },
+              }),
+              403,
+              headers: {
+                'content-type': 'application/json',
+                'retry-after': '20',
+              },
+            ),
+          );
+          try {
+            await GoogleDriveRemote(RetryAfterClient(inner)).pull('80');
+            fail('should have thrown');
+          } on DriveTransientError catch (e) {
+            expect(e.throttled, isTrue);
+            expect(e.dailyLimit, isFalse);
+            expect(e.retryAfter, const Duration(seconds: 20));
+          }
+        },
+      );
+
+      test('a daily limit is marked', () async {
+        final f = Fake((r) => _err(403, 'x', 'dailyLimitExceeded'));
+        try {
+          await GoogleDriveRemote(f.client).pull('80');
+          fail('should have thrown');
+        } on DriveTransientError catch (e) {
+          expect(e.dailyLimit, isTrue);
+        }
+      });
+
+      test('5xx is transient but not a limit; a refusal is neither', () async {
+        final down = Fake((r) => _err(503, 'x'));
+        try {
+          await GoogleDriveRemote(down.client).pull('80');
+          fail('should have thrown');
+        } on DriveTransientError catch (e) {
+          expect(e.throttled, isFalse);
+        }
+        final no = Fake((r) => _err(403, 'x', 'forbidden'));
+        await expectLater(
+          GoogleDriveRemote(no.client).pull('80'),
+          throwsA(isA<ItemRejectedError>()),
+        );
+      });
+    });
 
     test('follows nextPageToken until a newStartPageToken arrives', () async {
       var calls = 0;

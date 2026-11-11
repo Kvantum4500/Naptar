@@ -28,6 +28,25 @@ class FinanceRepository {
   int now() => _clock();
   String newId() => const Uuid().v4();
 
+  /// The stamp for a new version of a record: the clock, but at least one
+  /// millisecond after the version it replaces (see [RecordRepository.edit]).
+  Future<int> _nextStamp(String kind, String id) async {
+    final row = await (db.select(
+      db.finRows,
+    )..where((t) => t.kind.equals(kind) & t.id.equals(id))).getSingleOrNull();
+    final prev = row?.updatedAt ?? 0;
+    final clock = now();
+    return clock > prev ? clock : prev + 1;
+  }
+
+  /// The newest stamp of any finance record, in milliseconds.
+  Future<int?> newestStamp() async =>
+      (await (db.selectOnly(
+        db.finRows,
+      )..addColumns([db.finRows.updatedAt.max()])).getSingle()).read(
+        db.finRows.updatedAt.max(),
+      );
+
   // ----------------------------------------------------------------- reads
 
   Stream<List<T>> _watch<T>(String kind, T? Function(Object?) parse) =>
@@ -102,70 +121,40 @@ class FinanceRepository {
         ),
       );
 
-  Future<void> saveTx(FinTx t) {
-    final x = t.copyWith(updatedAt: now());
-    return _put(
-      _kTx,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveTx(FinTx t) async {
+    final x = t.copyWith(updatedAt: await _nextStamp(_kTx, t.id));
+    await _put(_kTx, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
-  Future<void> saveCategory(FinCategory c) {
-    final x = c.copyWith(updatedAt: now());
-    return _put(
-      _kCategory,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveCategory(FinCategory c) async {
+    final x = c.copyWith(updatedAt: await _nextStamp(_kCategory, c.id));
+    await _put(_kCategory, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
-  Future<void> saveBudget(FinBudget b) {
-    final x = b.copyWith(updatedAt: now());
-    return _put(
-      _kBudget,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveBudget(FinBudget b) async {
+    final x = b.copyWith(updatedAt: await _nextStamp(_kBudget, b.id));
+    await _put(_kBudget, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
-  Future<void> saveRecurring(FinRecurring r) {
-    final x = r.copyWith(updatedAt: now());
-    return _put(
-      _kRecurring,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveRecurring(FinRecurring r) async {
+    final x = r.copyWith(updatedAt: await _nextStamp(_kRecurring, r.id));
+    await _put(_kRecurring, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
-  Future<void> saveGoal(FinGoal g) {
-    final x = g.copyWith(updatedAt: now());
-    return _put(
-      _kGoal,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveGoal(FinGoal g) async {
+    final x = g.copyWith(updatedAt: await _nextStamp(_kGoal, g.id));
+    await _put(_kGoal, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
-  Future<void> saveDeposit(FinDeposit d) {
-    final x = d.copyWith(updatedAt: now());
-    return _put(
-      _kDeposit,
-      x.id,
-      x.toJson(),
-      x.updatedAt,
-      x.deleted,
-    ).then((_) => onChanged?.call());
+  Future<void> saveDeposit(FinDeposit d) async {
+    final x = d.copyWith(updatedAt: await _nextStamp(_kDeposit, d.id));
+    await _put(_kDeposit, x.id, x.toJson(), x.updatedAt, x.deleted);
+    onChanged?.call();
   }
 
   /// Deleting leaves a tombstone, so the deletion reaches the other devices.
