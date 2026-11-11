@@ -640,8 +640,7 @@ class AssistantService {
     _taskIdToAlias.clear();
     _hiddenTitles.clear();
     _editIntent = scope.edit;
-    _forecast = null;
-    _forecastTried = false;
+    _forecastFuture = null;
     _taskMax = k.taskMax;
     // No clock in here: the system prompt and the tool list stay the same from
     // one request to the next (providers with prefix caching reuse them).
@@ -717,18 +716,18 @@ class AssistantService {
   /// that, anything the model proposes in that direction is dropped (a hostile
   /// event title must not be able to summon a deletion card).
   bool _editIntent = false;
-  List<DayWeather>? _forecast;
-  bool _forecastTried = false;
+  Future<List<DayWeather>?>? _forecastFuture;
 
-  /// The forecast for the next two weeks, fetched at most once per request.
-  /// Null when weather is off, no place is set, or the service is unreachable.
-  Future<List<DayWeather>?> _forecastFor(AiSettings s) async {
+  /// The forecast for the next two weeks, asked for once per request (the
+  /// service keeps a fetched one for a few hours, so the next request does not
+  /// ask again). It is started as the data is read and awaited where it is
+  /// used. Null when weather is off, no place is set, or the service is
+  /// unreachable.
+  Future<List<DayWeather>?> _forecastFor(AiSettings s) {
     final svc = weather;
     final place = s.place;
-    if (svc == null || !s.weather || place == null) return null;
-    if (_forecastTried) return _forecast;
-    _forecastTried = true;
-    return _forecast = await svc.forecast(place, days: 14);
+    if (svc == null || !s.weather || place == null) return Future.value(null);
+    return _forecastFuture ??= svc.forecast(place, days: 14);
   }
 
   // Short per-request aliases (e1, e2, ...) for event references: the long
@@ -869,6 +868,8 @@ class AssistantService {
     required bool weather,
     required bool slots,
   }) async {
+    // the forecast is fetched while the events, tasks and slots are read
+    if (weather && scope.slots) unawaited(_forecastFor(s));
     final last = _today.add(Duration(days: days - 1));
     String ymd(DateTime d) =>
         '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';

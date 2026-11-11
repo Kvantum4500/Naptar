@@ -19,6 +19,34 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'support/fake_llm.dart';
 import 'support/harness.dart';
 
+/// An event repository that tells when it is read.
+class _SpyEvents extends EventRepository {
+  _SpyEvents(super.db, this.onRead);
+  final void Function() onRead;
+
+  @override
+  Future<List<Occurrence>> occurrences(DateTime from, DateTime to) {
+    onRead();
+    return super.occurrences(from, to);
+  }
+}
+
+/// A weather service that tells when the forecast is asked for.
+class _SpyWeather extends WeatherService {
+  _SpyWeather(super.client, this.onAsk);
+  final void Function() onAsk;
+
+  @override
+  Future<List<DayWeather>?> forecast(
+    Place place, {
+    int days = 7,
+    String timezone = 'Europe/Budapest',
+  }) {
+    onAsk();
+    return super.forecast(place, days: days, timezone: timezone);
+  }
+}
+
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   setUpAll(ensureTimeZones);
@@ -938,6 +966,79 @@ void main() {
       );
       expect(first.contains('helyszin'), isFalse);
       expect(first, contains('csapadék 90%'));
+      expect(fetched, 1);
+    });
+
+    test(
+      'a forecast fetched for one request serves the next one too',
+      () async {
+        var count = 0;
+        final shared = WeatherService(
+          MockClient((_) async {
+            count++;
+            return http.Response(
+              jsonEncode(forecast()),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }),
+          now: () => now,
+        );
+        AssistantService withShared(FakeLlm llm) => AssistantService(
+          provider: llm,
+          events: events,
+          records: records,
+          handbook: HandbookStore(records, loader: (p) async => 'H[$p]'),
+          settingsStore: store,
+          now: () => now,
+          delay: (d) async {},
+          weather: shared,
+        );
+        for (var i = 0; i < 3; i++) {
+          final llm = FakeLlm([(_) => say('ok')]);
+          await withShared(llm).ask(
+            'Tervezz edzést',
+            model: 'm',
+            settings: AiSettings(place: bp0),
+          );
+          expect(firstOf(llm), contains('csapadék 90%'));
+        }
+        expect(count, 1);
+      },
+    );
+
+    test('the forecast is asked for before the events are read', () async {
+      final order = <String>[];
+      final spy = _SpyEvents(db, () => order.add('events'));
+      final llm = FakeLlm([(_) => say('ok')]);
+      await AssistantService(
+        provider: llm,
+        events: spy,
+        records: records,
+        handbook: HandbookStore(records, loader: (p) async => 'H[$p]'),
+        settingsStore: store,
+        now: () => now,
+        delay: (d) async {},
+        weather: _SpyWeather(
+          MockClient((_) async {
+            fetched++;
+            return http.Response(
+              jsonEncode(forecast()),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }),
+          () => order.add('forecast'),
+        ),
+      ).ask(
+        'Tervezz edzést',
+        model: 'm',
+        settings: AiSettings(place: bp0),
+      );
+      // (once, and before the first read: the two overlap instead of queueing)
+      expect(order.where((e) => e == 'forecast'), hasLength(1));
+      expect(order.first, 'forecast');
+      expect(order, contains('events'));
       expect(fetched, 1);
     });
 

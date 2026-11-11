@@ -151,6 +151,87 @@ void main() {
     });
   });
 
+  group('the forecast is kept for a few hours', () {
+    var clock = DateTime.utc(2026, 11, 10, 8); // 09:00 in Budapest
+    var requests = 0;
+    var status = 200;
+    WeatherService svc({Completer<void>? gate}) => WeatherService(
+      MockClient((r) async {
+        requests++;
+        await gate?.future;
+        return _json(forecastJson, status);
+      }),
+      now: () => clock,
+    );
+
+    setUp(() {
+      clock = DateTime.utc(2026, 11, 10, 8);
+      requests = 0;
+      status = 200;
+    });
+
+    test(
+      'the same place, length and day within 3 hours: one request',
+      () async {
+        final s = svc();
+        final a = await s.forecast(bp, days: 14);
+        clock = clock.add(const Duration(hours: 2, minutes: 59));
+        final b = await s.forecast(bp, days: 14);
+        expect(requests, 1);
+        expect(b, same(a));
+      },
+    );
+
+    test('after 3 hours it is asked for again', () async {
+      final s = svc();
+      await s.forecast(bp, days: 14);
+      clock = clock.add(const Duration(hours: 3, minutes: 1));
+      await s.forecast(bp, days: 14);
+      expect(requests, 2);
+    });
+
+    test('another place, or another length, is another forecast', () async {
+      final s = svc();
+      await s.forecast(bp, days: 14);
+      await s.forecast(Place(name: 'Pécs', lat: 46.07, lon: 18.23), days: 14);
+      await s.forecast(bp, days: 7);
+      expect(requests, 3);
+    });
+
+    test(
+      'a new local day is a new forecast, however fresh the old one is',
+      () async {
+        final s = svc();
+        clock = DateTime.utc(2026, 11, 10, 22, 30); // 23:30 in Budapest
+        await s.forecast(bp, days: 14);
+        clock = DateTime.utc(2026, 11, 10, 23, 30); // 00:30 the next day
+        await s.forecast(bp, days: 14);
+        expect(requests, 2);
+      },
+    );
+
+    test('a failure is not kept: the next ask tries again', () async {
+      final s = svc();
+      status = 500;
+      expect(await s.forecast(bp, days: 14), isNull);
+      status = 200;
+      expect(await s.forecast(bp, days: 14), isNotNull);
+      expect(await s.forecast(bp, days: 14), isNotNull);
+      expect(requests, 2);
+    });
+
+    test('two asks at the same time make one request', () async {
+      final gate = Completer<void>();
+      final s = svc(gate: gate);
+      final a = s.forecast(bp, days: 14);
+      final b = s.forecast(bp, days: 14);
+      gate.complete();
+      expect((await a)!.length, 2);
+      expect((await b)!.length, 2);
+      expect(requests, 1);
+    });
+  });
+
   group('WeatherService.search', () {
     test('finds places with a readable name', () async {
       late http.Request seen;

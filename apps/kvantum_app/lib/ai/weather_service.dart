@@ -10,20 +10,60 @@ import 'place.dart';
 /// coordinates are sent. Every failure (offline, timeout, odd answer) comes
 /// back as null / empty, so the assistant simply works without weather.
 class WeatherService {
-  WeatherService(this._client, {Duration? timeout})
-    : _timeout = timeout ?? const Duration(seconds: 8);
+  WeatherService(
+    this._client, {
+    Duration? timeout,
+    Duration? cacheFor,
+    DateTime Function()? now,
+  }) : _timeout = timeout ?? const Duration(seconds: 8),
+       _cacheFor = cacheFor ?? const Duration(hours: 3),
+       _now = now ?? DateTime.now;
   final http.Client _client;
   final Duration _timeout;
+  final Duration _cacheFor;
+  final DateTime Function() _now;
+
+  // A forecast changes slowly: the same place, length and local day get the
+  // same answer for a few hours (every request, the "Mit küldünk?" preview
+  // and the rule check ask for it). Only a real answer is kept; a failure is
+  // tried again next time. One service lives as long as the app does.
+  final _fresh = <String, ({DateTime at, List<DayWeather> days})>{};
+  final _pending = <String, Future<List<DayWeather>?>>{};
 
   static const _forecastHost = 'api.open-meteo.com';
   static const _geoHost = 'geocoding-api.open-meteo.com';
 
-  /// Daily forecast from today for [days] days (1–16), or null.
+  /// Daily forecast from today for [days] days (1–16), or null. A forecast
+  /// fetched within the last [_cacheFor] (same place, length and local day) is
+  /// reused, and two asks at the same time make one request.
   Future<List<DayWeather>?> forecast(
     Place place, {
     int days = 7,
     String timezone = 'Europe/Budapest',
-  }) async {
+  }) {
+    final today = toWallClock(timezone, _now().toUtc());
+    final key =
+        '${place.lat.toStringAsFixed(2)}|${place.lon.toStringAsFixed(2)}|${days.clamp(1, 16)}|$timezone|${today.year}-${today.month}-${today.day}';
+    final hit = _fresh[key];
+    if (hit != null && _now().difference(hit.at) < _cacheFor) {
+      return Future.value(hit.days);
+    }
+    return _pending[key] ??= _fetch(place, days, timezone)
+        .then((list) {
+          if (list != null) _fresh[key] = (at: _now(), days: list);
+          return list;
+        })
+        .whenComplete(() {
+          // (a block body: returning the removed future would make it wait for itself)
+          _pending.remove(key);
+        });
+  }
+
+  Future<List<DayWeather>?> _fetch(
+    Place place,
+    int days,
+    String timezone,
+  ) async {
     final uri = Uri.https(_forecastHost, '/v1/forecast', {
       'latitude': place.lat.toStringAsFixed(2),
       'longitude': place.lon.toStringAsFixed(2),
