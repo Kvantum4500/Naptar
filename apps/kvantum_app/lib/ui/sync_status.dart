@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../sync/error_catalog.dart';
+import '../sync/remote.dart' show SyncBindingMismatch;
 import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart' show currentBuildProvider;
 import 'format.dart';
@@ -78,6 +80,8 @@ class SyncStatusButton extends ConsumerWidget {
         DateTime.now().difference(s.lastSync!) > const Duration(minutes: 10);
     final (IconData icon, String label, Color color) = s.syncing
         ? (Icons.sync, 'Szinkronizál…', scheme.primary)
+        : s.mismatch != null
+        ? (Icons.sync_problem, 'Döntés kell', scheme.error)
         : s.error != null
         ? (Icons.error_outline, 'Hiba', scheme.error)
         : s.pending > 0
@@ -101,7 +105,11 @@ class SyncStatusButton extends ConsumerWidget {
       onSelected: (v) {
         switch (v) {
           case 'sync':
-            ctl.syncNow();
+            ctl.syncNow(manual: true);
+          case 'decide':
+            showBindingDialog(context, ref, s.mismatch!);
+          case 'reset':
+            showResetDialog(context, ref);
           case 'details':
             () async {
               final build = await ref.read(currentBuildProvider.future);
@@ -111,8 +119,11 @@ class SyncStatusButton extends ConsumerWidget {
                 'Szinkronállapot',
                 'Verzió: build $build\n'
                     'Utolsó sikeres szinkron: ${s.lastSync == null ? 'még nem volt' : '${fmtDate(s.lastSync!)} ${_hm(s.lastSync!)}'}\n'
+                    '${s.nextAttempt == null ? '' : 'Következő automatikus próba: ${_hm(s.nextAttempt!)}\n'}'
                     'Függő módosítás: ${s.pending}\n'
+                    '${s.parked == 0 ? '' : 'Ebből feladva: ${s.parked} (a „Szinkron most” újra megpróbálja)\n'}'
                     'Naptár: Google „Naptar”\n'
+                    '${s.mismatch == null ? '' : 'Döntés kell: másik Google-fiók vagy naptár\n'}'
                     '${s.financeNote == null ? '' : '${s.financeNote}\n'}'
                     '${s.error == null ? 'Hiba: nincs' : 'Hiba: ${s.error}'}',
               );
@@ -124,8 +135,17 @@ class SyncStatusButton extends ConsumerWidget {
         }
       },
       itemBuilder: (c) => [
+        if (s.mismatch != null)
+          const PopupMenuItem(
+            value: 'decide',
+            child: Text('Másik fiók / naptár: döntés kell…'),
+          ),
         const PopupMenuItem(value: 'sync', child: Text('Szinkron most')),
         const PopupMenuItem(value: 'details', child: Text('Részletek')),
+        const PopupMenuItem(
+          value: 'reset',
+          child: Text('Szinkron alaphelyzetbe…'),
+        ),
         const PopupMenuItem(value: 'update', child: Text('Frissítés keresése')),
         const PopupMenuDivider(),
         const PopupMenuItem(
@@ -174,4 +194,114 @@ class SyncStatusButton extends ConsumerWidget {
           ],
         ),
       );
+}
+
+/// "Szinkron alaphelyzetbe": explains and asks before it does anything.
+Future<void> showResetDialog(BuildContext context, WidgetRef ref) async {
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text(resetTitle),
+      content: const SingleChildScrollView(child: Text(resetBody)),
+      actions: [
+        TextButton(
+          key: const Key('reset-cancel'),
+          onPressed: () => Navigator.pop(c, false),
+          child: const Text('Mégse'),
+        ),
+        FilledButton(
+          key: const Key('reset-go'),
+          onPressed: () => Navigator.pop(c, true),
+          child: const Text('Alaphelyzetbe'),
+        ),
+      ],
+    ),
+  );
+  if (go == true) await ref.read(syncControllerProvider.notifier).resetSync();
+}
+
+/// This device was linked to another Google account / calendar: three ways
+/// out, none of which loses anything without asking.
+Future<void> showBindingDialog(
+  BuildContext context,
+  WidgetRef ref,
+  SyncBindingMismatch m,
+) async {
+  final ctl = ref.read(syncControllerProvider.notifier);
+  final count = await ctl.localEventCount();
+  if (!context.mounted) return;
+  final choice = await showDialog<String>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(
+        m.accountChanged ? bindingTitleAccount : bindingTitleCalendar,
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              bindingBody(
+                accountChanged: m.accountChanged,
+                stored: m.stored.maskedAccount,
+                current: m.current.maskedAccount,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(bindingKeepTitle, style: Theme.of(c).textTheme.labelLarge),
+            const Text(bindingKeepBody),
+            const SizedBox(height: 8),
+            Text(bindingFreshTitle, style: Theme.of(c).textTheme.labelLarge),
+            const Text(bindingFreshBody),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('binding-later'),
+          onPressed: () => Navigator.pop(c),
+          child: const Text('Később'),
+        ),
+        TextButton(
+          key: const Key('binding-fresh'),
+          onPressed: () => Navigator.pop(c, 'fresh'),
+          child: const Text('Üres indulás…'),
+        ),
+        FilledButton(
+          key: const Key('binding-keep'),
+          onPressed: () => Navigator.pop(c, 'keep'),
+          child: const Text('Megtartom és feltöltöm'),
+        ),
+      ],
+    ),
+  );
+  if (choice == 'keep') {
+    await ctl.keepLocalAfterMismatch();
+  } else if (choice == 'fresh') {
+    if (count > 0) {
+      if (!context.mounted) return;
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text(bindingFreshTitle),
+          content: Text(bindingFreshConfirm(count)),
+          actions: [
+            TextButton(
+              key: const Key('fresh-cancel'),
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Mégse'),
+            ),
+            FilledButton(
+              key: const Key('fresh-go'),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Törlöm és letöltöm'),
+            ),
+          ],
+        ),
+      );
+      if (sure != true) return;
+    }
+    await ctl.startFreshAfterMismatch();
+  }
 }

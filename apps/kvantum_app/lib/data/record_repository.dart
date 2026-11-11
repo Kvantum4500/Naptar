@@ -4,6 +4,9 @@ import 'package:uuid/uuid.dart';
 
 import 'db.dart';
 
+/// The meta key of the Drive change token (where the record sync left off).
+const driveTokenKey = 'drivePageToken';
+
 /// Local store of the Drive-synced records (tasks, check-ins).
 class RecordRepository {
   RecordRepository(this.db, {String? deviceId, int Function()? clock})
@@ -95,6 +98,18 @@ class RecordRepository {
       (db.update(db.recordRows)
             ..where((t) => t.kind.equals(kind) & t.id.equals(id)))
           .write(const RecordRowsCompanion(dirty: Value(true)));
+
+  /// "Start the record sync over": forget where the Drive listing stopped and
+  /// which file belongs to which record (they may belong to ANOTHER account's
+  /// Drive), and queue every record for a check against Drive. Nothing is
+  /// deleted: the merge keeps whatever either side has.
+  Future<void> resetSync() => db.transaction(() async {
+    await setMeta(driveTokenKey, null);
+    await db.delete(db.driveFileRows).go();
+    await db
+        .update(db.recordRows)
+        .write(const RecordRowsCompanion(dirty: Value(true)));
+  });
 
   Future<List<SyncRecord>> dirty() async {
     final rows = await (db.select(

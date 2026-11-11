@@ -3,8 +3,6 @@ import 'package:kvantum_core/kvantum_core.dart';
 import '../data/record_repository.dart';
 import 'drive_remote.dart';
 
-const _tokenKey = 'drivePageToken';
-
 /// Syncs tasks and check-ins with Drive's app folder: pull -> merge -> push.
 ///
 /// Records merge field by field (see [SyncRecord]); nothing is ever lost to a
@@ -41,12 +39,12 @@ class DriveSyncEngine {
     var fin = true; // unknown until a pull succeeded: assume there is mail
     try {
       // ---------------------------------------------------------- pull
-      var token = await repo.meta(_tokenKey);
+      var token = await repo.meta(driveTokenKey);
       DrivePull res;
       try {
         res = await remote.pull(token);
       } on DriveTokenExpired {
-        await repo.setMeta(_tokenKey, null);
+        await repo.setMeta(driveTokenKey, null);
         token = null;
         res = await remote.pull(null);
       }
@@ -114,7 +112,7 @@ class DriveSyncEngine {
           }
         }
       }
-      await repo.setMeta(_tokenKey, res.nextToken);
+      await repo.setMeta(driveTokenKey, res.nextToken);
 
       // ---------------------------------------------------------- push
       for (final rec in await repo.dirty()) {

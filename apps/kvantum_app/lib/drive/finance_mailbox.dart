@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../data/finance_repository.dart';
+import '../sync/api_errors.dart' show RetryHint;
 import 'drive_remote.dart';
 
 /// What one mail run did.
@@ -14,6 +15,7 @@ class MailReport {
     this.expired = 0,
     this.peers = 0,
     this.stoppedEarly = false,
+    this.hint,
   });
   final int sentLetters;
   final int receivedLetters;
@@ -26,6 +28,9 @@ class MailReport {
   final int expired;
   final int peers;
   final bool stoppedEarly;
+
+  /// Why the run stopped early (when it did).
+  final RetryHint? hint;
 
   @override
   String toString() =>
@@ -76,6 +81,14 @@ class FinanceMailbox {
   Future<MailReport> sync() => _running ??= _run().whenComplete(() {
     _running = null;
   });
+
+  /// "Start the mail over": forget who has been greeted, so the next run
+  /// sends every other device the whole snapshot (merging makes that safe)
+  /// and announces this device again.
+  Future<void> resetPeers() async {
+    await repo.setMeta(_knownKey, null);
+    await repo.setMeta(_announcedKey, null);
+  }
 
   Future<MailReport> _run() async {
     var sent = 0, received = 0, applied = 0, corrupt = 0, expired = 0;
@@ -144,7 +157,7 @@ class FinanceMailbox {
       // ------------------------------------------------ housekeeping
       expired = await _expireOldLetters(letters, known);
       await _saveKnown(known);
-    } on DriveTransientError {
+    } on DriveTransientError catch (e) {
       return MailReport(
         sentLetters: sent,
         receivedLetters: received,
@@ -153,6 +166,7 @@ class FinanceMailbox {
         expired: expired,
         peers: peerCount,
         stoppedEarly: true,
+        hint: e,
       );
     }
     return MailReport(

@@ -12,8 +12,13 @@ import '../drive/google_drive_remote.dart';
 import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
 import '../providers.dart';
+import 'api_errors.dart';
+import 'error_catalog.dart';
 import 'remote.dart';
+import 'retry_after_client.dart';
 import 'sync_engine.dart';
+import 'sync_pacer.dart';
+import 'sync_reset.dart';
 
 const syncCalendarId = kNaptarCalendar;
 
@@ -32,6 +37,25 @@ final remoteFactoryProvider = Provider<RemoteCalendar Function(http.Client)>(
       (c) => GoogleCalendarRemote(c),
 );
 
+/// Starts the one-shot timer of the next automatic run (replaceable in tests).
+typedef SyncScheduler = Timer Function(Duration delay, void Function() action);
+final syncSchedulerProvider = Provider<SyncScheduler>(
+  (_) =>
+      (delay, action) => Timer(delay, action),
+);
+
+/// "Now" for the scheduling decisions (replaceable in tests).
+final syncClockProvider = Provider<DateTime Function()>((_) => DateTime.now);
+
+/// Pause between two uploads of one run.
+final syncPaceProvider = Provider<Duration>(
+  (_) => const Duration(milliseconds: 200),
+);
+
+final syncPacerProvider = Provider<SyncPacer>((_) => SyncPacer());
+
+const _unset = Object();
+
 class SyncState {
   const SyncState({
     this.configured = false,
@@ -41,6 +65,9 @@ class SyncState {
     this.pending = 0,
     this.error,
     this.financeNote,
+    this.nextAttempt,
+    this.mismatch,
+    this.parked = 0,
   });
   final bool configured, signedIn, syncing;
 
@@ -50,6 +77,18 @@ class SyncState {
   final int pending;
   final String? error;
 
+  /// When the next automatic run is planned (null: none, e.g. in the
+  /// background).
+  final DateTime? nextAttempt;
+
+  /// Calendar sync is paused: this is not the account / calendar the device
+  /// was linked to. The user decides what to do (see the controller).
+  final SyncBindingMismatch? mismatch;
+
+  /// Uploads the Google refused repeatedly: they wait for a manual retry or an
+  /// edit of the event.
+  final int parked;
+
   SyncState copyWith({
     bool? signedIn,
     bool? syncing,
@@ -58,6 +97,9 @@ class SyncState {
     String? error,
     bool clearError = false,
     String? financeNote,
+    Object? nextAttempt = _unset,
+    Object? mismatch = _unset,
+    int? parked,
   }) => SyncState(
     configured: configured,
     signedIn: signedIn ?? this.signedIn,
@@ -66,17 +108,63 @@ class SyncState {
     pending: pending ?? this.pending,
     error: clearError ? null : (error ?? this.error),
     financeNote: financeNote ?? this.financeNote,
+    nextAttempt: identical(nextAttempt, _unset)
+        ? this.nextAttempt
+        : nextAttempt as DateTime?,
+    mismatch: identical(mismatch, _unset)
+        ? this.mismatch
+        : mismatch as SyncBindingMismatch?,
+    parked: parked ?? this.parked,
   );
 }
 
-/// Adaptive sync: right after local edits (debounced), when the app returns to
-/// the foreground, and every minute while it runs. Android background runs and
-/// push (turbo mode) come later.
+/// What one pass over the three channels found, for the scheduling.
+class _Outcome {
+  const _Outcome({
+    this.failed = false,
+    this.busy = false,
+    this.more = false,
+    this.retryAfter,
+    this.throttled = false,
+    this.dailyLimit = false,
+    this.expired = false,
+  });
+
+  /// A channel stopped because of the moment (network, server, a limit).
+  final bool failed;
+
+  /// Something was pulled / pushed: keep the lively beat.
+  final bool busy;
+
+  /// More is waiting to be uploaded than one run does.
+  final bool more;
+  final Duration? retryAfter;
+  final bool throttled, dailyLimit;
+
+  /// The login is gone; nothing more to schedule.
+  final bool expired;
+}
+
+/// Syncs the calendar, the Drive records and the finance mail.
+///
+/// The beat adapts: a minute while things happen, slower and slower while
+/// nothing does, backing off after failures (never sooner than the server
+/// asked), and no timer at all while the app is in the background. Local edits
+/// start a run after a short pause (except while backing off), coming back to
+/// the app starts one if the last is older than half a minute, and "Szinkron
+/// most" always runs at once and starts the beat over.
 class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   SyncEngine? _engine;
   DriveSyncEngine? _drive;
   FinanceMailbox? _mail;
-  Timer? _periodic, _debounce;
+  SyncResetOps? _reset;
+  Timer? _timer, _debounce;
+
+  int _quiet = 0, _failures = 0, _ticks = 0;
+  DateTime? _notBefore, _lastRun;
+  bool _foreground = true;
+
+  DateTime _now() => ref.read(syncClockProvider)();
 
   @override
   SyncState build() {
@@ -84,7 +172,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() {
       WidgetsBinding.instance.removeObserver(this);
-      _periodic?.cancel();
+      _timer?.cancel();
       _debounce?.cancel();
     });
     if (configured) Future.microtask(_restore);
@@ -111,31 +199,57 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> signOut() async {
-    _periodic?.cancel();
+  void _stopEverything() {
+    _timer?.cancel();
+    _timer = null;
+    _debounce?.cancel();
     _engine = null;
     _drive = null;
     _mail = null;
+    _reset = null;
+  }
+
+  Future<void> signOut() async {
+    _stopEverything();
     await ref.read(authGatewayProvider).signOut();
-    state = state.copyWith(signedIn: false, syncing: false, clearError: true);
+    state = state.copyWith(
+      signedIn: false,
+      syncing: false,
+      clearError: true,
+      nextAttempt: null,
+      mismatch: null,
+    );
   }
 
   Future<void> _start(http.Client client) async {
+    // one wrapper for both services: it keeps the server's Retry-After
+    final tapped = RetryAfterClient(client);
+    final events = ref.read(repoProvider);
+    final records = ref.read(recordRepoProvider);
     _engine = SyncEngine(
-      ref.read(repoProvider),
-      ref.read(remoteFactoryProvider)(client),
+      events,
+      ref.read(remoteFactoryProvider)(tapped),
+      pace: ref.read(syncPaceProvider),
     );
-    final driveRemote = ref.read(driveFactoryProvider)(client);
-    _drive = DriveSyncEngine(ref.read(recordRepoProvider), driveRemote);
-    _mail = FinanceMailbox(
+    final driveRemote = ref.read(driveFactoryProvider)(tapped);
+    _drive = DriveSyncEngine(records, driveRemote);
+    final mail = FinanceMailbox(
       ref.read(financeRepoProvider),
       driveRemote,
-      deviceId: await ref.read(recordRepoProvider).deviceId(),
+      deviceId: await records.deviceId(),
+    );
+    _mail = mail;
+    _reset = SyncResetOps(
+      events: events,
+      records: records,
+      resetMailbox: mail.resetPeers,
     );
     state = state.copyWith(signedIn: true, clearError: true);
-    _periodic?.cancel();
-    _periodic = Timer.periodic(const Duration(seconds: 60), (_) => syncNow());
-    await syncNow();
+    _quiet = 0;
+    _failures = 0;
+    _ticks = 0;
+    _notBefore = null;
+    await syncNow(manual: true);
   }
 
   /// The saved Google login no longer works: the token endpoint answered
@@ -153,11 +267,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   /// Drops the dead session once and asks for a new sign-in. Local data and
   /// the queue of unsent changes are untouched; they upload after signing in.
   Future<void> _expireLogin() async {
-    _periodic?.cancel();
-    _debounce?.cancel();
-    _engine = null;
-    _drive = null;
-    _mail = null;
+    _stopEverything();
     try {
       await ref.read(authGatewayProvider).signOut();
     } catch (_) {
@@ -166,120 +276,311 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     state = state.copyWith(
       signedIn: false,
       syncing: false,
+      nextAttempt: null,
       error: 'A Google-bejelentkezés lejárt. Jelentkezz be újra, az adataid megvannak, a függő módosítások utána feltöltődnek.',
     );
   }
 
-  /// Call after any local change; coalesces bursts of edits into one run.
+  /// Call after any local change; coalesces bursts of edits into one run. While
+  /// the sync is backing off after a failure the planned run carries the edit.
   void requestSync() {
     if (!state.signedIn) return;
+    final blocked = _notBefore;
+    if (blocked != null && blocked.isAfter(_now())) return;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(seconds: 2), syncNow);
+    _debounce = ref.read(syncSchedulerProvider)(
+      const Duration(seconds: 2),
+      () => syncNow(),
+    );
   }
 
-  bool _running = false, _again = false;
+  bool _running = false, _again = false, _manualAgain = false;
 
-  /// One run at a time: calls that arrive meanwhile (the minute timer, coming
-  /// back to the app, a saved edit) are folded into ONE follow-up run instead
-  /// of piling up behind a slow request.
-  Future<void> syncNow() async {
+  /// One run at a time: calls that arrive meanwhile (the timer, coming back to
+  /// the app, a saved edit) are folded into ONE follow-up run instead of
+  /// piling up behind a slow request.
+  ///
+  /// [manual]: the user asked for it. It does not wait for a backoff, gives
+  /// the uploads that were given up on a fresh start, and restarts the beat.
+  Future<void> syncNow({bool manual = false}) async {
     if (_engine == null) return;
+    if (manual) {
+      _failures = 0;
+      _quiet = 0;
+      _notBefore = null;
+    }
     if (_running) {
       _again = true;
+      _manualAgain = _manualAgain || manual;
       return;
     }
     _running = true;
+    var last = const _Outcome();
     try {
+      var asked = manual;
       do {
         _again = false;
-        await _syncOnce();
+        last = await _syncOnce(manual: asked);
+        asked = _manualAgain;
+        _manualAgain = false;
       } while (_again && _engine != null);
     } finally {
       _running = false;
     }
+    if (!last.expired && _engine != null) _scheduleAfter(last);
   }
 
-  /// Calendar and Drive data sync independently: a problem with one never
-  /// blocks the other.
-  Future<void> _syncOnce() async {
+  /// Plans the next automatic run from what the last one found.
+  void _scheduleAfter(_Outcome o) {
+    final Duration wait;
+    if (o.failed) {
+      _failures++;
+      _quiet = 0;
+      wait = ref
+          .read(syncPacerProvider)
+          .afterFailure(
+            failures: _failures,
+            retryAfter: o.retryAfter,
+            throttled: o.throttled,
+            dailyLimit: o.dailyLimit,
+          );
+    } else {
+      _failures = 0;
+      if (o.more) {
+        wait = SyncPacer.followUp;
+      } else {
+        _quiet = o.busy ? 0 : _quiet + 1;
+        wait = ref.read(syncPacerProvider).afterSuccess(quietRuns: _quiet);
+      }
+    }
+    _arm(wait);
+  }
+
+  void _arm(Duration wait) {
+    _timer?.cancel();
+    _timer = null;
+    final next = _now().add(wait);
+    _notBefore = _failures > 0 ? next : null;
+    state = state.copyWith(nextAttempt: next);
+    if (!_foreground) return; // coming back to the app looks at it again
+    _timer = ref.read(syncSchedulerProvider)(wait, () {
+      _timer = null;
+      syncNow();
+    });
+  }
+
+  /// Calendar, Drive and the finance mail sync independently: a problem with
+  /// one never blocks the others.
+  Future<_Outcome> _syncOnce({required bool manual}) async {
     final engine = _engine;
-    if (engine == null) return;
+    if (engine == null) return const _Outcome();
     state = state.copyWith(syncing: true);
     final errors = <String>[];
-    var ok = true;
-    try {
-      final r = await engine.sync(syncCalendarId);
-      if (r.stoppedEarly) {
-        ok = false;
-        errors.add('Naptár: nincs kapcsolat vagy limit, később újrapróbálja.');
-      } else if (r.failed > 0) {
-        errors.add('Naptár: ${r.failed} módosítást nem sikerült elküldeni.');
-      }
-    } catch (e) {
-      if (isAuthExpired(e)) return _expireLogin();
-      ok = false;
-      errors.add('Naptár: $e');
+    var ok = true, failed = false, busy = false, more = false;
+    Duration? retryAfter;
+    var throttled = false, daily = false;
+    SyncBindingMismatch? mismatch;
+    var parked = 0;
+
+    void noteHint(RetryHint? h) {
+      if (h == null) return;
+      throttled |= h.throttled;
+      daily |= h.dailyLimit;
+      final r = h.retryAfter;
+      if (r != null && (retryAfter == null || r > retryAfter!)) retryAfter = r;
     }
+
+    try {
+      final r = await engine.sync(syncCalendarId, manual: manual);
+      if (r.mismatch != null) {
+        mismatch = r.mismatch;
+        ok = false;
+      } else if (r.calendarGone) {
+        ok = false;
+        failed = true;
+        errors.add(calendarGoneText);
+      } else if (r.stoppedEarly) {
+        ok = false;
+        failed = true;
+        noteHint(r.hint);
+        errors.add(transientText('Naptár', r.hint));
+      } else {
+        parked = r.parked;
+        if (r.parked > 0) errors.add(parkedText('Naptár', r.parked));
+        final refused = r.failed - r.parked;
+        if (refused > 0) errors.add(refusedText('Naptár', refused));
+        if (r.skippedRemote > 0) {
+          errors.add(skippedText('Naptár', r.skippedRemote));
+        }
+      }
+      busy |= r.pulled > 0 || r.pushed > 0 || r.deferred > 0;
+      more |= r.more;
+    } catch (e) {
+      if (isAuthExpired(e)) {
+        await _expireLogin();
+        return const _Outcome(expired: true);
+      }
+      ok = false;
+      failed = true;
+      errors.add(unexpectedText('Naptár'));
+    }
+
+    DriveReport? driveReport;
     final drive = _drive;
     if (drive != null) {
       try {
         final r = await drive.sync();
+        driveReport = r;
         if (r.stoppedEarly) {
           ok = false;
-          errors.add('Drive: nincs kapcsolat vagy limit, később újrapróbálja.');
+          failed = true;
+          noteHint(r.hint);
+          errors.add(transientText('Drive', r.hint));
         } else if (r.failed > 0) {
           errors.add('Drive: ${r.failed} elemet nem sikerült feltölteni.');
         } else if (r.skippedCorrupt > 0) {
           errors.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
         }
+        busy |= r.pulled > 0 || r.pushed > 0;
       } catch (e) {
-        if (isAuthExpired(e)) return _expireLogin();
+        if (isAuthExpired(e)) {
+          await _expireLogin();
+          return const _Outcome(expired: true);
+        }
         ok = false;
-        errors.add('Drive: $e');
+        failed = true;
+        errors.add(unexpectedText('Drive'));
       }
     }
+
+    // The mailbox is listed when Drive reported news about it, when there is
+    // something to send, now and then as a safety net, and on request.
     final mail = _mail;
     String? note;
     if (mail != null) {
-      try {
-        final r = await mail.sync();
-        if (r.stoppedEarly) {
+      final tick = _ticks++;
+      final dirty = await ref.read(financeRepoProvider).dirtyCount();
+      final look =
+          manual ||
+          driveReport == null ||
+          driveReport.finChanged ||
+          dirty > 0 ||
+          tick % 5 == 0;
+      if (look) {
+        try {
+          final r = await mail.sync();
+          if (r.stoppedEarly) {
+            ok = false;
+            failed = true;
+            noteHint(r.hint);
+            errors.add(transientText('Pénzügy', r.hint));
+          } else {
+            if (r.corrupt > 0) {
+              errors.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
+            }
+            if (r.sentLetters + r.receivedLetters > 0) {
+              note =
+                  'Pénzügy: ${r.sentLetters} levél elküldve, ${r.receivedLetters} megérkezett'
+                  '${r.applied > 0 ? ' (${r.applied} tétel frissült)' : ''}.';
+              busy = true;
+            }
+          }
+        } catch (e) {
+          if (isAuthExpired(e)) {
+            await _expireLogin();
+            return const _Outcome(expired: true);
+          }
           ok = false;
-          errors.add(
-            'Pénzügy: nincs kapcsolat vagy limit, később újrapróbálja.',
-          );
-        } else {
-          if (r.corrupt > 0) {
-            errors.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
-          }
-          if (r.sentLetters + r.receivedLetters > 0) {
-            note =
-                'Pénzügy: ${r.sentLetters} levél elküldve, ${r.receivedLetters} megérkezett'
-                '${r.applied > 0 ? ' (${r.applied} tétel frissült)' : ''}.';
-          }
+          failed = true;
+          errors.add(unexpectedText('Pénzügy'));
         }
-      } catch (e) {
-        if (isAuthExpired(e)) return _expireLogin();
-        ok = false;
-        errors.add('Pénzügy: $e');
       }
     }
+
     final pending =
         (await ref.read(repoProvider).pending()).length +
         await ref.read(recordRepoProvider).dirtyCount();
+    _lastRun = _now();
     state = state.copyWith(
       syncing: false,
       pending: pending,
-      lastSync: ok ? DateTime.now() : null,
+      lastSync: ok ? _now() : null,
       financeNote: note,
+      parked: parked,
+      mismatch: mismatch,
       error: errors.isEmpty ? null : errors.join(' · '),
       clearError: errors.isEmpty,
     );
+    return _Outcome(
+      failed: failed,
+      busy: busy,
+      more: more,
+      retryAfter: retryAfter,
+      throttled: throttled,
+      dailyLimit: daily,
+    );
+  }
+
+  // ---------------------------------------------------------------- reset
+
+  /// How many calendar events a fresh start would remove from this device.
+  Future<int> localEventCount() =>
+      ref.read(repoProvider).countLive(syncCalendarId);
+
+  /// "Szinkron alaphelyzetbe": same account, everything linked again.
+  Future<void> resetSync() async {
+    final reset = _reset;
+    if (reset == null) return;
+    await reset.resetAll(syncCalendarId);
+    await syncNow(manual: true);
+  }
+
+  /// Another account / calendar: keep the local events and upload them.
+  Future<void> keepLocalAfterMismatch() async {
+    final m = state.mismatch, reset = _reset;
+    if (m == null || reset == null) return;
+    await reset.rebindKeepLocal(syncCalendarId, m.current);
+    state = state.copyWith(mismatch: null);
+    await syncNow(manual: true);
+  }
+
+  /// Another account / calendar: remove the local events, take the new ones.
+  Future<void> startFreshAfterMismatch() async {
+    final m = state.mismatch, reset = _reset;
+    if (m == null || reset == null) return;
+    await reset.rebindFresh(syncCalendarId, m.current);
+    state = state.copyWith(mismatch: null);
+    await syncNow(manual: true);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) syncNow();
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _foreground = true;
+        if (_engine == null) return;
+        final last = _lastRun;
+        if (last == null ||
+            _now().difference(last) > const Duration(seconds: 30)) {
+          syncNow();
+        } else {
+          final next = this.state.nextAttempt;
+          final left = next == null ? SyncPacer.base : next.difference(_now());
+          _arm(
+            left < const Duration(seconds: 1)
+                ? const Duration(seconds: 1)
+                : left,
+          );
+        }
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        _foreground = false;
+        _timer?.cancel();
+        _timer = null;
+      case AppLifecycleState.inactive:
+        break;
+    }
   }
 }
 

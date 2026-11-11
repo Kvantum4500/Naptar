@@ -327,9 +327,11 @@ class SyncEngine {
         // Stale etag: next pull adopts the new etag, then this retries.
         await repo.markFailed(item, 'conflict');
         report.failed++;
+        if (item.attempts + 1 >= maxAttempts) report.parked++;
       } catch (e) {
         await repo.markFailed(item, _describe(e));
         report.failed++;
+        if (item.attempts + 1 >= maxAttempts) report.parked++;
       }
     }
   }

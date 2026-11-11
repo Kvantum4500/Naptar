@@ -16,6 +16,13 @@ class FakeDrive implements DriveRemote {
   int creates = 0;
   int deletes = 0;
 
+  /// How often the mailbox listed letters / peer notes.
+  int listCalls = 0;
+
+  /// Overrides what a pull reports about finance mailbox news (null: derive it
+  /// from the files, like Drive's change list does).
+  bool? forceFinChanged;
+
   /// Runs inside the next write (simulates an edit made while uploading).
   Future<void> Function()? duringWrite;
 
@@ -60,11 +67,16 @@ class FakeDrive implements DriveRemote {
             for (final e in _removedAt.entries)
               if (e.value > since) e.key,
           ];
+    final finNews =
+        pageToken == null ||
+        removed.isNotEmpty ||
+        files.values.any((f) => f.rev > since && f.name.startsWith('fin-'));
     return DrivePull(
       files: list,
       removedIds: removed,
       nextToken: '$_clock',
       full: pageToken == null,
+      finChanged: forceFinChanged ?? finNews,
     );
   }
 
@@ -87,6 +99,7 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<List<DriveName>> listNames(String prefix) async {
+    listCalls++;
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     return [
