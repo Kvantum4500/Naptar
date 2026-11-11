@@ -7,6 +7,7 @@ export 'src/finance.dart';
 export 'src/free_slots.dart';
 export 'src/handbook.dart';
 export 'src/ics.dart';
+export 'src/local_answers.dart';
 export 'src/models.dart';
 export 'src/reconcile.dart';
 export 'src/recurrence.dart';

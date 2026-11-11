@@ -1010,6 +1010,10 @@ void main() {
         // nothing happened yet
         expect((await tester.runAsync(() => events.byId('p1')))!, isNotNull);
 
+        await tester.ensureVisible(find.text('Engedélyezem'));
+
+        await tester.pumpAndSettle();
+
         await tester.tap(find.text('Engedélyezem'));
         await tester.pumpAndSettle();
         final gone = (await tester.runAsync(() => events.all()))!
@@ -1071,6 +1075,8 @@ void main() {
         expect(find.text('Csak ezt'), findsOneWidget);
         expect(find.text('Ezt és a következőket'), findsOneWidget);
         expect(find.text('Az összeset'), findsOneWidget);
+        await tester.ensureVisible(find.text('Engedélyezem'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Engedélyezem'));
         await tester.pumpAndSettle();
         final m = (await tester.runAsync(() => events.byId('s1')))!;
@@ -1101,6 +1107,8 @@ void main() {
       await ask(tester);
       await tester.tap(find.text('Az összeset'));
       await tester.pump();
+      await tester.ensureVisible(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Engedélyezem'));
       await tester.pumpAndSettle();
       expect(await tester.runAsync(() => events.byId('s1')), isNull);
@@ -1173,6 +1181,10 @@ void main() {
         floating(2026, 11, 20, 9),
       );
 
+      await tester.ensureVisible(find.text('Engedélyezem'));
+
+      await tester.pumpAndSettle();
+
       await tester.tap(find.text('Engedélyezem'));
       await tester.pumpAndSettle();
       final e = (await tester.runAsync(() => events.byId('p1')))!;
@@ -1230,6 +1242,8 @@ void main() {
       refs.add(await refOf(tester, 'Edzés'));
       await ask(tester);
       expect(find.textContaining('csak ez a nap mozdul'), findsOneWidget);
+      await tester.ensureVisible(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Engedélyezem'));
       await tester.pumpAndSettle();
       final master = (await tester.runAsync(() => events.byId('s1')))!;
@@ -1868,6 +1882,154 @@ void main() {
       );
       await shutdown(tester, db);
     });
+
+    // ---- answers the program gives by itself (2d)
+    Future<void> seedBudget(WidgetTester tester) async {
+      final fin = ref0(tester).read(financeRepoProvider);
+      await tester.runAsync(() async {
+        await fin.ensureDefaults();
+        await fin.saveTx(
+          FinTx(
+            id: 't1',
+            date: floating(2026, 5, 3),
+            amount: 20000,
+            kind: FinKind.expense,
+            categoryId: 'cat-food',
+            merchant: 'SPAR',
+          ),
+        );
+        await fin.saveBudget(
+          const FinBudget(categoryId: 'cat-food', limit: 50000),
+        );
+      });
+    }
+
+    String firstMessage(FakeGemini llm) =>
+        llm.requests.single.turns.first.parts.whereType<LlmText>().single.text;
+
+    testWidgets(
+      'the budget is answered by the program: no key, no model, marked as local',
+      (tester) async {
+        final llm = FakeGemini([]); // a call would throw
+        await boot(tester, const AssistantPage(), llm: llm); // no key at all
+        await seedBudget(tester);
+        await tester.tap(find.text('Hogy állok a költségkerettel?'));
+        await tester.pumpAndSettle();
+        expect(find.text('Helyi válasz, modell nélkül'), findsOneWidget);
+        expect(
+          find.textContaining('Költségkeret – 2026. május'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Élelmiszer'), findsOneWidget);
+        expect(find.textContaining('API-kulcs'), findsNothing);
+        expect(find.textContaining('Utolsó kérés'), findsNothing);
+        expect(llm.requests, isEmpty);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('the agenda of tomorrow is answered by the program', (
+      tester,
+    ) async {
+      final llm = FakeGemini([]);
+      await boot(tester, const AssistantPage(), llm: llm);
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('m', 'Megbeszélés', floating(2026, 5, 5, 12))),
+      );
+      await tester.tap(find.text('Mi lesz holnap?'));
+      await tester.pumpAndSettle();
+      expect(find.text('Helyi válasz, modell nélkül'), findsOneWidget);
+      expect(find.textContaining('Holnap – kedd (05-05)'), findsOneWidget);
+      expect(find.textContaining('12:00–13:00 Megbeszélés'), findsOneWidget);
+      expect(llm.requests, isEmpty);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a further question goes to the model, with the local answer as data',
+      (tester) async {
+        final llm = FakeGemini([(_) => say('Kevesebb szórakozás.')]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await seedBudget(tester);
+        await tester.tap(find.text('Hogy állok a költségkerettel?'));
+        await tester.pumpAndSettle();
+        expect(llm.requests, isEmpty);
+        await tester.enterText(
+          find.byKey(const Key('local-more')),
+          'Miből spórolhatnék?',
+        );
+        await tester.tap(find.byKey(const Key('local-more-send')));
+        await tester.pumpAndSettle();
+        expect(llm.requests, hasLength(1));
+        final first = firstMessage(llm);
+        expect(first, contains('<adat tipus="helyi_valasz">'));
+        expect(first, contains('Élelmiszer'));
+        expect(first, endsWith('Kérés: Miből spórolhatnék?'));
+        expect(find.textContaining('Kevesebb szórakozás.'), findsOneWidget);
+        expect(find.text('Helyi válasz, modell nélkül'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'with the money data not shared the local answer still comes, but goes to no model',
+      (tester) async {
+        final llm = FakeGemini([(_) => say('Ok.')]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await seedBudget(tester);
+        await tester.runAsync(
+          () =>
+              ref0(tester)
+                  .read(aiSettingsStoreProvider)
+                  .save(const AiSettings(finance: false)),
+        );
+        await tester.tap(find.text('Hogy állok a költségkerettel?'));
+        await tester.pumpAndSettle();
+        // the data is on the device: the answer is there whatever the switch says
+        expect(find.textContaining('Élelmiszer'), findsOneWidget);
+        await tester.enterText(
+          find.byKey(const Key('local-more')),
+          'Miből spórolhatnék?',
+        );
+        await tester.tap(find.byKey(const Key('local-more-send')));
+        await tester.pumpAndSettle();
+        final first = firstMessage(llm);
+        expect(first.contains('helyi_valasz'), isFalse);
+        expect(first.contains('Élelmiszer'), isFalse);
+        expect(first, contains('"kikapcsolva":true'));
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'a request that needs a switched-off source gets a notice at once, not a model call',
+      (tester) async {
+        final llm = FakeGemini([]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.runAsync(
+          () =>
+              ref0(tester)
+                  .read(aiSettingsStoreProvider)
+                  .save(const AiSettings(finance: false)),
+        );
+        await tester.enterText(
+          find.byType(TextField).first,
+          'Miből spórolhatnék a legtöbbet?',
+        );
+        await tester.tap(find.byTooltip('Küldés'));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('A pénzügyi adatok megosztása ki van kapcsolva'),
+          findsOneWidget,
+        );
+        expect(find.text('Helyi válasz, modell nélkül'), findsOneWidget);
+        // nothing to build on: no further question to the model
+        expect(find.byKey(const Key('local-more')), findsNothing);
+        expect(llm.requests, isEmpty);
+        await shutdown(tester, db);
+      },
+    );
 
     testWidgets(
       'a model without free quota is replaced by another one, the switch is remembered and explained',

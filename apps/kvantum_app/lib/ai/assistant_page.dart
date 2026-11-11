@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MaxLengthEnforcement;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:kvantum_core/kvantum_core.dart' show Occurrence, toWallClock;
+import 'package:kvantum_core/kvantum_core.dart'
+    show LocalAnswer, LocalKind, Occurrence, toWallClock;
 
 import '../ui/day_utils.dart' show defaultTz;
 import '../ui/event_editor.dart' show Scope;
@@ -19,6 +20,7 @@ const _quickPrompts = [
   'Tervezz könnyű napot, kevés energiám van',
   'Ütemezd a nyitott feladataimat a következő napokra',
   'Hogy állok a költségkerettel?',
+  'Mi lesz holnap?',
 ];
 
 /// Ask for a plan; review the proposals; accept the ones you like.
@@ -438,7 +440,12 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     }
 
     return [
-      if (o.text.isNotEmpty)
+      if (o.localAnswer != null)
+        _LocalCard(
+          answer: o.localAnswer as LocalAnswer,
+          onAsk: (q) => ctl.askMore(q),
+        )
+      else if (o.text.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: SelectableText(o.text),
@@ -770,6 +777,102 @@ class _PreviewPanel extends StatelessWidget {
             },
           ),
       ],
+    );
+  }
+}
+
+/// An answer the program gave by itself, from the data on the device, with no
+/// model: marked as such, and open to a further question that DOES go to the
+/// model (with the answer as context, where the sharing switches allow it).
+class _LocalCard extends StatefulWidget {
+  const _LocalCard({required this.answer, required this.onAsk});
+  final LocalAnswer answer;
+  final void Function(String question) onAsk;
+
+  @override
+  State<_LocalCard> createState() => _LocalCardState();
+}
+
+class _LocalCardState extends State<_LocalCard> {
+  final _more = TextEditingController();
+
+  @override
+  void dispose() {
+    _more.dispose();
+    super.dispose();
+  }
+
+  void _ask() {
+    final q = _more.text.trim();
+    if (q.isNotEmpty) widget.onAsk(q);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final small = Theme.of(context).textTheme.bodySmall;
+    final canAsk = widget.answer.kind != LocalKind.switchedOff;
+    return Card(
+      key: const Key('local-answer'),
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.offline_bolt_outlined,
+                  size: 18,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Helyi válasz, modell nélkül',
+                  style: Theme.of(context).textTheme.labelLarge
+                      ?.copyWith(color: scheme.primary),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SelectableText(widget.answer.text),
+            if (canAsk) ...[
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('local-more'),
+                controller: _more,
+                maxLength: maxPromptLength,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _ask(),
+                decoration: InputDecoration(
+                  labelText: 'További kérdés',
+                  hintText: widget.answer.kind == LocalKind.budget
+                      ? 'pl. Miből spórolhatnék a legtöbbet?'
+                      : 'pl. Mikor férne be egy edzés?',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  key: const Key('local-more-send'),
+                  onPressed: _ask,
+                  icon: const Icon(Icons.auto_awesome, size: 18),
+                  label: const Text('Kérdezd a modellt is'),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'A kérdés a modellhez megy. Ennek a válasznak a szövege csak akkor megy vele, ha a Beállításokban az érintett adat megosztása be van kapcsolva.',
+                style: small,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

@@ -187,7 +187,12 @@ class AssistantOutcome {
     this.notice,
     this.usage,
     this.estimatedTokens,
+    this.localAnswer,
   });
+
+  /// Set when the program answered by itself, without a model (the budget, the
+  /// agenda, or "that source is switched off"): [text] is that answer.
+  final LocalAnswer? localAnswer;
 
   /// Plain answer (e.g. a question) when no plan was proposed.
   final String text;
@@ -239,6 +244,7 @@ class AssistantOutcome {
     notice: notice ?? this.notice,
     usage: usage ?? this.usage,
     estimatedTokens: estimatedTokens ?? this.estimatedTokens,
+    localAnswer: localAnswer,
   );
 
   AssistantOutcome withNotice(String n) =>
@@ -407,12 +413,16 @@ class AssistantService {
     return floating(w.year, w.month, w.day);
   }
 
+  /// [context] is the local answer a further question builds on: it goes to
+  /// the model as data, but only where the user's sharing switches allow it.
   Future<AssistantOutcome> ask(
     String prompt, {
     required String model,
     required AiSettings settings,
     void Function(String status)? onStatus,
+    LocalAnswer? context,
   }) async {
+    _context = context;
     final clock = Stopwatch()..start();
     _since = _sinceOverride ?? (() => clock.elapsed);
     _onStatus = onStatus;
@@ -551,6 +561,102 @@ class AssistantService {
         calls: maxCalls,
       ),
     );
+  }
+
+  // ----------------------------------------------------------- local answers
+
+  /// The local answer a further question builds on (see [ask]).
+  LocalAnswer? _context;
+
+  /// Whether the user's sharing switches let the text of a local answer go to
+  /// the model: the budget needs the money data on, the agenda the events and
+  /// the tasks (it holds both). A text of a switched-off notice never goes.
+  bool _mayShare(LocalKind kind, AiSettings s) => switch (kind) {
+    LocalKind.budget => s.finance,
+    LocalKind.agenda => s.events && s.tasks,
+    LocalKind.switchedOff => false,
+  };
+
+  /// The local answer as a data block of the first message of a follow-up
+  /// question (null: none, or the user does not share what it is made of).
+  /// Typed-in short events are "foglalt" in it, as in the events block.
+  String? _contextBlock(AiSettings s) {
+    final c = _context;
+    if (c == null || !_mayShare(c.kind, s)) return null;
+    final lines = [
+      for (final l in c.modelText.split('\n'))
+        if (l.trim().isNotEmpty) sanitizeText(l, max: 200),
+    ].take(40).toList();
+    return dataBlock('helyi_valasz', {
+      'megjegyzes': 'A program korábbi saját válasza a felhasználónak.',
+      'sorok': lines,
+    });
+  }
+
+  /// What the program answers by itself, with no model and no key: the budget
+  /// and the agenda of a day, from the data on the device (whatever the sharing
+  /// switches say, nothing leaves the device); and the plain notice that a
+  /// request needs a source the user switched off, instead of sending it just
+  /// to be told so. Null when the request is a question for the model.
+  Future<AssistantOutcome?> localOutcome(
+    String prompt, {
+    required AiSettings settings,
+  }) async {
+    final q = localQuestionFor(prompt, _today);
+    if (q == null) return _switchedOff(prompt, settings);
+    switch (q.kind) {
+      case LocalKind.budget:
+        final repo = finance;
+        if (repo == null) return null;
+        final a = budgetAnswer(
+          today: _today,
+          txs: await repo.txs(),
+          categories: await repo.categories(),
+          budgets: await repo.budgets(),
+          recurring: await repo.recurring(),
+          goals: await repo.goals(),
+          deposits: await repo.deposits(),
+        );
+        return AssistantOutcome(text: a.text, localAnswer: a);
+      case LocalKind.agenda:
+        final first = _today.add(Duration(days: q.offset));
+        final occ = await events.occurrences(
+          resolveWallClock(_tz, first.subtract(const Duration(days: 1))),
+          resolveWallClock(_tz, first.add(Duration(days: q.days + 1))),
+        );
+        // (the forecast is public data; it is only used when it is switched on)
+        _forecastFuture = null;
+        final a = agendaAnswer(
+          today: _today,
+          first: first,
+          days: q.days,
+          tz: _tz,
+          occurrences: occ,
+          tasks: [for (final r in await records.all(kindTask)) TaskView(r)],
+          forecast: await _forecastFor(settings),
+        );
+        return AssistantOutcome(text: a.text, localAnswer: a);
+      case LocalKind.switchedOff:
+        return null;
+    }
+  }
+
+  AssistantOutcome? _switchedOff(String prompt, AiSettings s) {
+    final scope = scopeFor(prompt, _today);
+    final String? why;
+    if (scope.kind == PromptKind.money && !s.finance) {
+      why = 'A pénzügyi adatok megosztása ki van kapcsolva, ezért ezt a kérdést nem küldöm el a modellnek. Kapcsold be a Beállításokban („Mit láthat az asszisztens?”), vagy kérdezz a költségkeretről („Hogy állok a költségkerettel?”): arra helyben, modell nélkül is válaszolok.';
+    } else if (scope.edit && !s.events) {
+      why = 'A naptáresemények megosztása ki van kapcsolva, ezért nem tudom, melyik eseményt töröljem vagy helyezzem át. Kapcsold be a Beállításokban („Mit láthat az asszisztens?”).';
+    } else {
+      why = null;
+    }
+    return why == null
+        ? null
+        : AssistantOutcome(
+            text: why,
+            localAnswer: LocalAnswer(LocalKind.switchedOff, why),
+          );
   }
 
   // ------------------------------------------------------------ preparation
@@ -906,6 +1012,7 @@ class AssistantService {
             s,
           ),
         ),
+      ?_contextBlock(s),
       nowLine(_nowUtc, _tz),
       // the user's own words, cleaned and at most 500 characters
       'Kérés: ${sanitizeText(prompt, max: maxPromptLength)}',

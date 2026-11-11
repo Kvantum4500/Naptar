@@ -238,7 +238,16 @@ class AssistantController extends Notifier<AssistantState> {
     state = AssistantState(prompt: state.prompt);
   }
 
-  Future<void> ask(String prompt) async {
+  /// A further question to the model about a local answer the program has
+  /// just given ("Kérdezd a modellt is"): the answer goes with it as data,
+  /// where the user's sharing switches allow it.
+  Future<void> askMore(String followUp) async {
+    final answer = state.outcome?.localAnswer;
+    if (answer == null || answer.kind == LocalKind.switchedOff) return;
+    await ask(followUp, context: answer);
+  }
+
+  Future<void> ask(String prompt, {LocalAnswer? context}) async {
     final text = prompt.trim();
     if (text.isEmpty || state.busy) return;
     final run = ++_run;
@@ -252,6 +261,19 @@ class AssistantController extends Notifier<AssistantState> {
     try {
       var settings = await ref.read(aiSettingsProvider.future);
       final info = providerById(settings.provider);
+      // Some questions the program answers itself, from the data on the device:
+      // no key, no model, no tokens (and nothing leaves the device).
+      if (context == null) {
+        final local = await _newService(
+          settings,
+          info,
+          _NoProvider(),
+        ).localOutcome(text, settings: settings);
+        if (local != null) {
+          if (live()) state = AssistantState(prompt: text, outcome: local);
+          return;
+        }
+      }
       final key = await ref.read(apiKeyStoreProvider).read(provider: info.id);
       if (key == null && !info.keyOptional) {
         if (live()) {
@@ -289,8 +311,13 @@ class AssistantController extends Notifier<AssistantState> {
       if (!live()) return;
       final service = _newService(settings, info, provider);
       _service = service;
-      Future<AssistantOutcome> go(String m) =>
-          service.ask(text, model: m, settings: settings, onStatus: status);
+      Future<AssistantOutcome> go(String m) => service.ask(
+        text,
+        model: m,
+        settings: settings,
+        onStatus: status,
+        context: context,
+      );
 
       AssistantOutcome outcome;
       String? notice;

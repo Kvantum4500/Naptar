@@ -110,6 +110,9 @@ String _line(DayWeather w) {
   return parts.join(', ');
 }
 
+/// The same line, for the screen: "felhős, 8–17 °C, csapadék 60%".
+String weatherLine(DayWeather w) => _line(w);
+
 /// Data block for the assistant: one short line per day. The name of the place
 /// does not go with it (the forecast is looked up by coordinates elsewhere; the
 /// model has no use for the city).
