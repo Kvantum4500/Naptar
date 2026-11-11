@@ -17,6 +17,7 @@ class PlanRules {
     this.hardFromMinutes = 60,
     this.shiftBufferFromMinutes = 45,
     this.shiftBufferHours = 8,
+    this.hardFromBySport = const {},
     this.tzid = 'Europe/Budapest',
   });
   final int sleepStartHour;
@@ -43,7 +44,31 @@ class PlanRules {
   /// A hard session (or a workout of [shiftBufferFromMinutes]) may not
   /// start/end this close to a shift.
   final int shiftBufferHours;
+
+  /// What the program has learned of the user's own workouts: from how many
+  /// minutes a workout of a sport (see `sportKey`) is a hard one for them.
+  /// A sport that is not here uses [hardFromMinutes].
+  final Map<String, int> hardFromBySport;
   final String tzid;
+
+  /// From how many minutes a workout of [sport] is a hard one.
+  int hardFromFor(String sport) => hardFromBySport[sport] ?? hardFromMinutes;
+
+  /// The same rules with other learned limits.
+  PlanRules withHardFrom(Map<String, int> bySport) => PlanRules(
+    sleepStartHour: sleepStartHour,
+    sleepEndHour: sleepEndHour,
+    bufferMinutes: bufferMinutes,
+    minHoursBetweenHard: minHoursBetweenHard,
+    maxWorkoutsPerWeek: maxWorkoutsPerWeek,
+    minEnergyForHard: minEnergyForHard,
+    assumedEnergy: assumedEnergy,
+    hardFromMinutes: hardFromMinutes,
+    shiftBufferFromMinutes: shiftBufferFromMinutes,
+    shiftBufferHours: shiftBufferHours,
+    hardFromBySport: bySport,
+    tzid: tzid,
+  );
 }
 
 class ProposedBlock {
@@ -284,7 +309,7 @@ List<Violation> validateProposal(
       if (isHardWorkout(
         title: x.title,
         length: x.endUtc.difference(x.startUtc),
-        fromMinutes: rules.hardFromMinutes,
+        fromMinutes: rules.hardFromFor(sportKey(x.title)),
       ))
         (start: x.startUtc, end: x.endUtc, title: x.title, planned: false),
   ]..sort((a, b) => a.start.compareTo(b.start));

@@ -1179,10 +1179,15 @@ class AssistantService {
   _propose(Map<String, Object?> args, {required int repairsLeft}) async {
     final raw = parseProposal(args, defaultTz: _tz);
     final dropped = [...raw.problems];
-    final linked = _withinHorizon(
-      await _attachTasks(raw.items, dropped),
-      dropped,
-    );
+    // what the screen shows as "hard" is the code's verdict (the model's word
+    // is one vote), the one the rules below judge by
+    final linked = [
+      for (final i in _withinHorizon(
+        await _attachTasks(raw.items, dropped),
+        dropped,
+      ))
+        i.withHard(i.isHardSession(rules: rules)),
+    ];
     final parsed = ParsedProposal(
       summary: raw.summary,
       items: linked,
@@ -1252,10 +1257,7 @@ class AssistantService {
       for (final w in forecast ?? <DayWeather>[]) w.day: w,
     };
     List<Violation> check(List<ProposalItem> items) => validateProposal(
-      [
-        for (final i in items)
-          i.toBlock(hardFromMinutes: rules.hardFromMinutes),
-      ],
+      [for (final i in items) i.toBlock(rules: rules)],
       existing: existing,
       rules: rules,
       energyByDate: energy,

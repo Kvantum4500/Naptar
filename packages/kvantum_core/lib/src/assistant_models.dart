@@ -77,23 +77,42 @@ class ProposalItem {
       (kind == 'other' && isWorkoutTitle(title) && !isLightTitle(title));
 
   /// Whether the rules treat it as a hard session: decided in code (see
-  /// [isHardWorkout]) from the length and the title; the model's `hard` is one
-  /// vote, not the verdict.
-  bool isHardSession({int hardFromMinutes = 60}) =>
+  /// [isHardWorkout]) from the length and the title, with the limit the user's
+  /// own workouts have taught ([PlanRules.hardFromFor]); the model's `hard` is
+  /// one vote, not the verdict.
+  bool isHardSession({PlanRules rules = const PlanRules()}) =>
       isWorkout &&
       isHardWorkout(
         title: title,
         length: endUtc.difference(startUtc),
         modelSaysHard: hard,
-        fromMinutes: hardFromMinutes,
+        fromMinutes: rules.hardFromFor(sportKey(title)),
       );
 
-  ProposedBlock toBlock({int hardFromMinutes = 60}) => ProposedBlock(
+  /// The same item with the code's verdict as its `hard` (what the screen
+  /// shows is what the rules judged).
+  ProposalItem withHard(bool value) => ProposalItem(
+    title: title,
+    startWall: startWall,
+    endWall: endWall,
+    tzid: tzid,
+    kind: kind,
+    hard: value,
+    reason: reason,
+    taskId: taskId,
+    taskTitle: taskTitle,
+    taskDue: taskDue,
+    taskEstimateMin: taskEstimateMin,
+    taskEnergy: taskEnergy,
+    outdoor: outdoor,
+  );
+
+  ProposedBlock toBlock({PlanRules rules = const PlanRules()}) => ProposedBlock(
     title: title,
     startUtc: startUtc,
     endUtc: endUtc,
     isWorkout: isWorkout,
-    isHard: isHardSession(hardFromMinutes: hardFromMinutes),
+    isHard: isHardSession(rules: rules),
     taskId: taskId,
     taskDue: taskDue,
     taskEstimateMin: taskEstimateMin,

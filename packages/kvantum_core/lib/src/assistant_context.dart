@@ -8,6 +8,7 @@ import 'models.dart';
 import 'rules.dart';
 import 'text_safety.dart';
 import 'time.dart';
+import 'workout_learning.dart';
 
 /// Which data the assistant may see (each can be switched off by the user).
 class AssistantSources {
@@ -576,6 +577,24 @@ Map<String, Object?> checkinsForTool(
   };
 }
 
+/// The feedback on the latest workouts, one short line each (see
+/// [workoutLogLines]); it belongs to the check-in data, so the same switch
+/// governs it. The block is only worth sending when there is something in it.
+Map<String, Object?> workoutLogForTool(
+  Iterable<WorkoutLogView> logs, {
+  required DateTime today,
+  bool enabled = true,
+  int max = 10,
+}) {
+  if (!enabled) {
+    return {
+      'kikapcsolva': true,
+      'uzenet': 'A felhasználó nem engedi a check-in adatok megosztását.',
+    };
+  }
+  return {'edzesek': workoutLogLines(logs, today: today, max: max)};
+}
+
 /// Wraps tool-style data for the first message. Everything inside has gone
 /// through [sanitizeText], so it cannot contain `<`/`>` and therefore cannot
 /// close the block or imitate our own delimiters.
@@ -591,12 +610,16 @@ String dataBlock(String type, Map<String, Object?> data) =>
 /// request carries money data (a plan without it is not told about money).
 /// With [mixed] a deleting / moving request also gets what planning needs
 /// (the legends of tasks, check-ins and free slots, and the hard rules).
+/// With [workoutLog] the request carries the feedback on the latest workouts:
+/// the legend of that block, how to use it, and the limits the user's own
+/// workouts have taught ([PlanRules.hardFromBySport]).
 String buildSystemPrompt({
   required String handbook,
   required PlanRules rules,
   PromptKind kind = PromptKind.plan,
   bool finance = true,
   bool mixed = false,
+  bool workoutLog = false,
 }) {
   String hh(int h) => h.toString().padLeft(2, '0');
   final b = StringBuffer();
@@ -621,6 +644,13 @@ String buildSystemPrompt({
       'feladatok: t=azonosító, c=cím, h=határidő, p=becsült perc, pr=prioritás 1–3 (alapból 2), e=energiaigény 1–5 (alapból 3), k=késésben.';
   const legendCheckin =
       'check_in: d=nap, f=fizikai, m=mentális, h=hangulat, a=alvás (1 rossz … 5 kiváló).';
+  const legendWorkoutLog =
+      'edzes_naplo: d=nap, s=sport, p=perc, nf/nm=fizikai/mentális nehézség (1 könnyű … 5 nagyon nehéz), e=energia elején/végén, k=élmény, kihagyta.';
+  const workoutAdvice =
+      'Az edzes_naplo az észlelt terhelés: a nagyon nehéz vagy sok energiát elvevő edzéshez hasonlót rövidebben vagy könnyebben tervezz.';
+  final learnedLimits = rules.hardFromBySport.isEmpty
+      ? null
+      : 'Egyedi nehéz-küszöb a naplód szerint (perc): ${[for (final e in (rules.hardFromBySport.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))) '${e.key} ${e.value}'].join(', ')}.';
   const legendSlots =
       'szabad_idosavok: napok szerint, HH:MM-HH:MM. idojaras: napok szerint (HH-NN), csapadék és szél csak ha jelentős; szabadtéri tevékenységnél állítsd outdoor: true-ra.';
   const hardRulesTitle =
@@ -631,6 +661,7 @@ String buildSystemPrompt({
     'Műszak (f: m) előtt és után ${rules.shiftBufferHours} órán belül ${rules.shiftBufferFromMinutes} perces vagy hosszabb edzés nincs.',
     'Nehéz edzés: ${rules.hardFromMinutes} perctől (a „könnyű”, „nyújtás”, „mobilitás” című mindig könnyű); csak ${rules.minEnergyForHard}/5 vagy magasabb fizikai energiánál; nehéz edzések között legalább ${rules.minHoursBetweenHard} óra; heti legfeljebb ${rules.maxWorkoutsPerWeek} edzés (a naptárban lévőket is számítva).',
     'Check-in nélküli napra ${rules.assumedEnergy}/5 fizikai energiát feltételezel; nehéz edzésnél ezt jelezd az indoklásban.',
+    ?(workoutLog ? learnedLimits : null),
   ];
 
   switch (kind) {
@@ -652,10 +683,16 @@ String buildSystemPrompt({
         'A kérést a propose_events eszközzel add le: törlés → deletions (az r érték), áthelyezés → moves (az r érték és az ÚJ kezdés/vég helyi időben, zóna nélkül: 2026-05-04T18:00:00). Csak a kifejezetten megnevezett eseményeket add meg. Semmi nem történik a felhasználó külön jóváhagyása nélkül. Műszak nem törölhető és nem mozgatható; az új időpont ne ütközzön (szabad időpontot a find_free_slots eszközzel kérhetsz).',
         if (mixed)
           'Új eseményt is javasolhatsz (proposals): időpontját a szabad_idosavok adatból vagy a find_free_slots eszközből válaszd, ne számold ki. $taskRule',
+        if (mixed && workoutLog) workoutAdvice,
       ]);
       section('ADATJELÖLÉSEK', [
         legendEventsEdit,
-        if (mixed) ...[legendTasks, legendCheckin, legendSlots],
+        if (mixed) ...[
+          legendTasks,
+          legendCheckin,
+          if (workoutLog) legendWorkoutLog,
+          legendSlots,
+        ],
       ]);
       section('BIZALMI SZABÁLY', [trust]);
       if (mixed) section(hardRulesTitle, hardRules);
@@ -668,12 +705,14 @@ String buildSystemPrompt({
         'A tervet MINDIG a propose_events eszközzel add le (proposals). Semmi nem történik a felhasználó külön jóváhagyása nélkül. Meglévő eseményt nem módosítasz, nem törölsz és nem mozgatsz.',
         'Időpont: helyi idő, zóna nélkül (2026-05-04T18:00:00); a szabad_idosavok adatból vagy a find_free_slots eszközből válassz, ne számold ki.',
         taskRule,
+        if (workoutLog) workoutAdvice,
         if (finance) 'penzugy: a felhasználó saját adata (Ft); csak ebből számolj, befektetési vagy hitel-tanácsot nem adsz; pénzügyi tételt nem veszel fel és nem törölsz; részlet: get_finance (honap: ÉÉÉÉ-HH).',
       ]);
       section('ADATJELÖLÉSEK', [
         legendEventsPlan,
         legendTasks,
         legendCheckin,
+        if (workoutLog) legendWorkoutLog,
         legendSlots,
       ]);
       section('BIZALMI SZABÁLY', [trust]);

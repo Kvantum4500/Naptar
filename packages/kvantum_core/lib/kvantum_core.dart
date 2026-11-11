@@ -22,3 +22,4 @@ export 'src/weather.dart';
 export 'src/wallet_parser.dart';
 export 'src/week.dart';
 export 'src/workout.dart';
+export 'src/workout_learning.dart';

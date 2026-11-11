@@ -476,4 +476,192 @@ void main() {
       },
     );
   });
+
+  group('what the user\'s own workouts have taught', () {
+    // calisthenics counts as hard from 90 minutes (agreed), gym from 45
+    const learned = PlanRules(hardFromBySport: {'calisthenics': 90, 'gym': 45});
+
+    ProposalItem item(String title, int minutes, {bool model = false}) =>
+        ProposalItem(
+          title: title,
+          startWall: floating(2026, 5, 5, 18),
+          endWall: floating(2026, 5, 5, 18).add(Duration(minutes: minutes)),
+          tzid: bp,
+          kind: 'workout',
+          hard: model,
+          reason: '',
+        );
+
+    test('the limit is per sport, the default for the rest', () {
+      expect(learned.hardFromFor('calisthenics'), 90);
+      expect(learned.hardFromFor('gym'), 45);
+      expect(learned.hardFromFor('futas'), 60);
+      expect(learned.hardFromFor(''), 60);
+      expect(const PlanRules().hardFromBySport, isEmpty);
+    });
+
+    test('the same rules with other limits keep everything else', () {
+      const base = PlanRules(sleepStartHour: 22, maxWorkoutsPerWeek: 4);
+      final other = base.withHardFrom({'gym': 45});
+      expect((other.sleepStartHour, other.maxWorkoutsPerWeek), (22, 4));
+      expect(other.hardFromFor('gym'), 45);
+      expect(base.hardFromFor('gym'), 60);
+    });
+
+    test('an easy sport is not hard at 60, a tightened one is hard at 45', () {
+      expect(item('Calisthenics', 60).isHardSession(rules: learned), isFalse);
+      expect(item('Calisthenics', 89).isHardSession(rules: learned), isFalse);
+      expect(item('Calisthenics', 90).isHardSession(rules: learned), isTrue);
+      expect(item('Gym', 44).isHardSession(rules: learned), isFalse);
+      expect(item('Gym', 45).isHardSession(rules: learned), isTrue);
+      // without the lesson nothing changes
+      expect(item('Calisthenics', 60).isHardSession(), isTrue);
+      expect(item('Gym', 45).isHardSession(), isFalse);
+    });
+
+    test('the model\'s "hard" and a hard word in the title still win', () {
+      expect(
+        item('Calisthenics', 60, model: true).isHardSession(rules: learned),
+        isTrue,
+      );
+      expect(
+        item('Intenzív calisthenics', 60).isHardSession(rules: learned),
+        isTrue,
+      );
+      // ... and a light title is light whatever was learned
+      expect(item('Könnyű gym', 90).isHardSession(rules: learned), isFalse);
+    });
+
+    test('the verdict goes into the block the rules check', () {
+      expect(item('Calisthenics', 60).toBlock(rules: learned).isHard, isFalse);
+      expect(item('Gym', 45).toBlock(rules: learned).isHard, isTrue);
+      expect(item('Gym', 45).toBlock().isHard, isFalse);
+      final shown = item('Calisthenics', 60).withHard(false);
+      expect(shown.hard, isFalse);
+      expect(shown.title, 'Calisthenics');
+      expect(shown.endWall, floating(2026, 5, 5, 19));
+    });
+
+    test(
+      'an easy 60-minute session is not held to the energy and rest rules',
+      () {
+        // a low energy day: a hard session would be refused, an easy one is not
+        final low = {floating(2026, 5, 5): 2};
+        codesOf(ProposalItem i, PlanRules r) => [
+          for (final v in validateProposal(
+            [i.toBlock(rules: r)],
+            existing: [],
+            rules: r,
+            energyByDate: low,
+          ))
+            v.code,
+        ];
+        expect(codesOf(item('Calisthenics', 60), const PlanRules()), [
+          'low_energy',
+        ]);
+        expect(codesOf(item('Calisthenics', 60), learned), isEmpty);
+        expect(codesOf(item('Calisthenics', 90), learned), ['low_energy']);
+        // a tightened sport is held to them from 45 minutes
+        expect(codesOf(item('Gym', 45), const PlanRules()), isEmpty);
+        expect(codesOf(item('Gym', 45), learned), ['low_energy']);
+      },
+    );
+
+    test('booked workouts are told apart by the same limits (48 hours)', () {
+      // a booked 70-minute calisthenics: hard by default, not for this user
+      final booked = Occurrence(
+        eventId: 'c',
+        title: 'Calisthenics',
+        startUtc: at(5, 18),
+        endUtc: at(5, 18).add(const Duration(minutes: 70)),
+        originalStart: floating(2026, 5, 5, 18),
+        allDay: false,
+        tzid: bp,
+      );
+      final next = block(6, 18, hard: true, title: 'Gym');
+      expect(
+        codes(validateProposal([next], existing: [booked], rules: rules)),
+        ['rest'],
+      );
+      expect(
+        codes(validateProposal([next], existing: [booked], rules: learned)),
+        isEmpty,
+      );
+    });
+  });
+
+  group('the system prompt with the feedback', () {
+    String prompt({
+      bool log = false,
+      PlanRules rules = const PlanRules(),
+      PromptKind kind = PromptKind.plan,
+      bool mixed = false,
+    }) => buildSystemPrompt(
+      handbook: '',
+      rules: rules,
+      kind: kind,
+      mixed: mixed,
+      workoutLog: log,
+    );
+
+    test('without feedback the prompt does not mention it', () {
+      final p = prompt();
+      expect(p.contains('edzes_naplo'), isFalse);
+      expect(p.contains('Egyedi nehéz-küszöb'), isFalse);
+    });
+
+    test('with feedback: the legend and how to use it', () {
+      final p = prompt(log: true);
+      expect(p, contains('edzes_naplo: d=nap, s=sport, p=perc'));
+      expect(p, contains('nf/nm=fizikai/mentális nehézség'));
+      expect(p, contains('e=energia elején/végén'));
+      expect(p, contains('Az edzes_naplo az észlelt terhelés'));
+      expect(p.contains('Egyedi nehéz-küszöb'), isFalse);
+    });
+
+    test('the learned limits are told, sorted, in the hard rules', () {
+      final p = prompt(
+        log: true,
+        rules: const PlanRules(
+          hardFromBySport: {'gym': 45, 'calisthenics': 90},
+        ),
+      );
+      expect(
+        p,
+        contains(
+          'Egyedi nehéz-küszöb a naplód szerint (perc): calisthenics 90, gym 45.',
+        ),
+      );
+      expect(
+        p.indexOf('KEMÉNY SZABÁLYOK'),
+        lessThan(p.indexOf('Egyedi nehéz-küszöb')),
+      );
+    });
+
+    test('limits are not told when the feedback is not shared', () {
+      final p = prompt(rules: const PlanRules(hardFromBySport: {'gym': 45}));
+      expect(p.contains('Egyedi nehéz-küszöb'), isFalse);
+    });
+
+    test('a deleting request has none of it; a mixed one has all of it', () {
+      expect(
+        prompt(log: true, kind: PromptKind.edit).contains('edzes_naplo'),
+        isFalse,
+      );
+      final m = prompt(
+        log: true,
+        kind: PromptKind.edit,
+        mixed: true,
+        rules: const PlanRules(hardFromBySport: {'gym': 45}),
+      );
+      expect(m, contains('edzes_naplo: d=nap'));
+      expect(m, contains('Az edzes_naplo az észlelt terhelés'));
+      expect(m, contains('Egyedi nehéz-küszöb'));
+    });
+
+    test('the prompt is the same when nothing changed', () {
+      const r = PlanRules(hardFromBySport: {'gym': 45});
+      expect(prompt(log: true, rules: r), prompt(log: true, rules: r));
+    });
+  });
 }

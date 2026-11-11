@@ -482,9 +482,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
               isThreeLine:
                   (o.items[i].reason as String).isNotEmpty ||
                   o.items[i].taskTitle != null,
-              // (hard by the rules' own count: 60 minutes or more, not the
-              // model's word alone)
-              secondary: o.items[i].isHardSession() == true
+              // (the service has set it to the code's verdict: 60 minutes or
+              // more by default, the user's own limits once learned)
+              secondary: o.items[i].hard == true
                   ? const Tooltip(
                       message: 'Nehéz edzés',
                       child: Icon(Icons.fitness_center),
