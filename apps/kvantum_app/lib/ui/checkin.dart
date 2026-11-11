@@ -166,16 +166,23 @@ class _CheckInDialogState extends ConsumerState<CheckInDialog> {
                 ),
                 Padding(
                   padding: const EdgeInsets.only(top: 2, right: 4),
+                  // (each half may wrap: a large system font must not push the
+                  // end of the scale off the dialog)
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '1 = $low',
-                        style: Theme.of(context).textTheme.bodySmall,
+                      Expanded(
+                        child: Text(
+                          '1 = $low',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ),
-                      Text(
-                        '5 = $high',
-                        style: Theme.of(context).textTheme.bodySmall,
+                      Expanded(
+                        child: Text(
+                          '5 = $high',
+                          textAlign: TextAlign.end,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ),
                     ],
                   ),

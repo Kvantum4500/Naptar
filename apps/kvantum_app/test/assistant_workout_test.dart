@@ -360,6 +360,50 @@ void main() {
     });
 
     test(
+      'the screen shows the code\'s verdict, not the model\'s word',
+      () async {
+        // a 60-minute gym the model called easy is hard ...
+        var llm = FakeLlm([
+          (_) => calls([
+            propose([
+              item('Gym', '2026-05-07T18:00:00', '2026-05-07T19:00:00'),
+            ]),
+          ]),
+        ]);
+        var out = await service(llm)
+            .ask('Tervezz edzést', model: 'm', settings: settings);
+        expect(out.items.single.hard, isTrue);
+        // ... and a 30-minute run the model called hard is, by its word, hard
+        llm = FakeLlm([
+          (_) => calls([
+            propose([
+              item(
+                'Futás',
+                '2026-05-07T18:00:00',
+                '2026-05-07T18:30:00',
+                hard: true,
+              ),
+            ]),
+          ]),
+        ]);
+        out = await service(llm)
+            .ask('Tervezz edzést', model: 'm', settings: settings);
+        expect(out.items.single.hard, isTrue);
+        // a 30-minute run nobody called hard is not
+        llm = FakeLlm([
+          (_) => calls([
+            propose([
+              item('Futás', '2026-05-07T18:00:00', '2026-05-07T18:30:00'),
+            ]),
+          ]),
+        ]);
+        out = await service(llm)
+            .ask('Tervezz edzést', model: 'm', settings: settings);
+        expect(out.items.single.hard, isFalse);
+      },
+    );
+
+    test(
       'after a yes the 60-minute session is not held to the energy rule',
       () async {
         await lowEnergyOn6th();
