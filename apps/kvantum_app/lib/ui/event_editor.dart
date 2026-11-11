@@ -131,7 +131,8 @@ class _EventEditorState extends ConsumerState<EventEditor> {
       final s =
           t.initialStart ??
           (() {
-            final d = t.initialDay ?? dateOnly(DateTime.now());
+            final today = ref.read(todayProvider);
+            final d = t.initialDay ?? today;
             return floating(d.year, d.month, d.day, 9);
           })();
       _start = s;
@@ -350,7 +351,9 @@ class _EventEditorState extends ConsumerState<EventEditor> {
           setState(() => _busy = false);
           return;
         }
-        await _saveSeries(scope, formEv, repo, uuid);
+        // a split into two series, the exceptions that move with it ...: all
+        // or nothing, and one change for the screens
+        await repo.atomically(() => _saveSeries(scope, formEv, repo, uuid));
       }
       ref.read(syncControllerProvider.notifier).requestSync();
       if (mounted) Navigator.of(context).pop(true);

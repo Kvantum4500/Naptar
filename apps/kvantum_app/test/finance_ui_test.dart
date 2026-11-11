@@ -8,6 +8,7 @@ import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_wallet.dart';
@@ -335,7 +336,7 @@ void main() {
     final container = ProviderScope.containerOf(
       tester.element(find.byType(FinancePage)),
     );
-    final now = DateTime.now();
+    final now = todayIn(DateTime.now());
     final prev = DateTime.utc(now.year, now.month - 1, 1);
     expect(container.read(finMonthProvider), prev);
     await tester.tap(find.byTooltip('Következő hónap'));

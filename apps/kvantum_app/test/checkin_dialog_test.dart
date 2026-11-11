@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
@@ -52,11 +53,11 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Mentés'));
     await tester.pumpAndSettle();
-    final n = DateTime.now();
     final rec = await tester.runAsync(
-      () => ref0(tester)
-          .read(recordRepoProvider)
-          .get(kindCheckIn, checkInId(DateTime.utc(n.year, n.month, n.day))),
+      () =>
+          ref0(tester)
+              .read(recordRepoProvider)
+              .get(kindCheckIn, checkInId(todayIn(DateTime.now()))),
     );
     final v = CheckInView(rec!);
     expect((v.physical, v.sleep, v.mental, v.mood), (4, 2, null, null));

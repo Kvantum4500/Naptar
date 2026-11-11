@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'data/db.dart';
 import 'data/event_repository.dart';
 import 'data/finance_repository.dart';
+import 'data/housekeeping.dart';
 import 'finance/wallet_bridge.dart';
 import 'finance/wallet_ingest.dart';
 import 'data/record_repository.dart';
@@ -68,21 +71,74 @@ final eventsTickProvider = StreamProvider<int>(
       ),
 );
 
-DateTime _today() {
-  final n = DateTime.now();
-  return DateTime.utc(n.year, n.month, n.day);
+/// The clock of the app (replaced by tests).
+final appClockProvider = Provider<DateTime Function()>((_) => DateTime.now);
+
+/// Starts the timer that wakes [todayProvider] at midnight (replaced by tests).
+final midnightTimerProvider =
+    Provider<Timer Function(Duration, void Function())>((_) => Timer.new);
+
+/// Today's date in the display zone (a floating y/m/d). It changes at midnight
+/// of that zone, and when the app comes back to the front (a timer may have
+/// stood still while the device slept), so a calendar left open overnight
+/// moves on to the new day.
+class Today extends Notifier<DateTime> {
+  Timer? _timer;
+
+  @override
+  DateTime build() {
+    ref.onDispose(() => _timer?.cancel());
+    final now = ref.read(appClockProvider)();
+    _arm(now);
+    return todayIn(now);
+  }
+
+  void _arm(DateTime now) {
+    _timer?.cancel();
+    final wall = toWallClock(defaultTz, now.toUtc());
+    final midnight = resolveWallClock(
+      defaultTz,
+      DateTime.utc(wall.year, wall.month, wall.day + 1),
+    );
+    // a moment after midnight, never before it
+    final wait = midnight.difference(now.toUtc()) + const Duration(seconds: 1);
+    _timer = ref.read(midnightTimerProvider)(wait, refresh);
+  }
+
+  /// Looks at the clock again (midnight, or the app is in front again).
+  void refresh() {
+    final now = ref.read(appClockProvider)();
+    _arm(now);
+    final t = todayIn(now);
+    if (t != state) state = t;
+  }
 }
+
+final todayProvider = NotifierProvider<Today, DateTime>(Today.new);
 
 class SelectedDay extends Notifier<DateTime> {
   @override
-  DateTime build() => _today();
+  DateTime build() {
+    // whoever was looking at "today" keeps looking at today
+    ref.listen(todayProvider, (before, now) {
+      if (before != null && state == before) state = now;
+    });
+    return ref.read(todayProvider);
+  }
+
   void set(DateTime d) => state = DateTime.utc(d.year, d.month, d.day);
 }
 
 class VisibleMonth extends Notifier<DateTime> {
   @override
   DateTime build() {
-    final t = _today();
+    ref.listen(todayProvider, (before, now) {
+      if (before != null &&
+          state == DateTime.utc(before.year, before.month, 1)) {
+        state = DateTime.utc(now.year, now.month, 1);
+      }
+    });
+    final t = ref.read(todayProvider);
     return DateTime.utc(t.year, t.month, 1);
   }
 
@@ -179,6 +235,15 @@ final monthOccurrencesProvider =
         rangeOccurrencesProvider(ref.watch(monthRangeProvider)).future,
       ),
     );
+
+/// Quiet upkeep of the local data (see [Housekeeping]).
+final housekeepingProvider = Provider<Housekeeping>(
+  (ref) => Housekeeping(
+    events: ref.watch(repoProvider),
+    finance: ref.watch(financeRepoProvider),
+    now: ref.watch(appClockProvider),
+  ),
+);
 
 final recordRepoProvider = Provider<RecordRepository>(
   (ref) => RecordRepository(ref.watch(dbProvider)),

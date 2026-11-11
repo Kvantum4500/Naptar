@@ -4,15 +4,13 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_app/ui/checkin.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/tasks_page.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 
-DateTime today() {
-  final n = DateTime.now();
-  return DateTime.utc(n.year, n.month, n.day);
-}
+DateTime today() => todayIn(DateTime.now());
 
 void main() {
   setUpAll(() async {

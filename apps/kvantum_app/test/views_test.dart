@@ -5,6 +5,7 @@ import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/ui/home_page.dart';
 import 'package:kvantum_app/ui/time_grid.dart';
 import 'package:kvantum_app/ui/palette.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
@@ -84,7 +85,7 @@ void main() {
       useSize(tester);
       final db = await newDb();
       final repo = EventRepository(db);
-      final today = DateTime.now();
+      final today = todayIn(DateTime.now());
       final d = floating(today.year, today.month, 15);
       await tester.runAsync(() async {
         for (var i = 0; i < 6; i++) {

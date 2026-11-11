@@ -6,11 +6,6 @@ import 'package:kvantum_core/kvantum_core.dart';
 import '../../providers.dart';
 import '../format.dart';
 
-DateTime todayFloating() {
-  final n = DateTime.now();
-  return DateTime.utc(n.year, n.month, n.day);
-}
-
 /// Display name of a category id ("Besorolatlan" for the fallback).
 String categoryName(List<FinCategory> cats, String id) {
   if (id == kUncategorized) return 'Besorolatlan';
@@ -222,7 +217,8 @@ class _TxEditorState extends ConsumerState<TxEditor> {
   );
   late final _note = TextEditingController(text: widget.existing?.note ?? '');
   late FinKind _kind = widget.existing?.kind ?? FinKind.expense;
-  late DateTime _date = widget.existing?.date ?? widget.day ?? todayFloating();
+  late DateTime _date =
+      widget.existing?.date ?? widget.day ?? ref.read(todayProvider);
   late String _cat = widget.existing?.categoryId ?? kUncategorized;
   String? _error;
 

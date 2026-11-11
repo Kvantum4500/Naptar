@@ -57,6 +57,20 @@ class PlannedReminder {
   final DateTime atUtc;
   final String title;
   final String body;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlannedReminder &&
+      other.id == id &&
+      other.atUtc == atUtc &&
+      other.title == title &&
+      other.body == body;
+
+  @override
+  int get hashCode => Object.hash(id, atUtc, title, body);
+
+  @override
+  String toString() => 'PlannedReminder($id, $atUtc, $title)';
 }
 
 /// Hour (wall clock) of the evening check-in reminder.
@@ -122,14 +136,66 @@ List<PlannedReminder> planReminders({
   return out.take(maxCount).toList();
 }
 
-/// Puts the planned reminders on the device. [replaceAll] makes the device's
-/// pending set equal to [reminders] (cancelling everything else).
+/// What has to happen on the device so that it holds the planned reminders.
+class ReminderChanges {
+  const ReminderChanges({this.cancel = const [], this.schedule = const []});
+
+  /// Ids the device has but the plan no longer wants.
+  final List<int> cancel;
+
+  /// Reminders that are new or whose time or text changed (scheduling one
+  /// again replaces the one with the same id).
+  final List<PlannedReminder> schedule;
+
+  bool get isEmpty => cancel.isEmpty && schedule.isEmpty;
+}
+
+/// The difference between what the device holds ([previous]) and the plan
+/// ([next]). Reminders are told apart by id; when the plan has an id twice, the
+/// later one counts (as it does on the device).
+ReminderChanges diffReminders(
+  List<PlannedReminder> previous,
+  List<PlannedReminder> next,
+) {
+  final have = {for (final r in previous) r.id: r};
+  final want = {for (final r in next) r.id: r};
+  return ReminderChanges(
+    cancel: [
+      for (final id in have.keys)
+        if (!want.containsKey(id)) id,
+    ],
+    schedule: [
+      for (final r in want.values)
+        if (have[r.id] != r) r,
+    ],
+  );
+}
+
+/// Puts the planned reminders on the device. Only the difference is touched:
+/// cancelling everything and scheduling it all again on every change of the
+/// calendar loses reminders when the app stops in between, and the device
+/// would do the work again for a sync that changes ninety events.
 abstract class ReminderScheduler {
   bool get supported;
 
   /// Asks the user for the notification permission; true when granted.
   Future<bool> ensurePermission();
-  Future<void> replaceAll(List<PlannedReminder> reminders);
+
+  /// The reminders the device holds right now.
+  Future<List<PlannedReminder>> pending();
+  Future<void> cancel(Iterable<int> ids);
+  Future<void> schedule(Iterable<PlannedReminder> reminders);
+}
+
+/// Makes the device hold exactly [plan] and says what it had to change.
+Future<ReminderChanges> syncReminders(
+  ReminderScheduler scheduler,
+  List<PlannedReminder> plan,
+) async {
+  final changes = diffReminders(await scheduler.pending(), plan);
+  if (changes.cancel.isNotEmpty) await scheduler.cancel(changes.cancel);
+  if (changes.schedule.isNotEmpty) await scheduler.schedule(changes.schedule);
+  return changes;
 }
 
 class NoopReminderScheduler implements ReminderScheduler {
@@ -138,8 +204,31 @@ class NoopReminderScheduler implements ReminderScheduler {
   @override
   Future<bool> ensurePermission() async => false;
   @override
-  Future<void> replaceAll(List<PlannedReminder> reminders) async {}
+  Future<List<PlannedReminder>> pending() async => const [];
+  @override
+  Future<void> cancel(Iterable<int> ids) async {}
+  @override
+  Future<void> schedule(Iterable<PlannedReminder> reminders) async {}
 }
+
+/// A pending notification of the device as a [PlannedReminder]. The time
+/// travels in the payload (the device does not report it). One without a
+/// payload (made by an older version) gets time 0, so it never equals a plan
+/// and is replaced.
+PlannedReminder plannedFromPending(
+  int id,
+  String? title,
+  String? body,
+  String? payload,
+) => PlannedReminder(
+  id,
+  DateTime.fromMillisecondsSinceEpoch(
+    int.tryParse(payload ?? '') ?? 0,
+    isUtc: true,
+  ),
+  title ?? '',
+  body ?? '',
+);
 
 /// Android only: local scheduled notifications (no server involved). Uses
 /// inexact alarms, so a reminder may arrive a few minutes late but needs no
@@ -147,6 +236,15 @@ class NoopReminderScheduler implements ReminderScheduler {
 class AndroidReminderScheduler implements ReminderScheduler {
   final _plugin = FlutterLocalNotificationsPlugin();
   Future<void>? _init;
+
+  static const _details = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'reminders',
+      'Emlékeztetők',
+      channelDescription: 'Műszak és napi check-in emlékeztetők',
+      importance: Importance.defaultImportance,
+    ),
+  );
 
   @override
   bool get supported => true;
@@ -170,25 +268,34 @@ class AndroidReminderScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> replaceAll(List<PlannedReminder> reminders) async {
+  Future<List<PlannedReminder>> pending() async {
     await _ensureInit();
-    await _plugin.cancelAllPendingNotifications();
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'reminders',
-        'Emlékeztetők',
-        channelDescription: 'Műszak és napi check-in emlékeztetők',
-        importance: Importance.defaultImportance,
-      ),
-    );
+    return [
+      for (final p in await _plugin.pendingNotificationRequests())
+        plannedFromPending(p.id, p.title, p.body, p.payload),
+    ];
+  }
+
+  @override
+  Future<void> cancel(Iterable<int> ids) async {
+    await _ensureInit();
+    for (final id in ids) {
+      await _plugin.cancel(id: id);
+    }
+  }
+
+  @override
+  Future<void> schedule(Iterable<PlannedReminder> reminders) async {
+    await _ensureInit();
     for (final r in reminders) {
       await _plugin.zonedSchedule(
         id: r.id,
         title: r.title,
         body: r.body,
         scheduledDate: tz.TZDateTime.from(r.atUtc, tz.UTC),
-        notificationDetails: details,
+        notificationDetails: _details,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        payload: '${r.atUtc.millisecondsSinceEpoch}',
       );
     }
   }
@@ -221,45 +328,74 @@ final reminderSettingsProvider =
       ReminderSettingsNotifier.new,
     );
 
+/// How long the reminders wait for the calendar to settle before the device
+/// is touched (a sync that changes ninety events announces ninety changes).
+final reminderDebounceProvider = Provider<Duration>(
+  (_) => const Duration(milliseconds: 1500),
+);
+
+/// Starts the timer of the wait above (replaceable by tests).
+final reminderTimerProvider =
+    Provider<Timer Function(Duration, void Function())>((_) => Timer.new);
+
+/// Runs of the reminder sync, one after the other.
+class _ReminderRuns {
+  Future<void> last = Future.value();
+}
+
+final _reminderRunsProvider = Provider<_ReminderRuns>((_) => _ReminderRuns());
+
 /// Keeps the device's notifications in step with the calendar, the check-ins
 /// and the settings. Watch it once from the home page.
+///
+/// Every change of the inputs starts the wait anew (the earlier wait is
+/// cancelled when the provider rebuilds), so a burst of changes costs one
+/// plan and one look at the device.
 final reminderSyncProvider = Provider<void>((ref) {
   final settings = ref.watch(reminderSettingsProvider).value;
   ref.watch(eventsTickProvider);
   ref.watch(checkInsProvider);
   final scheduler = ref.read(reminderSchedulerProvider);
   if (settings == null || !scheduler.supported) return;
-  final job = _chain.then((_) async {
-    try {
-      final now = DateTime.now().toUtc();
-      final shifts = settings.shiftLeadMinutes > 0
-          ? [
-              for (final o
-                  in await ref
-                      .read(repoProvider)
-                      .occurrences(now, now.add(const Duration(days: 16))))
-                if (o.isShift && !o.allDay)
-                  (startUtc: o.startUtc, title: o.title),
-            ]
-          : <({DateTime startUtc, String title})>[];
+  final runs = ref.read(_reminderRunsProvider);
+  final timer = ref.read(reminderTimerProvider)(
+    ref.read(reminderDebounceProvider),
+    () {
+      // everything the run needs is taken now: it must not touch [ref]
+      // after the provider has been rebuilt or disposed
+      final repo = ref.read(repoProvider);
+      final now = ref.read(appClockProvider)().toUtc();
       final done = {
         for (final c
             in ref.read(checkInsProvider).value ?? const <CheckInView>[])
           if (c.date != null) c.date!,
       };
-      await scheduler.replaceAll(
-        planReminders(
-          nowUtc: now,
-          settings: settings,
-          shifts: shifts,
-          checkedInDays: done,
-        ),
-      );
-    } catch (_) {
-      // reminders are a convenience; never break the app because of them
-    }
-  });
-  _chain = job;
+      runs.last = runs.last.then((_) async {
+        try {
+          final shifts = settings.shiftLeadMinutes > 0
+              ? [
+                  for (final o in await repo.occurrences(
+                    now,
+                    now.add(const Duration(days: 16)),
+                  ))
+                    if (o.isShift && !o.allDay)
+                      (startUtc: o.startUtc, title: o.title),
+                ]
+              : <({DateTime startUtc, String title})>[];
+          await syncReminders(
+            scheduler,
+            planReminders(
+              nowUtc: now,
+              settings: settings,
+              shifts: shifts,
+              checkedInDays: done,
+            ),
+          );
+        } catch (_) {
+          // reminders are a convenience; never break the app because of them
+        }
+      });
+    },
+  );
+  ref.onDispose(timer.cancel);
 });
-
-Future<void> _chain = Future.value();

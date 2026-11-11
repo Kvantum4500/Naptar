@@ -27,10 +27,7 @@ class HomePage extends ConsumerWidget {
     ref.read(visibleMonthProvider.notifier).set(day);
   }
 
-  void _today(WidgetRef ref) {
-    final n = DateTime.now();
-    _goto(ref, DateTime.utc(n.year, n.month, n.day));
-  }
+  void _today(WidgetRef ref) => _goto(ref, ref.read(todayProvider));
 
   void _shift(WidgetRef ref, int dir) {
     final view = ref.read(viewModeProvider);

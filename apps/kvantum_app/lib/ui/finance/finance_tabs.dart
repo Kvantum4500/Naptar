@@ -237,14 +237,18 @@ class _RuleEditorState extends ConsumerState<_RuleEditor> {
     text: widget.existing == null ? '' : '${widget.existing!.amount}',
   );
   late final _day = TextEditingController(
-    text: '${widget.existing?.dayOfMonth ?? DateTime.now().day}',
+    text: '${widget.existing?.dayOfMonth ?? ref.read(todayProvider).day}',
   );
   late FinKind _kind = widget.existing?.kind ?? FinKind.expense;
   late String _cat = widget.existing?.categoryId ?? kUncategorized;
   late bool _active = widget.existing?.active ?? true;
   late DateTime _from =
       widget.existing?.fromMonth ??
-      DateTime.utc(DateTime.now().year, DateTime.now().month, 1);
+      DateTime.utc(
+        ref.read(todayProvider).year,
+        ref.read(todayProvider).month,
+        1,
+      );
   late DateTime? _to = widget.existing?.toMonth;
   String? _error;
 
@@ -312,7 +316,7 @@ class _RuleEditorState extends ConsumerState<_RuleEditor> {
         active: _active,
       ),
     );
-    final n = DateTime.now();
+    final n = ref.read(todayProvider);
     await repo.ensureRecurring(n.year, n.month);
     if (mounted) Navigator.pop(context);
   }
@@ -501,7 +505,7 @@ class GoalsTab extends ConsumerWidget {
     final deposits =
         ref.watch(finDepositsProvider).value ?? const <FinDeposit>[];
     final repo = ref.read(financeRepoProvider);
-    final today = todayFloating();
+    final today = ref.watch(todayProvider);
     return Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: FloatingActionButton(
@@ -544,7 +548,7 @@ class GoalsTab extends ConsumerWidget {
                         FinDeposit(
                           id: repo.newId(),
                           goalId: g.id,
-                          date: todayFloating(),
+                          date: ref.read(todayProvider),
                           amount: v,
                         ),
                       );

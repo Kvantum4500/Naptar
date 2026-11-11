@@ -4,6 +4,12 @@ const defaultTz = 'Europe/Budapest';
 
 DateTime dateOnly(DateTime d) => DateTime.utc(d.year, d.month, d.day);
 
+/// Today's date (a floating y/m/d) in the display zone [tz]: the day the
+/// calendar draws, wherever the device thinks it is (a phone abroad, a PC set
+/// to another zone).
+DateTime todayIn(DateTime now, {String tz = defaultTz}) =>
+    dateOnly(toWallClock(tz, now.toUtc()));
+
 /// Calendar days (floating dates, in [tz]) that an occurrence touches.
 /// All-day events are zone-independent; their end date is exclusive.
 List<DateTime> daysOf(Occurrence o, {String tz = defaultTz}) {

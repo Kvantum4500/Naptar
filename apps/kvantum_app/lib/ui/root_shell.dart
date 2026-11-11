@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
+import '../sync/sync_controller.dart';
 
 import 'finance/finance_page.dart';
 import 'home_page.dart';
@@ -24,6 +25,8 @@ class _RootShellState extends ConsumerState<RootShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _collectWallet();
+    // upkeep waits until the first screen is up
+    WidgetsBinding.instance.addPostFrameCallback((_) => _housekeeping());
   }
 
   @override
@@ -34,7 +37,24 @@ class _RootShellState extends ConsumerState<RootShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _collectWallet();
+    if (state == AppLifecycleState.resumed) {
+      _collectWallet();
+      // the midnight timer may have stood still while the device slept
+      ref.read(todayProvider.notifier).refresh();
+    }
+  }
+
+  /// Once a day: forgets old deletion markers and puts right what an
+  /// interrupted run left behind.
+  Future<void> _housekeeping() async {
+    try {
+      final report = await ref.read(housekeepingProvider).runIfDue();
+      if (report != null && report.requeued > 0 && mounted) {
+        ref.read(syncControllerProvider.notifier).requestSync();
+      }
+    } catch (_) {
+      // upkeep is a convenience; never let it disturb the app
+    }
   }
 
   /// Books the payment notifications collected while the app was closed.

@@ -13,7 +13,7 @@ import 'finance_tabs.dart';
 class FinMonth extends Notifier<DateTime> {
   @override
   DateTime build() {
-    final n = DateTime.now();
+    final n = ref.read(todayProvider);
     return DateTime.utc(n.year, n.month, 1);
   }
 
@@ -42,7 +42,7 @@ class _FinancePageState extends ConsumerState<FinancePage> {
   Future<void> _prepare() async {
     final repo = ref.read(financeRepoProvider);
     await repo.ensureDefaults();
-    final n = DateTime.now();
+    final n = ref.read(todayProvider);
     final prev = DateTime.utc(n.year, n.month - 1, 1);
     await repo.ensureRecurring(prev.year, prev.month);
     await repo.ensureRecurring(n.year, n.month);
@@ -373,7 +373,7 @@ class TransactionsTab extends ConsumerWidget {
       floatingActionButton: FloatingActionButton(
         tooltip: 'Új tétel',
         onPressed: () {
-          final n = DateTime.now();
+          final n = ref.read(todayProvider);
           final inMonth = month.year == n.year && month.month == n.month;
           editTx(
             context,

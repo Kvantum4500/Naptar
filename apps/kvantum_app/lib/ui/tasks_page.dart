@@ -7,11 +7,6 @@ import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'format.dart';
 
-DateTime _today() {
-  final n = DateTime.now();
-  return DateTime.utc(n.year, n.month, n.day);
-}
-
 const _priorityLabels = {1: 'Alacsony', 2: 'Normál', 3: 'Magas'};
 
 /// Tasks grouped by urgency; done tasks are collapsed at the bottom.
@@ -21,7 +16,7 @@ class TasksPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(tasksProvider).value ?? const <TaskView>[];
-    final today = _today();
+    final today = ref.watch(todayProvider);
     final overdue = [
       for (final t in tasks)
         if (t.isOverdue(today)) t,
@@ -226,7 +221,8 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
   }
 
   Future<void> _pickDue() async {
-    final init = _due ?? _today();
+    final today = ref.read(todayProvider);
+    final init = _due ?? today;
     final d = await showDatePicker(
       context: context,
       initialDate: DateTime(init.year, init.month, init.day),

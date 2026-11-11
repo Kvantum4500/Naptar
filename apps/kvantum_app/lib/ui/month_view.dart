@@ -23,7 +23,7 @@ class MonthView extends ConsumerWidget {
     final selected = ref.watch(selectedDayProvider);
     final occ = ref.watch(monthOccurrencesProvider).value ?? const {};
     final cells = monthGrid(month);
-    final today = DateTime.now();
+    final today = ref.watch(todayProvider);
     final scheme = Theme.of(context).colorScheme;
     final names = [
       for (var i = 0; i < 7; i++)
