@@ -670,7 +670,7 @@ void main() {
         await tester.tap(find.text('Kemény szabályok'));
         await tester.pumpAndSettle();
         expect(
-          find.textContaining('Alvási sáv'),
+          find.textContaining('Calisthenics, Gym, Street Workout'),
           findsOneWidget,
         ); // real bundled text
         await tester.enterText(
@@ -1344,7 +1344,7 @@ void main() {
       expect(find.text('Rendben, mikor?'), findsOneWidget);
       expect(
         llm.requests.first.turns.first.parts.whereType<LlmText>().single.text,
-        startsWith('Tervezz edzést a jövő hétre'),
+        endsWith('Kérés: Tervezz edzést a jövő hétre'),
       );
       await shutdown(tester, db);
     });

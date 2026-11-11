@@ -61,6 +61,12 @@ void main() {
 
   const settings = AiSettings();
 
+  /// All rows of an `esemenyek` tool result (grouped by day), flattened.
+  List<Map<String, Object?>> eventRows(Map<String, Object?> res) => [
+    for (final day in (res['esemenyek'] as Map).values)
+      ...(day as List).cast<Map<String, Object?>>(),
+  ];
+
   Future<void> meeting(
     String id,
     DateTime start,
@@ -115,14 +121,11 @@ void main() {
         .whereType<LlmToolResult>()
         .map((r) => r.result)
         .toList();
-    expect((data[0]['feladatok'] as List).single['cim'], 'Beadandó');
-    expect((data[1]['napok'] as List).single['fizikai'], 4);
-    final slots = (lastResults(llm)[0]['idosavok'] as List)
-        .cast<Map<String, Object?>>();
-    expect(slots.map((s) => '${s['kezdes']}-${s['veg']}'), [
-      '07:00-11:45',
-      '13:15-23:00',
-    ]);
+    expect((data[0]['feladatok'] as List).single['c'], 'Beadandó');
+    expect((data[1]['napok'] as List).single['f'], 4);
+    expect(lastResults(llm)[0]['idosavok'], {
+      '2026-05-05': '07:00-11:45 13:15-23:00',
+    });
   });
 
   test(
@@ -342,12 +345,7 @@ void main() {
         expect(everything.contains(secret), isFalse, reason: secret);
       }
       // slots contain the 18:00 hour although the user is busy then (events not shared) ...
-      final slots = (r[3]['idosavok'] as List).cast<Map<String, Object?>>();
-      expect(slots.single, {
-        'nap': '2026-05-05',
-        'kezdes': '07:00',
-        'veg': '23:00',
-      });
+      expect(r[3]['idosavok'], {'2026-05-05': '07:00-23:00'});
       expect(r[3]['megjegyzes'], contains('nem láthatók'));
       // ... and the clash is still rejected locally
       expect(out.hasPlan, isFalse);
@@ -378,12 +376,14 @@ void main() {
           (_) => say('ok'),
         ]);
         await service(llm).ask('x', model: 'm', settings: settings);
-        final ev = (lastResults(llm).single['esemenyek'] as List)
-            .cast<Map<String, Object?>>();
-        expect(ev.map((e) => e['cim']), [
+        final res = lastResults(llm).single;
+        final ev = eventRows(res);
+        expect(ev.map((e) => e['c']), [
           'Közeli',
         ]); // 60-day cap excludes September
-        expect(ev.single['kezdes'], '09:00');
+        expect((res['esemenyek'] as Map).keys, ['2026-05-06']);
+        expect(ev.single['k'], '09:00');
+        expect(ev.single['v'], '10:00');
       },
     );
 
@@ -398,9 +398,9 @@ void main() {
       ]);
       await service(llm).ask('x', model: 'm', settings: settings);
       final r = lastResults(llm);
-      expect(r[0]['adat_tipus'], 'esemenyek');
-      expect(r[1]['adat_tipus'], 'check_in');
-      expect(r[2]['adat_tipus'], 'szabad_idosavok');
+      expect(r[0], contains('esemenyek'));
+      expect(r[1], contains('napok'));
+      expect(r[2], contains('idosavok'));
     });
   });
 
@@ -427,7 +427,14 @@ void main() {
       expect(out.calls, 1);
       final first =
           (llm.requests.single.turns.first.parts.single as LlmText).text;
-      expect(first, startsWith('Tervezz edzést'));
+      // data first, then the clock, the user's own words LAST
+      expect(first, endsWith('Kérés: Tervezz edzést'));
+      expect(first, contains('MOST: 2026-05-04 10:00'));
+      expect(
+        first.indexOf('<adat tipus="szabad_idosavok">'),
+        lessThan(first.indexOf('MOST:')),
+      );
+      expect(first.indexOf('MOST:'), lessThan(first.indexOf('Kérés:')));
       for (final block in [
         'esemenyek',
         'feladatok',
@@ -438,9 +445,9 @@ void main() {
       }
       expect(first, contains('Fogorvos'));
       expect(first, contains('Beadandó'));
-      expect(first, contains('"fizikai":4'));
+      expect(first, contains('"f":4'));
       // the free slots already respect the meeting (12:00-13:00 +- 15 min)
-      expect(first, contains('"kezdes":"07:00","veg":"11:45"'));
+      expect(first, contains('"2026-05-05":"07:00-11:45 13:15-23:00"'));
       // and the system prompt still has no calendar data
       expect(llm.requests.single.system.contains('Fogorvos'), isFalse);
     });
@@ -687,13 +694,13 @@ void main() {
       final a = FakeLlm([(_) => say('ok')]);
       await service(a).ask('Tervezz edzést', model: 'm', settings: settings);
       expect(firstOf(a).contains('Távoli találkozó'), isFalse);
-      expect(firstOf(a), contains('következő 7 napot'));
+      expect(firstOf(a), contains('7 nap (2026-05-04 – 2026-05-10)'));
 
       final b = FakeLlm([(_) => say('ok')]);
       await service(b)
           .ask('Tervezz edzést két hétre', model: 'm', settings: settings);
       expect(firstOf(b), contains('Távoli találkozó'));
-      expect(firstOf(b), contains('következő 14 napot'));
+      expect(firstOf(b), contains('14 nap (2026-05-04 – 2026-05-17)'));
     });
 
     test(
@@ -719,7 +726,7 @@ void main() {
             .ask('töröld a fogorvost', model: 'm', settings: settings);
         final first = firstOf(llm);
         expect(first.contains('a-very-long-event-id'), isFalse);
-        expect(first, contains('"ref":"e1"'));
+        expect(first, contains('"r":"e1"'));
         expect(out.deletions.single.occurrence.title, 'Fogorvos');
       },
     );
@@ -778,19 +785,17 @@ void main() {
       );
     }
 
-    test(
-      'events are labelled kezi / muszak / ai in the first message',
-      () async {
-        await seed();
-        final llm = FakeLlm([(_) => say('ok')]);
-        await service(llm).ask('töröld', model: 'm', settings: settings);
-        final first =
-            (llm.requests.first.turns.first.parts.single as LlmText).text;
-        expect(first, contains('"forras":"kezi"'));
-        expect(first, contains('"forras":"muszak"'));
-        expect(first, contains('"forras":"ai"'));
-      },
-    );
+    test('events carry their source in the first message: shift m, earlier AI a, typed in none', () async {
+      await seed();
+      final llm = FakeLlm([(_) => say('ok')]);
+      await service(llm).ask('töröld', model: 'm', settings: settings);
+      final first =
+          (llm.requests.first.turns.first.parts.single as LlmText).text;
+      expect(first, contains('"c":"Nappali műszak","f":"m"'));
+      expect(first, contains('"c":"Futás","f":"a"'));
+      // a typed-in event has no source flag at all
+      expect(first, contains('"c":"Fogorvos"}'));
+    });
 
     test('a generated shift is never offered for deletion', () async {
       await seed();
@@ -814,8 +819,7 @@ void main() {
                 .whereType<LlmToolResult>()
                 .single
                 .result;
-            final list = (res['esemenyek'] as List).cast<Map>();
-            final byTitle = {for (final e in list) e['cim']: e['ref']};
+            final byTitle = {for (final e in eventRows(res)) e['c']: e['r']};
             return calls([
               tool('propose_events', {
                 'deletions': [
@@ -851,9 +855,8 @@ void main() {
                 .whereType<LlmToolResult>()
                 .single
                 .result;
-            final ref = (res['esemenyek'] as List).cast<Map>().firstWhere(
-              (e) => e['cim'] == 'Futás',
-            )['ref'];
+            final ref = eventRows(res)
+                .firstWhere((e) => e['c'] == 'Futás')['r'];
             return calls([
               tool('propose_events', {
                 'deletions': [
@@ -1161,7 +1164,10 @@ void main() {
           names.any((n) => n.contains('save') || n.contains('delete')),
           isFalse,
         );
-        expect(llm.requests.first.system, contains('nem tudod felvenni'));
+        expect(
+          llm.requests.first.system,
+          contains('pénzügyi tételt nem veszel fel'),
+        );
       },
     );
   });
@@ -1314,17 +1320,45 @@ void main() {
       },
     );
 
-    test('the task data carries ids the model can refer to', () async {
-      await records.edit(kindTask, 't9', taskFields(title: 'Számla'));
-      final llm = FakeLlm([
-        (_) => calls([tool('get_tasks')]),
-        (_) => calls([
-          propose([item('Séta', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
-        ]),
-      ]);
-      await service(llm).ask('Mi vár rám?', model: 'm', settings: settings);
-      final r = lastResults(llm)[0];
-      expect((r['feladatok'] as List).single['azonosito'], 't9');
-    });
+    test(
+      'tasks are shown under short ids; the block gets the real task back',
+      () async {
+        const longId = 'a-very-long-task-record-id-0123456789';
+        await records.edit(
+          kindTask,
+          longId,
+          taskFields(title: 'Számla', estimateMin: 60),
+        );
+        final llm = FakeLlm([
+          (_) => calls([tool('get_tasks')]),
+          (_) => calls([
+            propose([
+              {
+                ...item(
+                  'Számla befizetése',
+                  '2026-05-05T18:00:00',
+                  '2026-05-05T19:00:00',
+                  kind: 'task',
+                ),
+                'taskId': ' T1 ',
+              },
+            ]),
+          ]),
+        ]);
+        final out = await service(llm)
+            .ask('Mi vár rám?', model: 'm', settings: settings);
+        final task = (lastResults(llm)[0]['feladatok'] as List).single as Map;
+        expect(task['t'], 't1');
+        expect(task['c'], 'Számla');
+        // the long record id never reaches the model ...
+        final first =
+            (llm.requests.first.turns.first.parts.single as LlmText).text;
+        expect(first.contains(longId), isFalse);
+        // ... and the proposal is linked to the real task again
+        expect(out.items.single.taskId, longId);
+        expect(out.items.single.taskTitle, 'Számla');
+        expect(out.items.single.taskEstimateMin, 60);
+      },
+    );
   });
 }

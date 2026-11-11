@@ -31,8 +31,11 @@ class ProposalItem {
   final int? taskEstimateMin;
   final int? taskEnergy;
 
+  /// Fills in the details of the real task. [id] replaces the id the model
+  /// named (a short alias such as `t1`) with the real record id.
   ProposalItem withTask({
     required String title,
+    String? id,
     DateTime? due,
     int? estimateMin,
     int? energy,
@@ -44,7 +47,7 @@ class ProposalItem {
     kind: kind,
     hard: hard,
     reason: reason,
-    taskId: taskId,
+    taskId: id ?? taskId,
     taskTitle: title,
     taskDue: due,
     taskEstimateMin: estimateMin,

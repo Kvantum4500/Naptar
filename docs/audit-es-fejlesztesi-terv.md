@@ -380,3 +380,16 @@ Tesztek: mag 194 (volt 173), app 441 (volt 405), az elemzők tiszták. Minden ja
 A Windows- és az Android-build is sikeres volt (a Kotlin-kód lefordult, az APK aláírt), de a **kiadás lépése** `Resource not accessible by integration` (403) hibával elbukott, kétszer is (újrafuttatva is). A token jogai (`Contents: write`), a runner és az action-verzió megegyezett a sikeres Build 33-éval. Az egyetlen különbség: ez volt az első build, amelynek workflow-fájljai (`build.yml`, `ci.yml`) eltértek a `main`-étől; a korábbi munkaági buildeké azonos volt, és a `main`-en a build-13 (amely a workflow-fájlokat adta a `main`-hez) sikerült. **Az ok nem bizonyított**, de a munkaág workflow-fájljait visszaállítottam a `main` változatára, és a következő build ezzel indul.
 
 **Tanulság:** a workflow-fájlok módosítását külön lépésben kell a `main`-be juttatni (külön PR, `[build]` nélkül), és csak utána szabad rájuk épülő munkaági buildet indítani. A CI-szigorítás (előzetes csatorna, Flutter-rögzítés, jogosultságok) ezen az úton jön vissza.
+
+### 2a (kisebb asszisztens-kérés) – kész, a build után kipróbálandó
+
+Tesztek: mag 214 (volt 194), app 466 (volt 441), az elemzők és a formázás tiszták. A mérés a `test/token_budget_test.dart`-ban fut (rögzített mintanaptár, a ténylegesen mellékelt kézikönyv, 3 karakter = 1 token). Az új tesztek 12 szándékos elrontással (más sorrend, minden kérés ugyanazt az eszközlistát kapja, a törlés is a teljes kézikönyvet kapja, hivatkozás a tervezésben, a régi alapszöveg „testreszabott” marad, a feladat-alias nem fejtődik vissza, az alapértékek kiíródnak, az időjárás-sor mindig kiír mindent …) próbára téve: mindegyiket elkapják.
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| AI-2, AI-20 | kész | a kézikönyv alapszövegei átírva, ismétlés nélkül; `compactHandbook` kiszedi a sablonsorokat; régi alapszövegek felismerése (SHA-1) |
+| AI-8 | kész | nincs óra a rendszerpromptban; adat → idő → kérés |
+| AI-14 (rész) | kész | eszközök a kérés fajtája szerint; a hatókör-felismerés javítása (ékezet, tagadás, vegyes kérés) a 2d-ben marad |
+| AI-21, AI-25 | részben | a tömör alak mindenhol; a „cím csak műszak/AI/egész napos esetén” és a tanult szokások korlátja a 2c/2d-ben |
+| token-cél | teljesült, becsléssel | terv ≈ 3,0 k (cél ≤ 3,2 k), törlés ≈ 1,3 k (cél ≤ 2,2 k), állandó rész ≈ 2,05 k (cél ≤ 2,3 k), pénz ≈ 0,5 k. A „pénz helyi válasz = 0” a 2d-ben jön. |
+| **Eltérés a tervtől** | | A rendszerprompt a kérés fajtája szerint három változatú (terv / törlés-áthelyezés / pénz); a terv azt írta, hogy minden kérésnél bájtra azonos. Azonos fajtájú kérések között az (cache-barát), a különböző fajták között nem; a törlés és a pénzügyi kérdés így lényegesen kisebb. |

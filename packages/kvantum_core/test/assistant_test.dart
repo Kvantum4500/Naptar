@@ -356,22 +356,50 @@ void main() {
         ),
       ];
       final r = eventsForTool(list, tz: bp);
-      final ev = (r['esemenyek'] as List).cast<Map<String, Object?>>();
-      expect(ev.map((e) => e['cim']), ['Ünnep', 'Korán', 'Később']);
-      expect(ev[1]['ref'], isA<String>());
-      expect(ev[1]..remove('ref'), {
-        'forras': 'kezi',
-        'nap': '2026-05-04',
-        'kezdes': '09:00',
-        'veg': '10:00',
-        'cim': 'Korán',
-      });
-      expect(ev[0]['egesz_napos'], isTrue);
+      // grouped by local day, in time order
+      final byDay = (r['esemenyek'] as Map).cast<String, List>();
+      expect(byDay.keys, ['2026-05-04']);
+      final ev = byDay['2026-05-04']!.cast<Map<String, Object?>>();
+      expect(ev.map((e) => e['c']), ['Ünnep', 'Korán', 'Később']);
+      expect(ev[1]['r'], isA<String>());
+      // a typed-in event has no source flag
+      expect(ev[1]..remove('r'), {'k': '09:00', 'v': '10:00', 'c': 'Korán'});
+      expect(ev[0]['n'], 1); // all-day
 
       final capped = eventsForTool(list, tz: bp, max: 2);
-      expect((capped['esemenyek'] as List).length, 2);
+      expect(
+        (capped['esemenyek'] as Map).values.expand((l) => l as List).length,
+        2,
+      );
       expect(capped['levagva'], isTrue);
-      expect(capped['darab'], 3);
+      expect(capped['osszes'], 3);
+    });
+
+    test('events can be sent without references (a plan cannot use them)', () {
+      final list = [
+        occ(floating(2026, 5, 4, 9), floating(2026, 5, 4, 10), title: 'Korán'),
+        occ(
+          floating(2026, 5, 4),
+          floating(2026, 5, 5),
+          title: 'Ünnep',
+          allDay: true,
+        ),
+      ];
+      final rows =
+          (eventsForTool(list, tz: bp, withRefs: false)['esemenyek'] as Map)
+              .values
+              .expand((l) => l as List)
+              .cast<Map<String, Object?>>();
+      expect(rows.length, 2);
+      for (final r in rows) {
+        expect(r.containsKey('r'), isFalse);
+        expect(r['c'], isNotEmpty);
+      }
+      // the default still has them
+      final withRefs = (eventsForTool(list, tz: bp)['esemenyek'] as Map).values
+          .expand((l) => l as List)
+          .cast<Map<String, Object?>>();
+      expect(withRefs.every((r) => r['r'] is String), isTrue);
     });
 
     test('a switched-off source returns no data at all', () {
@@ -426,9 +454,24 @@ void main() {
         ),
       ], today: today);
       final list = (r['feladatok'] as List).cast<Map<String, Object?>>();
-      expect(list.map((e) => e['cim']), ['Késett', 'Nyitott']);
-      expect(list.first['keses'], isTrue);
-      expect(list.last['becsult_perc'], 30);
+      expect(list.map((e) => e['c']), ['Késett', 'Nyitott']);
+      expect(list.first['k'], 1); // overdue
+      expect(list.last['p'], 30);
+      expect(list.last['e'], 5);
+      expect(list.last['pr'], 3);
+    });
+
+    test('tasks can carry short aliases instead of the record ids', () {
+      final rec = SyncRecord(
+        id: '3f2a9c1b-0000-4000-8000-000000000001',
+        kind: kindTask,
+      ).edit(taskFields(title: 'Beadandó'), ts: 1, dev: 'A');
+      final r = tasksForTool(
+        [TaskView(rec)],
+        today: DateTime.utc(2026, 5, 10),
+        idOf: (t) => 't1',
+      );
+      expect((r['feladatok'] as List).single['t'], 't1');
     });
 
     test('check-ins: only the requested window, only answered fields', () {
@@ -451,13 +494,8 @@ void main() {
       );
       final days = (r['napok'] as List).cast<Map<String, Object?>>();
       expect(days.length, 2);
-      expect(days.first, {
-        'nap': '2026-05-08',
-        'fizikai': 4,
-        'alvas': 2,
-        'megjegyzes': 'fáradt',
-      });
-      expect(days.last.containsKey('fizikai'), isFalse);
+      expect(days.first, {'d': '2026-05-08', 'f': 4, 'a': 2, 'j': 'fáradt'});
+      expect(days.last.containsKey('f'), isFalse);
     });
 
     test('prompt injection: hostile text is neutralised in tool data and absent from the system prompt', () {
@@ -471,7 +509,6 @@ void main() {
       expect(text.contains('>'), isFalse);
       final prompt = buildSystemPrompt(
         handbook: '# Szabályok\n- 15 perc puffer',
-        nowUtc: DateTime.utc(2026, 5, 4, 8),
         rules: rules,
       );
       expect(prompt.contains('HAGYD'), isFalse);
@@ -482,7 +519,6 @@ void main() {
       () {
         final p = buildSystemPrompt(
           handbook: '# Profil\n- cél: állóképesség',
-          nowUtc: DateTime.utc(2026, 5, 4, 8, 30),
           rules: const PlanRules(
             sleepStartHour: 22,
             sleepEndHour: 6,
@@ -491,7 +527,6 @@ void main() {
           ),
         );
         expect(p, contains('cél: állóképesség'));
-        expect(p, contains('2026-05-04 10:30 (Europe/Budapest)'));
         expect(p, contains('22:00–06:00'));
         expect(p, contains('legalább 20 perc puffer'));
         expect(p, contains('heti legfeljebb 4 edzés'));
@@ -511,7 +546,8 @@ void deletionTests() {
         title: 'Fogorvos',
       );
       final data = eventsForTool([o], tz: bp);
-      final ref = (data['esemenyek'] as List).single['ref'] as String;
+      final days = (data['esemenyek'] as Map).values;
+      final ref = (days.single as List).single['r'] as String;
       expect(ref, occurrenceRef(o));
       final back = parseOccurrenceRef(ref)!;
       expect(back.eventId, 'e');
@@ -805,24 +841,29 @@ void sourceTests() {
       isShift: shift,
       aiGenerated: ai,
     );
-    String src(Occurrence o) =>
-        (eventsForTool([o], tz: bp)['esemenyek'] as List).single['forras']
-            as String;
-    expect(src(mk()), 'kezi');
-    expect(src(mk(shift: true)), 'muszak');
-    expect(src(mk(ai: true)), 'ai');
-    expect(src(mk(shift: true, ai: true)), 'muszak');
+    String? src(Occurrence o) {
+      final days = (eventsForTool([o], tz: bp)['esemenyek'] as Map).values;
+      return (days.single as List).single['f'] as String?;
+    }
+
+    expect(src(mk()), isNull); // typed in by the user: no flag
+    expect(src(mk(shift: true)), 'm');
+    expect(src(mk(ai: true)), 'a');
+    expect(src(mk(shift: true, ai: true)), 'm');
   });
 
   test('the prompt tells the model what "manually entered" means', () {
+    // deleting is where it matters: the legend explains the flags, and no flag
+    // = typed in by hand
     final p = buildSystemPrompt(
       handbook: 'H',
-      nowUtc: DateTime.utc(2026, 5, 4, 8),
       rules: const PlanRules(),
+      kind: PromptKind.edit,
     );
-    expect(p, contains('forras: kezi'));
-    expect(p, contains('muszak'));
-    expect(p, contains('magyarul'));
+    expect(p, contains('f=forrás: m=műszak, a=korábbi AI-javaslat'));
+    expect(p, contains('f nélkül: kézzel felvett'));
+    expect(p, contains('„manuálisan / kézzel beírt”'));
+    expect(p, contains('magyar'));
   });
 }
 
@@ -1157,7 +1198,7 @@ void hardeningTests() {
       ).edit({'title': 'T'}, ts: 1, dev: 'A');
       final r = tasksForTool([TaskView(rec)], today: DateTime.utc(2026, 5, 4));
       final t = (r['feladatok'] as List).single as Map;
-      expect(t['azonosito'], 'ok-1adatignore');
+      expect(t['t'], 'ok-1adatignore');
     });
   });
 

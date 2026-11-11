@@ -53,12 +53,18 @@ void main() {
   group('weatherForTool', () {
     test('a short Hungarian line per day; off means no data', () {
       final r = weatherForTool(parseOpenMeteoDaily(sample), place: 'Budapest');
-      expect(r['adat_tipus'], 'idojaras');
       expect(r['helyszin'], 'Budapest');
-      final first = (r['napok'] as List).first as Map;
-      expect(first['nap'], '2026-11-10');
-      expect(first['elorejelzes'], contains('csapadék 10%'));
-      expect(first['elorejelzes'], contains('3–9 °C'));
+      // one line per day, keyed by month-day
+      final days = r['napok'] as Map;
+      expect(days.keys.first, '11-10');
+      expect(days['11-10'], contains('3–9 °C'));
+      // a calm day is just the weather and the temperatures ...
+      expect(days['11-10'], isNot(contains('csapadék')));
+      expect(days['11-10'], isNot(contains('szél')));
+      // ... rain and wind show up when they matter
+      expect(days['11-11'], contains('csapadék 80%'));
+      expect(days['11-11'], contains('4.2 mm'));
+      expect(days['11-11'], contains('szél 33 km/h'));
       final off = weatherForTool(const [], place: 'x', enabled: false);
       expect(off['kikapcsolva'], isTrue);
       expect(off.containsKey('napok'), isFalse);

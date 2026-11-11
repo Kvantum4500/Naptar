@@ -36,7 +36,7 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 
 - **Idő:** falióra + IANA zóna (mint a Google); az ismétlődés falióra-időben fut (DST-biztos), az esemény időtartama valós eltelt idő.
 - **Duplikáció-védelem:** `reconcile()` sorrend: tárolt link → `appEventId` (saját írás visszhangja) → iCalUID → új.
-- **AI:** a modell csak javasol. Minden írás (új esemény, áthelyezés, törlés, megjegyzett szokás) külön gombnyomásra történik; a szabályokat (alvás, puffer, energia, műszak, időjárás, határidő) a `validateProposal` kóddal ellenőrzi. A modellnek szánt szöveg adatként, jelölt blokkban megy, tisztítva.
+- **AI:** a modell csak javasol. Minden írás (új esemény, áthelyezés, törlés, megjegyzett szokás) külön gombnyomásra történik; a szabályokat (alvás, puffer, energia, műszak, időjárás, határidő) a `validateProposal` kóddal ellenőrzi. A modellnek szánt szöveg adatként, jelölt blokkban megy, tisztítva. A kérés fajtája (terv / törlés-áthelyezés / pénzügyi kérdés) szabja meg, mennyi utasítást, adatot és hány eszközt kap a modell, hogy az ingyenes szintek percenkénti tokenkerete elég legyen.
 - **Adatok helye:** az események a Google Calendarban és a helyi adatbázisban; a feladatok, check-inek, kézikönyv a Drive `appDataFolder`-ben; a pénzügyi adat **helyben**, a gépek között rövid életű „levelekkel” (a megérkezett levél törlődik). A Drive-ban a pénzügyről nincs teljes másolat: a rendszeres mentés (Beállítások → Mentés) fontos.
 - **Titkok:** az eszköz biztonságos tárolójában (Windows DPAPI / Android Keystore); az API-kulcs csak fejlécben utazik; nincs telemetria, nincs naplózott kulcs.
 - **Android:** az automatikus (felhő-/eszközátvitel) mentés ki van kapcsolva; az adat a Google-fiókból és a többi eszközről áll helyre.

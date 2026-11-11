@@ -93,14 +93,19 @@ String weatherWord(int? code) {
 
 String _deg(double? v) => v == null ? '?' : v.round().toString();
 
+/// One short line per day. The chance of rain and the wind only appear when
+/// they matter (the limits of the outdoor rules are far above these), so a fine
+/// day is just "felhős, 8–17 °C".
 String _line(DayWeather w) {
   final parts = <String>[
     weatherWord(w.code),
     if (w.tMin != null || w.tMax != null) '${_deg(w.tMin)}–${_deg(w.tMax)} °C',
-    if (w.precipProb != null) 'csapadék ${w.precipProb}%',
+    if (w.precipProb != null && w.precipProb! >= 30)
+      'csapadék ${w.precipProb}%',
     if (w.precipMm != null && w.precipMm! >= 0.5)
       '${w.precipMm!.toStringAsFixed(w.precipMm! < 10 ? 1 : 0)} mm',
-    if (w.windMax != null) 'szél ${w.windMax!.round()} km/h',
+    if (w.windMax != null && w.windMax! >= 20)
+      'szél ${w.windMax!.round()} km/h',
   ].where((s) => s.isNotEmpty).toList();
   return parts.join(', ');
 }
@@ -117,14 +122,13 @@ Map<String, Object?> weatherForTool(
       'uzenet': 'A felhasználó nem engedi az időjárás használatát.',
     };
   }
-  String ymd(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  // MM-DD keys: the window is two weeks at most and the model never copies a
+  // weather date into its answer (events and slots carry the full dates).
+  String md(DateTime d) =>
+      '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   return {
-    'adat_tipus': 'idojaras',
     'helyszin': place,
-    'napok': [
-      for (final w in days) {'nap': ymd(w.day), 'elorejelzes': _line(w)},
-    ],
+    'napok': {for (final w in days) md(w.day): _line(w)},
   };
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../data/record_repository.dart';
+import 'handbook_legacy.dart';
 
 /// The handbook files (the assistant's rules, profile and relationships).
 const handbookFiles = <(String id, String title)>[
@@ -30,7 +31,11 @@ class HandbookStore {
     final r = await records.get(kindHandbook, id);
     if (r == null || r.deleted) return null;
     final t = r['text'];
-    return (t is String && t.trim().isNotEmpty) ? t : null;
+    if (t is! String || t.trim().isEmpty) return null;
+    // A copy that is just a retired default was never edited by the user:
+    // the current default applies.
+    if (isLegacyHandbookDefault(id, t)) return null;
+    return t;
   }
 
   Future<bool> isCustomized(String id) async => await _custom(id) != null;
@@ -81,13 +86,19 @@ class HandbookStore {
     return true;
   }
 
-  /// All files as one block for the system prompt.
-  Future<String> combined() async {
+  /// The files as one block for the system prompt, without the template lines
+  /// and decoration that only help while editing ([compactHandbook]); a file
+  /// with nothing left is left out altogether. With [only] just those files
+  /// (by id) are included: a request that deletes an event does not need the
+  /// training rules.
+  Future<String> combined({Set<String>? only}) async {
     final b = StringBuffer();
     for (final (id, title) in handbookFiles) {
-      b.writeln('### $title');
-      b.writeln((await textOf(id)).trim());
-      b.writeln();
+      if (only != null && !only.contains(id)) continue;
+      final body = compactHandbook(await textOf(id));
+      if (body.isEmpty) continue;
+      b.writeln('## $title');
+      b.writeln(body);
     }
     return b.toString().trim();
   }

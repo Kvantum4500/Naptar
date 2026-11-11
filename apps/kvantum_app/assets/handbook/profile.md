@@ -1,10 +1,8 @@
 # Profil (az AI innen dolgozik; a Kézikönyvben szerkesztheted)
-- Fő edzéstípusok (ezeket tervezheted): Calisthenics, Gym, Street Workout.
-- Hobbisportok (alkalmanként, évszaknak megfelelően): kajak, falmászás, kerékpározás, és hasonlók.
 - Célok: (pl. állóképesség, izomtömeg, erő)
 - Edzettségi szint: (kezdő / haladó)
 - Sérülések, korlátok:
 - Elérhető eszközök / helyszínek:
 - Preferált napszakok edzéshez:
-- Tipikus munkarend: váltóműszak (lásd a műszak-eseményeket)
+- Tipikus munkarend: 12 napos váltóműszak: 3 éjszaka (18–06), 3 szabad, 3 nappal (06–18), 3 szabad (lásd a műszak-eseményeket)
 - Időzóna: Europe/Budapest
