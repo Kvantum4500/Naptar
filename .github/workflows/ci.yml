@@ -2,12 +2,6 @@ name: CI
 on:
   push:
   pull_request:
-permissions:
-  contents: read
-# a newer push to the same ref makes the older run pointless
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   core:
     runs-on: ubuntu-latest
@@ -15,7 +9,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
-        with: { sdk: '3.13.7' }  # the Dart of Flutter 3.47.9
       - run: dart pub get
       - run: dart analyze
       - run: dart test
@@ -25,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { flutter-version: '3.47.9', channel: stable, cache: true }
+        with: { channel: stable, cache: true }
       - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
