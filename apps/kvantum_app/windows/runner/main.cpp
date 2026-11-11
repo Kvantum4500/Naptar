@@ -5,8 +5,46 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+namespace {
+
+// Marks a running copy of the app. "Local\" = per login session.
+constexpr wchar_t kSingleInstanceMutex[] = L"Local\\KvantumNaptar.SingleInstance";
+
+// The window class and title the runner creates (win32_window.cpp, below).
+constexpr wchar_t kWindowClass[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+constexpr wchar_t kWindowTitle[] = L"kvantum_app";
+
+// Brings the window of the copy that is already running to the front.
+void BringRunningInstanceToFront() {
+  HWND existing = ::FindWindowW(kWindowClass, kWindowTitle);
+  if (existing == nullptr) {
+    return;
+  }
+  if (::IsIconic(existing)) {
+    ::ShowWindow(existing, SW_RESTORE);
+  }
+  ::SetForegroundWindow(existing);
+}
+
+}  // namespace
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // One copy at a time: a second one would open the same database and the
+  // same sync state. The self-update starts the new copy before the old one
+  // has quite left, so a newcomer waits a little for the owner of the mutex
+  // before it decides that another copy is really running. The handle stays
+  // open (and owned) until the process ends. If the mutex cannot be created
+  // the app simply starts, as it always did.
+  HANDLE single_instance = ::CreateMutexW(nullptr, FALSE, kSingleInstanceMutex);
+  if (single_instance != nullptr) {
+    if (::WaitForSingleObject(single_instance, 3000) == WAIT_TIMEOUT) {
+      BringRunningInstanceToFront();
+      ::CloseHandle(single_instance);
+      return EXIT_SUCCESS;
+    }
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
