@@ -20,3 +20,4 @@ export 'src/time.dart';
 export 'src/weather.dart';
 export 'src/wallet_parser.dart';
 export 'src/week.dart';
+export 'src/workout.dart';

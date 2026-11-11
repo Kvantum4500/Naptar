@@ -27,6 +27,15 @@ const busyTitle = 'foglalt';
 /// From this length on a typed-in event keeps its title even when planning.
 const longEvent = Duration(hours: 4);
 
+/// Whether planning hides the title of [o] (shows [busyTitle]): a timed event
+/// the user typed in, shorter than [longEvent]. Shifts, the assistant's own
+/// suggestions, all-day events and long events keep theirs.
+bool titleHiddenWhenPlanning(Occurrence o) =>
+    !o.allDay &&
+    !o.isShift &&
+    !o.aiGenerated &&
+    o.endUtc.difference(o.startUtc) < longEvent;
+
 String _hm(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 String _ymd(DateTime d) =>
@@ -74,10 +83,7 @@ Map<String, Object?> eventsForTool(
   final sorted = [...events]..sort((a, b) => a.startUtc.compareTo(b.startUtc));
   final days = <String, List<Map<String, Object?>>>{};
   String titleOf(Occurrence o) {
-    if (hideTitles &&
-        !o.allDay &&
-        _sourceFlag(o) == null &&
-        o.endUtc.difference(o.startUtc) < longEvent) {
+    if (hideTitles && titleHiddenWhenPlanning(o)) {
       onHidden?.call(o.title);
       return busyTitle;
     }
@@ -556,9 +562,9 @@ String buildSystemPrompt({
         [
           'Alvási sáv: ${hh(rules.sleepStartHour)}:00–${hh(rules.sleepEndHour)}:00; ekkor semmit nem tervezel.',
           'Események között legalább ${rules.bufferMinutes} perc puffer.',
-          'Műszak (f: m) előtt és után ${rules.shiftBufferHours} órán belül nehéz edzés nincs.',
-          'Check-in nélküli napra közepes energiát (3/5) feltételezel, csak könnyű edzést javasolsz, és jelzed az indoklásban.',
-          'Nehéz edzés csak ${rules.minEnergyForHard}/5 vagy magasabb fizikai energiánál; nehéz edzések között legalább ${rules.minHoursBetweenHard} óra; heti legfeljebb ${rules.maxWorkoutsPerWeek} edzés.',
+          'Műszak (f: m) előtt és után ${rules.shiftBufferHours} órán belül ${rules.shiftBufferFromMinutes} perces vagy hosszabb edzés nincs.',
+          'Nehéz edzés: ${rules.hardFromMinutes} perctől (a „könnyű”, „nyújtás”, „mobilitás” című mindig könnyű); csak ${rules.minEnergyForHard}/5 vagy magasabb fizikai energiánál; nehéz edzések között legalább ${rules.minHoursBetweenHard} óra; heti legfeljebb ${rules.maxWorkoutsPerWeek} edzés (a naptárban lévőket is számítva).',
+          'Check-in nélküli napra ${rules.assumedEnergy}/5 fizikai energiát feltételezel; nehéz edzésnél ezt jelezd az indoklásban.',
         ],
       );
   }

@@ -1107,13 +1107,28 @@ class AssistantService {
         // events the user is asked to delete do not block the new plan
         if (!doomed.contains(occurrenceRef(o))) o,
     ];
+    // The rules look further than the data window (the weeks and the 48 hours
+    // around the proposal): a typed-in event found there is "foglalt" in what
+    // goes back to the model as well, though the model never saw it.
+    if (!_editIntent) {
+      for (final o in existing) {
+        if (titleHiddenWhenPlanning(o)) {
+          _hiddenTitles
+            ..add(o.title)
+            ..add(sanitizeText(o.title, max: 300));
+        }
+      }
+    }
     final energy = await _energyByDate();
     final forecast = await _forecastFor(_settings);
     final weatherByDate = {
       for (final w in forecast ?? <DayWeather>[]) w.day: w,
     };
     List<Violation> check(List<ProposalItem> items) => validateProposal(
-      [for (final i in items) i.toBlock()],
+      [
+        for (final i in items)
+          i.toBlock(hardFromMinutes: rules.hardFromMinutes),
+      ],
       existing: existing,
       rules: rules,
       energyByDate: energy,
@@ -1438,15 +1453,29 @@ class AssistantService {
     return keep;
   }
 
+  /// What the rules compare a proposal with: the day before and after (buffer,
+  /// shifts), 48 hours around it (rest between hard sessions) and the whole
+  /// ISO weeks it touches (the weekly workout cap counts what is booked).
   Future<List<Occurrence>> _existingAround(List<ProposalItem> items) {
     var from = items.first.startUtc, to = items.first.endUtc;
     for (final i in items) {
       if (i.startUtc.isBefore(from)) from = i.startUtc;
       if (i.endUtc.isAfter(to)) to = i.endUtc;
     }
+    final a = toWallClock(_tz, from), b = toWallClock(_tz, to);
+    final monday = resolveWallClock(
+      _tz,
+      floating(a.year, a.month, a.day).subtract(Duration(days: a.weekday - 1)),
+    );
+    final nextMonday = resolveWallClock(
+      _tz,
+      floating(b.year, b.month, b.day).add(Duration(days: 8 - b.weekday)),
+    );
+    final near = from.subtract(const Duration(days: 2));
+    final far = to.add(const Duration(days: 2));
     return events.occurrences(
-      from.subtract(const Duration(days: 1)),
-      to.add(const Duration(days: 1)),
+      monday.isBefore(near) ? monday : near,
+      nextMonday.isAfter(far) ? nextMonday : far,
     );
   }
 

@@ -312,45 +312,77 @@ void main() {
       for (final d in [4, 5, 6, 7, 8, 9, 10]) floating(2026, 5, d): 4,
     };
 
-    test('a hard session close to a shift is rejected, a light one is not', () {
-      final night = shift(4, 18, 12); // 4 May 18:00 -> 5 May 06:00
-      // 13:00-14:00 on 5 May is only 7 h after the shift ended (needs 8)
-      final close = validateProposal(
-        [block(5, 13, hard: true)],
-        existing: [night],
-        rules: rules,
-        energyByDate: energy4,
-      );
-      expect(close.map((v) => v.code), contains('shift_rest'));
-      final light = validateProposal(
-        [block(5, 13)],
-        existing: [night],
-        rules: rules,
-        energyByDate: energy4,
-      );
-      expect(light, isEmpty);
-      // 8 h after the end is fine
-      final ok = validateProposal(
-        [block(5, 15, hard: true)],
-        existing: [night],
-        rules: rules,
-        energyByDate: energy4,
-      );
-      expect(ok.map((v) => v.code), isNot(contains('shift_rest')));
-    });
+    test(
+      'a workout close to a shift is rejected, a short light one is not',
+      () {
+        final night = shift(4, 18, 12); // 4 May 18:00 -> 5 May 06:00
+        // 13:00-14:00 on 5 May is only 7 h after the shift ended (needs 8)
+        final close = validateProposal(
+          [block(5, 13, hard: true)],
+          existing: [night],
+          rules: rules,
+          energyByDate: energy4,
+        );
+        expect(close.map((v) => v.code), contains('shift_rest'));
+        // an hour of training keeps the distance too, hard or not (45 min or more)
+        final notHard = validateProposal(
+          [block(5, 13)],
+          existing: [night],
+          rules: rules,
+          energyByDate: energy4,
+        );
+        expect(notHard.map((v) => v.code), ['shift_rest']);
+        // half an hour of easy movement does not need it
+        final light = validateProposal(
+          [
+            ProposedBlock(
+              title: 'könnyű mozgás',
+              startUtc: resolveWallClock(bp, floating(2026, 5, 5, 13)),
+              endUtc: resolveWallClock(bp, floating(2026, 5, 5, 13, 30)),
+            ),
+          ],
+          existing: [night],
+          rules: rules,
+          energyByDate: energy4,
+        );
+        expect(light, isEmpty);
+        // 8 h after the end is fine
+        final ok = validateProposal(
+          [block(5, 15, hard: true)],
+          existing: [night],
+          rules: rules,
+          energyByDate: energy4,
+        );
+        expect(ok.map((v) => v.code), isNot(contains('shift_rest')));
+      },
+    );
 
-    test('without a check-in only light sessions are allowed', () {
-      final hard = validateProposal(
-        [block(5, 18, hard: true)],
-        existing: [],
-        rules: rules,
-      );
-      expect(hard.map((v) => v.code), ['no_data_hard']);
-      expect(
-        validateProposal([block(5, 18)], existing: [], rules: rules),
-        isEmpty,
-      );
-    });
+    test(
+      'without a check-in the day is taken as 3/5 (see workout_rules_test)',
+      () {
+        // (every planned day lacks a check-in, so the old "light only" rule
+        // would have forbidden every hard session of a plan)
+        expect(
+          validateProposal(
+            [block(5, 18, hard: true)],
+            existing: [],
+            rules: rules,
+          ),
+          isEmpty,
+        );
+        // with a higher minimum the old, strict behaviour comes back
+        final strict = validateProposal(
+          [block(5, 18, hard: true)],
+          existing: [],
+          rules: const PlanRules(minEnergyForHard: 4),
+        );
+        expect(strict.map((v) => v.code), ['no_data_hard']);
+        expect(
+          validateProposal([block(5, 18)], existing: [], rules: rules),
+          isEmpty,
+        );
+      },
+    );
 
     test('a custom sleep window (day sleeper) moves the forbidden hours', () {
       const dayShift = PlanRules(sleepStartHour: 8, sleepEndHour: 16);

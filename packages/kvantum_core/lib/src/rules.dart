@@ -2,6 +2,7 @@ import 'event.dart';
 import 'text_safety.dart';
 import 'time.dart';
 import 'weather.dart';
+import 'workout.dart';
 
 /// Hard constraints the AI may never violate. Enforced in code, not by prompt.
 class PlanRules {
@@ -12,6 +13,9 @@ class PlanRules {
     this.minHoursBetweenHard = 48,
     this.maxWorkoutsPerWeek = 5,
     this.minEnergyForHard = 3,
+    this.assumedEnergy = 3,
+    this.hardFromMinutes = 60,
+    this.shiftBufferFromMinutes = 45,
     this.shiftBufferHours = 8,
     this.tzid = 'Europe/Budapest',
   });
@@ -22,7 +26,22 @@ class PlanRules {
   final int maxWorkoutsPerWeek;
   final int minEnergyForHard; // 1..5 physical energy
 
-  /// A hard session may not start/end this close to a shift.
+  /// The physical energy taken for a day without a check-in (a check-in exists
+  /// only for today and the past, so every planned day lacks one). A hard
+  /// session needs [minEnergyForHard]: with the defaults (3 and 3) a day
+  /// without data is allowed, and raising the minimum to 4 makes such days
+  /// light-only again.
+  final int assumedEnergy;
+
+  /// A workout of this many minutes or more is a hard one (unless its title
+  /// says it is light: "könnyű", "nyújtás", "mobilitás" …).
+  final int hardFromMinutes;
+
+  /// A workout of this many minutes or more keeps the distance from a shift too.
+  final int shiftBufferFromMinutes;
+
+  /// A hard session (or a workout of [shiftBufferFromMinutes]) may not
+  /// start/end this close to a shift.
   final int shiftBufferHours;
   final String tzid;
 }
@@ -113,8 +132,9 @@ List<Violation> validateProposal(
     // Sleep window (in the user's zone).
     final s = toWallClock(rules.tzid, b.startUtc);
     final e = toWallClock(rules.tzid, b.endUtc);
-    if (_inSleep(s, rules) ||
-        _inSleep(e.subtract(const Duration(minutes: 1)), rules)) {
+    // (any overlap counts: a block that spans the whole night starts and ends
+    // outside the sleep window and still takes the sleep away)
+    if (_touchesSleep(s, e, rules)) {
       v.add(Violation('sleep_window', '„${b.title}” az alvási sávba esik'));
     }
     // Overlap + buffer with existing events (all-day events do not block).
@@ -152,10 +172,10 @@ List<Violation> validateProposal(
         );
       }
     }
-    // Energy gate for hard sessions.
-    if (b.isHard) {
-      final day = floating(s.year, s.month, s.day);
-      final energy = energyByDate[day];
+    // A hard session, and any workout of 45 minutes or more, keeps its
+    // distance from a shift.
+    final minutes = b.endUtc.difference(b.startUtc).inMinutes;
+    if (b.isHard || (b.isWorkout && minutes >= rules.shiftBufferFromMinutes)) {
       final rest = Duration(hours: rules.shiftBufferHours);
       for (final x in existing.where((x) => x.isShift && !x.allDay)) {
         if (b.startUtc.isBefore(x.endUtc.add(rest)) &&
@@ -163,26 +183,31 @@ List<Violation> validateProposal(
           v.add(
             Violation(
               'shift_rest',
-              '„${b.title}” nehéz edzés, de a műszakhoz (${x.title}) túl közel van (előtte és utána legalább ${rules.shiftBufferHours} óra kell)',
+              '„${b.title}” ${b.isHard ? 'nehéz ' : ''}edzés, de a műszakhoz (${x.title}) túl közel van (előtte és utána legalább ${rules.shiftBufferHours} óra kell)',
             ),
           );
           break;
         }
       }
-      if (energy == null) {
+    }
+    // Energy gate for hard sessions. A day without a check-in (every planned
+    // day) is taken as [PlanRules.assumedEnergy].
+    if (b.isHard) {
+      final day = floating(s.year, s.month, s.day);
+      final known = energyByDate[day];
+      final energy = known ?? rules.assumedEnergy;
+      if (energy < rules.minEnergyForHard) {
+        final date = day.toIso8601String().substring(0, 10);
         v.add(
-          Violation(
-            'no_data_hard',
-            '„${b.title}” nehéz edzés, de ${day.toIso8601String().substring(0, 10)}-ra nincs check-in; check-in nélkül csak könnyű edzés javasolható',
-          ),
-        );
-      }
-      if (energy != null && energy < rules.minEnergyForHard) {
-        v.add(
-          Violation(
-            'low_energy',
-            '„${b.title}” nehéz edzés, de a fizikai energia ${day.toIso8601String().substring(0, 10)}-n csak $energy/5 (legalább ${rules.minEnergyForHard} kell)',
-          ),
+          known == null
+              ? Violation(
+                  'no_data_hard',
+                  '„${b.title}” nehéz edzés, de $date-ra nincs check-in (${rules.assumedEnergy}/5 energiát feltételezve), a nehézhez legalább ${rules.minEnergyForHard}/5 kell',
+                )
+              : Violation(
+                  'low_energy',
+                  '„${b.title}” nehéz edzés, de a fizikai energia $date-n csak $known/5 (legalább ${rules.minEnergyForHard} kell)',
+                ),
         );
       }
     }
@@ -242,34 +267,71 @@ List<Violation> validateProposal(
     }
   });
 
-  // Rest between hard sessions.
-  final hard = sorted.where((b) => b.isHard).toList();
-  for (var i = 1; i < hard.length; i++) {
-    final gap = hard[i].startUtc.difference(hard[i - 1].endUtc);
+  // The workouts already in the calendar (typed in, or an earlier plan) count
+  // as much as the proposed ones: for the rest between hard sessions and for
+  // the weekly cap. Shifts and all-day events are never workouts.
+  final booked = [
+    for (final x in existing)
+      if (!x.allDay && !x.isShift && isWorkoutTitle(x.title)) x,
+  ];
+
+  // Rest between hard sessions: every pair of neighbours of which at least one
+  // is proposed (what is already booked is not judged again).
+  final line = <({DateTime start, DateTime end, String title, bool planned})>[
+    for (final b in sorted.where((b) => b.isHard))
+      (start: b.startUtc, end: b.endUtc, title: b.title, planned: true),
+    for (final x in booked)
+      if (isHardWorkout(
+        title: x.title,
+        length: x.endUtc.difference(x.startUtc),
+        fromMinutes: rules.hardFromMinutes,
+      ))
+        (start: x.startUtc, end: x.endUtc, title: x.title, planned: false),
+  ]..sort((a, b) => a.start.compareTo(b.start));
+  for (var i = 1; i < line.length; i++) {
+    final a = line[i - 1], b = line[i];
+    if (!a.planned && !b.planned) continue;
+    final gap = b.start.difference(a.end);
+    // (an overlap with something booked is a 'conflict' already)
+    if (gap < Duration.zero && (!a.planned || !b.planned)) continue;
     if (gap < Duration(hours: rules.minHoursBetweenHard)) {
       v.add(
         Violation(
           'rest',
-          'Két nehéz edzés között legalább ${rules.minHoursBetweenHard} óra kell',
+          a.planned && b.planned
+              ? 'Két nehéz edzés között legalább ${rules.minHoursBetweenHard} óra kell'
+              : 'Két nehéz edzés között legalább ${rules.minHoursBetweenHard} óra kell („${a.title}” és „${b.title}”)',
         ),
       );
     }
   }
 
-  // Weekly workout cap (ISO week, user zone).
+  // Weekly workout cap (ISO week, user zone), for the weeks the proposal
+  // touches: the proposed workouts plus the booked ones.
+  String weekOf(DateTime utc) {
+    final w = toWallClock(rules.tzid, utc);
+    final monday = w.subtract(Duration(days: w.weekday - 1));
+    return '${monday.year}-${monday.month}-${monday.day}';
+  }
+
   final perWeek = <String, int>{};
   for (final b in sorted.where((b) => b.isWorkout)) {
-    final w = toWallClock(rules.tzid, b.startUtc);
-    final monday = w.subtract(Duration(days: w.weekday - 1));
-    final key = '${monday.year}-${monday.month}-${monday.day}';
-    perWeek[key] = (perWeek[key] ?? 0) + 1;
+    final k = weekOf(b.startUtc);
+    perWeek[k] = (perWeek[k] ?? 0) + 1;
   }
-  perWeek.forEach((k, n) {
+  final bookedPerWeek = <String, int>{};
+  for (final x in booked) {
+    final k = weekOf(x.startUtc);
+    if (perWeek.containsKey(k)) bookedPerWeek[k] = (bookedPerWeek[k] ?? 0) + 1;
+  }
+  perWeek.forEach((k, planned) {
+    final already = bookedPerWeek[k] ?? 0;
+    final n = planned + already;
     if (n > rules.maxWorkoutsPerWeek) {
       v.add(
         Violation(
           'weekly_cap',
-          '$n edzés a(z) $k-i hétre (legfeljebb ${rules.maxWorkoutsPerWeek} megengedett)',
+          '$n edzés a(z) $k-i hétre (legfeljebb ${rules.maxWorkoutsPerWeek} megengedett${already > 0 ? '; ebből $already már a naptárban van' : ''})',
         ),
       );
     }
@@ -277,9 +339,22 @@ List<Violation> validateProposal(
   return v;
 }
 
-bool _inSleep(DateTime wall, PlanRules r) {
-  final h = wall.hour;
-  return r.sleepStartHour > r.sleepEndHour
-      ? (h >= r.sleepStartHour || h < r.sleepEndHour)
-      : (h >= r.sleepStartHour && h < r.sleepEndHour);
+/// Whether the wall-clock interval [s, e) takes any of the sleep window, the
+/// nights on both sides of it included.
+bool _touchesSleep(DateTime s, DateTime e, PlanRules r) {
+  if (r.sleepStartHour == r.sleepEndHour) return false;
+  var day = floating(s.year, s.month, s.day).subtract(const Duration(days: 1));
+  final last = floating(e.year, e.month, e.day);
+  while (!day.isAfter(last)) {
+    final from = floating(day.year, day.month, day.day, r.sleepStartHour);
+    final to = floating(day.year, day.month, day.day, r.sleepEndHour).add(
+      // (23:00 -> 07:00 ends the next morning)
+      r.sleepStartHour > r.sleepEndHour
+          ? const Duration(days: 1)
+          : Duration.zero,
+    );
+    if (s.isBefore(to) && from.isBefore(e)) return true;
+    day = day.add(const Duration(days: 1));
+  }
+  return false;
 }

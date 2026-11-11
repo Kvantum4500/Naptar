@@ -1,6 +1,7 @@
 import 'event.dart';
 import 'rules.dart';
 import 'time.dart';
+import 'workout.dart';
 
 /// One event proposed by the AI assistant (as understood by the app).
 class ProposalItem {
@@ -68,12 +69,31 @@ class ProposalItem {
   DateTime get startUtc => resolveWallClock(tzid, startWall);
   DateTime get endUtc => resolveWallClock(tzid, endWall);
 
-  ProposedBlock toBlock() => ProposedBlock(
+  /// Whether this is a workout for the rules. The model's `kind` counts, but a
+  /// plain workout name under "other" does not slip past the weekly cap (a
+  /// walk, a stretch and anything else light is never one).
+  bool get isWorkout =>
+      kind == 'workout' ||
+      (kind == 'other' && isWorkoutTitle(title) && !isLightTitle(title));
+
+  /// Whether the rules treat it as a hard session: decided in code (see
+  /// [isHardWorkout]) from the length and the title; the model's `hard` is one
+  /// vote, not the verdict.
+  bool isHardSession({int hardFromMinutes = 60}) =>
+      isWorkout &&
+      isHardWorkout(
+        title: title,
+        length: endUtc.difference(startUtc),
+        modelSaysHard: hard,
+        fromMinutes: hardFromMinutes,
+      );
+
+  ProposedBlock toBlock({int hardFromMinutes = 60}) => ProposedBlock(
     title: title,
     startUtc: startUtc,
     endUtc: endUtc,
-    isWorkout: kind == 'workout',
-    isHard: hard,
+    isWorkout: isWorkout,
+    isHard: isHardSession(hardFromMinutes: hardFromMinutes),
     taskId: taskId,
     taskDue: taskDue,
     taskEstimateMin: taskEstimateMin,
