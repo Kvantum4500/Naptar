@@ -323,6 +323,7 @@ class _Knobs {
   bool slots = true;
   int taskMax = 40;
   int days;
+  bool workouts = true;
   bool learned = true;
 }
 
@@ -407,6 +408,32 @@ class AssistantService {
   }
 
   String get _tz => rules.tzid;
+
+  // The rules of THIS request: the configured ones with the limits the user's
+  // own workouts have taught (see [learnFromWorkouts]), and the feedback they
+  // come from.
+  PlanRules? _learnedRules;
+  PlanRules get _rules => _learnedRules ?? rules;
+  List<WorkoutLogView> _workoutLogs = const [];
+
+  Future<void> _learn() async {
+    _workoutLogs = [
+      for (final r in await records.all(kindWorkoutLog))
+        if (!r.deleted) WorkoutLogView(r),
+    ];
+    final learning = learnFromWorkouts(
+      _workoutLogs,
+      today: _today,
+      approvedLight: await handbook.lightSports(),
+    );
+    _learnedRules = learning.isEmpty
+        ? rules
+        : rules.withHardFrom({
+            ...rules.hardFromBySport,
+            ...learning.hardFromBySport,
+          });
+  }
+
   DateTime get _nowUtc => _now().toUtc();
   DateTime get _today {
     final w = toWallClock(_tz, _nowUtc);
@@ -688,6 +715,7 @@ class AssistantService {
     AskScope scope,
     AiSettings settings,
   ) async {
+    await _learn();
     final knobs = _Knobs(scope.days);
     final taken = <String>[];
     var req = await _build(prompt, scope, settings, knobs);
@@ -727,6 +755,10 @@ class AssistantService {
       k.days = k.days > 7 ? 7 : 4;
       return 'időablak (${k.days} nap)';
     }
+    if (k.workouts && scope.checkins && s.checkins) {
+      k.workouts = false;
+      return 'edzésnapló';
+    }
     if (k.learned && scope.kind == PromptKind.plan && s.handbook) {
       k.learned = false;
       return 'Tanult szokások';
@@ -748,6 +780,12 @@ class AssistantService {
     _editIntent = scope.edit;
     _forecastFuture = null;
     _taskMax = k.taskMax;
+    // The feedback on the latest workouts goes with the check-in data (the
+    // same switch), and only when there is something to say.
+    final shareWorkouts = scope.checkins && k.workouts && settings.checkins;
+    final workoutLines = shareWorkouts
+        ? workoutLogLines(_workoutLogs, today: _today)
+        : const <String>[];
     // No clock in here: the system prompt and the tool list stay the same from
     // one request to the next (providers with prefix caching reuse them).
     final system = buildSystemPrompt(
@@ -757,10 +795,13 @@ class AssistantService {
         learned: k.learned,
         mixed: scope.mixed,
       ),
-      rules: rules,
+      rules: _rules,
       kind: scope.kind,
       finance: scope.finance,
       mixed: scope.mixed,
+      workoutLog:
+          workoutLines.isNotEmpty ||
+          (shareWorkouts && _rules.hardFromBySport.isNotEmpty),
     );
     return PreparedRequest(
       scope: scope,
@@ -773,6 +814,7 @@ class AssistantService {
         days: k.days,
         weather: k.weather,
         slots: k.slots,
+        workoutLines: workoutLines,
       ),
     );
   }
@@ -973,6 +1015,7 @@ class AssistantService {
     required int days,
     required bool weather,
     required bool slots,
+    List<String> workoutLines = const [],
   }) async {
     // the forecast is fetched while the events, tasks and slots are read
     if (weather && scope.slots) unawaited(_forecastFor(s));
@@ -1003,6 +1046,8 @@ class AssistantService {
           'check_in',
           await _runTool(LlmToolCall('get_checkins', const {}), s),
         ),
+      if (workoutLines.isNotEmpty)
+        dataBlock('edzes_naplo', {'edzesek': workoutLines}),
       if (weather) ...await _weatherBlock(s, days, scope.slots),
       if (scope.slots && slots)
         dataBlock(
@@ -1149,7 +1194,7 @@ class AssistantService {
           fromUtc: fromUtc,
           toUtc: toUtc,
           minLength: Duration(minutes: minutes),
-          rules: rules,
+          rules: _rules,
         );
         return freeSlotsForTool(
           slots,
@@ -1186,7 +1231,7 @@ class AssistantService {
         await _attachTasks(raw.items, dropped),
         dropped,
       ))
-        i.withHard(i.isHardSession(rules: rules)),
+        i.withHard(i.isHardSession(rules: _rules)),
     ];
     final parsed = ParsedProposal(
       summary: raw.summary,
@@ -1257,9 +1302,9 @@ class AssistantService {
       for (final w in forecast ?? <DayWeather>[]) w.day: w,
     };
     List<Violation> check(List<ProposalItem> items) => validateProposal(
-      [for (final i in items) i.toBlock(rules: rules)],
+      [for (final i in items) i.toBlock(rules: _rules)],
       existing: existing,
-      rules: rules,
+      rules: _rules,
       energyByDate: energy,
       weatherByDate: weatherByDate,
     );

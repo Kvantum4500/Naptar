@@ -191,7 +191,7 @@ class DriveSyncEngine {
   }
 
   SyncRecord? _parse(String name, String content) {
-    final m = RegExp(r'^(task|checkin|handbook)-(.+)\.json$').firstMatch(name);
+    final m = recordFileNamePattern.firstMatch(name);
     if (m == null) return null;
     try {
       final r = SyncRecord.decode(content);
@@ -204,10 +204,10 @@ class DriveSyncEngine {
   }
 
   bool _looksLikeRecordFile(String name) =>
-      RegExp(r'^(task|checkin|handbook)-.+\.json$').hasMatch(name);
+      recordFileNamePattern.hasMatch(name);
 
   Future<SyncRecord?> _recordForName(String name) async {
-    final m = RegExp(r'^(task|checkin|handbook)-(.+)\.json$').firstMatch(name);
+    final m = recordFileNamePattern.firstMatch(name);
     return m == null ? null : repo.get(m[1]!, m[2]!);
   }
 

@@ -74,6 +74,7 @@ class AiSettings {
     this.weather = true,
     this.place,
     this.handbook = true,
+    this.workoutFeedback = true,
   });
 
   /// Provider id from the catalog (gemini, groq, mistral, openrouter, openai, custom).
@@ -105,6 +106,10 @@ class AiSettings {
   /// model. Off: only the built-in rules go.
   final bool handbook;
 
+  /// Ask how a workout went after it (the answers teach the assistant how
+  /// hard the user's workouts really are).
+  final bool workoutFeedback;
+
   AiSettings copyWith({
     String? provider,
     String? model,
@@ -120,6 +125,7 @@ class AiSettings {
     Place? place,
     bool clearPlace = false,
     bool? handbook,
+    bool? workoutFeedback,
   }) => AiSettings(
     provider: provider ?? this.provider,
     model: clearModel ? null : (model ?? this.model),
@@ -133,6 +139,7 @@ class AiSettings {
     weather: weather ?? this.weather,
     place: clearPlace ? null : (place ?? this.place),
     handbook: handbook ?? this.handbook,
+    workoutFeedback: workoutFeedback ?? this.workoutFeedback,
   );
 }
 
@@ -175,6 +182,7 @@ class AiSettingsStore {
       weather: (await read('ai.weather')) != 'off',
       place: Place.decode(await read('ai.place')),
       handbook: (await read('ai.handbook')) != 'off',
+      workoutFeedback: (await read('ai.workoutFeedback')) != 'off',
     );
   }
 
@@ -197,6 +205,7 @@ class AiSettingsStore {
     await write('ai.weather', s.weather ? null : 'off');
     await write('ai.place', s.place?.encode());
     await write('ai.handbook', s.handbook ? null : 'off');
+    await write('ai.workoutFeedback', s.workoutFeedback ? null : 'off');
   }
 
   static int _hour(String? v, int fallback) {

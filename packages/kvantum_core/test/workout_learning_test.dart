@@ -189,6 +189,7 @@ void main() {
       expect(l.suggestions, hasLength(1));
       expect(l.suggestions.single.sport, 'calisthenics');
       expect(l.suggestions.single.samples, 5);
+      expect(l.suggestions.single.bandSamples, 5);
       expect(l.suggestions.single.average, closeTo(1.8, 1e-9));
       expect(l.relaxed, isEmpty);
       expect(l.hardFromBySport, isEmpty);
@@ -231,6 +232,7 @@ void main() {
       ];
       final s = learn(logs).suggestions.single;
       expect(s.samples, 5);
+      expect(s.bandSamples, 8); // all sessions of the band, for a "no"
       expect(s.average, closeTo(1.6, 1e-9));
       // a hard session among the latest five lifts the average over the line
       // (3, 5, 1, 1, 1 = 2.2), however easy the older ones were

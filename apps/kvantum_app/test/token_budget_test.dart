@@ -275,6 +275,43 @@ void main() {
       expect(size.total, lessThanOrEqualTo(3200), reason: '$size');
     });
 
+    test(
+      '"Tervezz edzést a jövő hétre" with ten workout feedbacks stays in 3 300',
+      () async {
+        // the feedback after workouts adds a short block and a few lines to
+        // the instructions (about 175 tokens), nothing more
+        final plain = _Size((await sent('Tervezz edzést a jövő hétre')).$1);
+        for (var i = 0; i < 10; i++) {
+          await records.edit(
+            kindWorkoutLog,
+            'fb$i',
+            workoutLogFields(
+              title: 'Gym',
+              date: DateTime.utc(2026, 5, 3).subtract(Duration(days: i)),
+              minutes: 60,
+              sport: i.isEven ? 'gym' : 'calisthenics',
+              bodyLoad: 4,
+              mindLoad: 2,
+              energyStart: 3,
+              energyEnd: 2,
+              experience: 4,
+              note: 'jegyzet, ami nem megy ki',
+            ),
+          );
+        }
+        final (r, first) = await sent('Tervezz edzést a jövő hétre');
+        final size = _Size(r);
+        expect(first, contains('<adat tipus="edzes_naplo">'));
+        expect(first.contains('jegyzet'), isFalse);
+        expect(
+          size.total - plain.total,
+          lessThanOrEqualTo(260),
+          reason: '$size',
+        );
+        expect(size.total, lessThanOrEqualTo(3300), reason: '$size');
+      },
+    );
+
     test('a deletion request fits in about 2 200 tokens', () async {
       final (r, _) = await sent('Töröld a kézzel felvett programokat holnapra');
       final size = _Size(r);

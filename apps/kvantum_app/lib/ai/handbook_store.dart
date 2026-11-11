@@ -58,6 +58,17 @@ class HandbookStore {
       if (l.startsWith('- ')) l.substring(2).trim(),
   ];
 
+  /// The sports the user agreed are easy for them (the marked lines of
+  /// "Tanult szokások", see [lightRuleText]). Deleting a line takes it back.
+  Future<Set<String>> lightSports() async =>
+      lightSportsFrom(await learnedRules());
+
+  /// Writes the user's "yes, that is easy for me" to "Tanult szokások".
+  Future<bool> agreeLight(String sport) {
+    assert(isSportKey(sport));
+    return appendLearned(lightRuleText(sport));
+  }
+
   /// Adds one habit the user confirmed to "Tanult szokások". Returns false
   /// when it is empty or already there. Keeps at most [maxRules] (oldest go).
   Future<bool> appendLearned(String rule, {int maxRules = 30}) async {

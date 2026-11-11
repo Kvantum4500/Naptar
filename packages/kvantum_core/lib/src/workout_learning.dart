@@ -67,12 +67,17 @@ class RelaxSuggestion {
     required this.sport,
     required this.samples,
     required this.average,
+    required this.bandSamples,
   });
   final String sport;
 
   /// How many of the latest sessions of 60–89 minutes it rests on.
   final int samples;
   final double average;
+
+  /// How many sessions of 60–89 minutes there are in all (a "no" remembers
+  /// this: the question comes back after [relaxAskAgainAfter] more).
+  final int bandSamples;
 
   /// The sentence the user is asked.
   String get question =>
@@ -186,7 +191,12 @@ WorkoutLearning learnFromWorkouts(
         continue;
       }
       suggestions.add(
-        RelaxSuggestion(sport: sport, samples: relaxMinSamples, average: easy),
+        RelaxSuggestion(
+          sport: sport,
+          samples: relaxMinSamples,
+          average: easy,
+          bandSamples: long.length,
+        ),
       );
     }
   }

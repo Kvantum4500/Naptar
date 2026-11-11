@@ -282,4 +282,88 @@ void main() {
     await Future.wait([engine.sync(), engine.sync(), engine.sync()]);
     expect(drive.creates, 1);
   });
+
+  // ---- the feedback after a workout (2e) is a record like the others
+  group('the workout feedback', () {
+    final id = workoutLogId('e1', DateTime.utc(2026, 5, 5, 18));
+
+    Map<String, Object?> answers({int? body, int? mind, int? exp}) =>
+        workoutLogFields(
+          title: 'Gym',
+          date: DateTime.utc(2026, 5, 5),
+          minutes: 60,
+          sport: 'gym',
+          bodyLoad: body,
+          mindLoad: mind,
+          experience: exp,
+        );
+
+    test('it is uploaded under its own file name, once', () async {
+      await repo.edit(kindWorkoutLog, id, answers(body: 4));
+      final r = await engine.sync();
+      expect(r.pushed, 1);
+      expect(drive.files.values.single.name, 'workoutlog-$id.json');
+      expect((await engine.sync()).pushed, 0);
+      expect(drive.writes, 1);
+    });
+
+    test('another device\'s feedback arrives and is read', () async {
+      final bDb = await newDb();
+      final rec = await repoFor(
+        bDb,
+        'B',
+      ).edit(kindWorkoutLog, id, answers(body: 5, exp: 2));
+      drive.externalWrite('workoutlog-$id.json', rec.encode());
+      final r = await engine.sync();
+      expect(r.pulled, 1);
+      expect(r.skippedCorrupt, 0);
+      final v = WorkoutLogView((await repo.get(kindWorkoutLog, id))!);
+      expect((v.bodyLoad, v.experience, v.sport), (5, 2, 'gym'));
+      expect(drive.writes, 0);
+      await bDb.close();
+    });
+
+    test(
+      'two devices answered different questions: both answers survive',
+      () async {
+        await repo.edit(kindWorkoutLog, id, answers(body: 4));
+        final bDb = await newDb();
+        final recB = await repoFor(
+          bDb,
+          'B',
+        ).edit(kindWorkoutLog, id, answers(mind: 2, exp: 5));
+        drive.externalWrite('workoutlog-$id.json', recB.encode());
+        await engine.sync();
+        expect(drive.files.length, 1);
+        for (final rec in [
+          await repo.get(kindWorkoutLog, id),
+          SyncRecord.decode(drive.files.values.single.content),
+        ]) {
+          final v = WorkoutLogView(rec!);
+          expect((v.bodyLoad, v.mindLoad, v.experience), (4, 2, 5));
+        }
+        await bDb.close();
+      },
+    );
+
+    test(
+      'a file whose body does not match its name is skipped as corrupt',
+      () async {
+        final rec = await repo.edit(kindWorkoutLog, id, answers(body: 3));
+        drive.externalWrite('workoutlog-someone-else.json', rec.encode());
+        final r = await engine.sync();
+        expect(r.skippedCorrupt, 1);
+        expect(await repo.get(kindWorkoutLog, 'someone-else'), isNull);
+      },
+    );
+
+    test('a full resync re-queues a feedback file Drive lost', () async {
+      await repo.edit(kindWorkoutLog, id, answers(body: 4));
+      await engine.sync();
+      drive.files.clear();
+      drive.expireToken = true;
+      await engine.sync();
+      expect(drive.files.values.single.name, 'workoutlog-$id.json');
+    });
+  });
 }
