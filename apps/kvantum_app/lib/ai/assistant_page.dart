@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MaxLengthEnforcement;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:kvantum_core/kvantum_core.dart' show Occurrence, toWallClock;
@@ -7,6 +8,9 @@ import '../ui/day_utils.dart' show defaultTz;
 import '../ui/event_editor.dart' show Scope;
 import '../ui/format.dart';
 import 'ai_providers.dart';
+import 'assistant_service.dart'
+    show AssistantOutcome, PreparedRequest, maxPromptLength;
+import 'llm_provider.dart' show LlmUsage;
 import 'settings_page.dart';
 
 const _quickPrompts = [
@@ -28,6 +32,10 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   final _input = TextEditingController();
   late final AssistantController _ctl;
 
+  // "Mit küldünk a modellnek?": built when the panel is opened or refreshed
+  // (no timers: it does not follow the typing by itself).
+  Future<PreparedRequest>? _preview;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +50,14 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     Future.microtask(ctl.cancel);
     _input.dispose();
     super.dispose();
+  }
+
+  void _showPreview() {
+    final text = _input.text.trim().isEmpty ? '…' : _input.text;
+    final future = ref.read(assistantControllerProvider.notifier).preview(text);
+    setState(() {
+      _preview = future;
+    });
   }
 
   void _send([String? text]) {
@@ -81,6 +97,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 controller: _input,
                 minLines: 2,
                 maxLines: 5,
+                maxLength: maxPromptLength,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
                 enabled: !st.busy,
                 textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
@@ -112,7 +130,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              _PreviewPanel(
+                future: _preview,
+                onOpen: _showPreview,
+                onClose: () => setState(() {
+                  _preview = null;
+                }),
+              ),
+              const SizedBox(height: 8),
               if (st.busy) _Working(status: st.status, onCancel: ctl.cancel),
               if (st.error != null)
                 Card(
@@ -232,6 +258,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     ),
                   ),
                 ),
+              if (o != null) _CostLine(outcome: o),
               if (o != null) ..._result(context, st, o),
             ],
           ),
@@ -610,6 +637,137 @@ class _WhyCardState extends ConsumerState<_WhyCard> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// What the last request cost: the provider's own numbers, or the program's
+/// estimate of the first request when the provider said nothing.
+class _CostLine extends StatelessWidget {
+  const _CostLine({required this.outcome});
+  final AssistantOutcome outcome;
+
+  @override
+  Widget build(BuildContext context) {
+    final LlmUsage? u = outcome.usage;
+    final int? est = outcome.estimatedTokens;
+    final int calls = outcome.calls;
+    final String text;
+    if (u != null) {
+      text =
+          'Utolsó kérés: ${spaced(u.total)} token (be ${spaced(u.prompt)} · ki ${spaced(u.output)}'
+          '${u.thinking > 0 ? ' · gondolkodás ${spaced(u.thinking)}' : ''}'
+          '${u.cached > 0 ? ' · ebből gyorsítótárból ${spaced(u.cached)}' : ''}'
+          ')${calls > 1 ? ' · $calls hívás' : ''}';
+    } else if (est != null) {
+      text =
+          'Utolsó kérés: ≈ ${spaced(est)} token (becslés; a szolgáltató nem közölt adatot)';
+    } else {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+    );
+  }
+}
+
+/// A collapsible look at exactly what is sent to the model.
+class _PreviewPanel extends StatelessWidget {
+  const _PreviewPanel({
+    required this.future,
+    required this.onOpen,
+    required this.onClose,
+  });
+  final Future<PreparedRequest>? future;
+  final VoidCallback onOpen;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    const mono = TextStyle(fontFamily: 'monospace', fontSize: 11.5);
+    return ExpansionTile(
+      key: const Key('preview-panel'),
+      tilePadding: EdgeInsets.zero,
+      title: const Text('Mit küldünk a modellnek?'),
+      onExpansionChanged: (open) => open ? onOpen() : onClose(),
+      children: [
+        if (future != null)
+          FutureBuilder<PreparedRequest>(
+            future: future,
+            builder: (context, snap) {
+              if (snap.hasError) {
+                return const Text('Az előnézet most nem készíthető el.');
+              }
+              final r = snap.data;
+              if (r == null) {
+                return const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: LinearProgressIndicator(),
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Becsült méret: ≈ ${spaced(r.estimatedTokens)} token '
+                    '(utasítás ${spaced(r.systemTokens)} · eszközök ${spaced(r.toolsTokens)} · adat és kérés ${spaced(r.messageTokens)})',
+                    style: small,
+                  ),
+                  for (final b in r.blocks)
+                    Text(
+                      '  • ${b.name}: ≈ ${spaced(b.tokens)} token',
+                      style: small,
+                    ),
+                  if (r.reductions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'A szolgáltató percenkénti keretéhez igazítva kimarad: ${r.reductions.join('; ')}.',
+                        style: small,
+                      ),
+                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onOpen,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Frissítés a beírt kéréssel'),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('A kérés szövege (adatok, idő, kérésed)'),
+                    children: [
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        width: double.infinity,
+                        child: SingleChildScrollView(
+                          child: SelectableText(r.firstMessage, style: mono),
+                        ),
+                      ),
+                    ],
+                  ),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Utasítások a modellnek'),
+                    children: [
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        width: double.infinity,
+                        child: SingleChildScrollView(
+                          child: SelectableText(r.system, style: mono),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+      ],
     );
   }
 }

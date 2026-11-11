@@ -19,6 +19,7 @@ class ProviderInfo {
     this.maxOutput = 4096,
     this.reasoningEffort,
     this.reasoningModels,
+    this.tokenBudget = 20000,
   });
 
   final String id;
@@ -46,6 +47,12 @@ class ProviderInfo {
   /// `reasoning_effort` sent to the models matching [reasoningModels].
   final String? reasoningEffort;
   final RegExp? reasoningModels;
+
+  /// How many tokens a request (instructions + tools + data) may have, by the
+  /// program's own estimate. A bigger one is made smaller before it is sent.
+  /// Groq's free tier allows 8 000 tokens a minute, and the reply cap counts
+  /// against it too (8 000 − 2 048, with some room for the estimate's error).
+  final int tokenBudget;
 }
 
 final kProviders = <ProviderInfo>[
@@ -68,6 +75,7 @@ final kProviders = <ProviderInfo>[
       RegExp(r'llama'),
     ],
     maxOutput: 2048,
+    tokenBudget: 5500,
     // gpt-oss thinks a lot by default; "low" keeps the budget for the plan
     reasoningEffort: 'low',
     reasoningModels: RegExp(r'gpt-oss'),

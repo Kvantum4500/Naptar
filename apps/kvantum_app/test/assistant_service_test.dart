@@ -354,38 +354,36 @@ void main() {
   });
 
   group('tool arguments', () {
-    test(
-      'get_events: window is clamped, only events in it come back, local times',
-      () async {
-        await meeting(
-          'near',
-          floating(2026, 5, 6, 9),
-          floating(2026, 5, 6, 10),
-          title: 'Közeli',
-        );
-        await meeting(
-          'far',
-          floating(2026, 9, 1, 9),
-          floating(2026, 9, 1, 10),
-          title: 'Távoli',
-        );
-        final llm = FakeLlm([
-          (_) => calls([
-            tool('get_events', {'from': '2026-05-04', 'to': '2027-12-31'}),
-          ]),
-          (_) => say('ok'),
-        ]);
-        await service(llm).ask('x', model: 'm', settings: settings);
-        final res = lastResults(llm).single;
-        final ev = eventRows(res);
-        expect(ev.map((e) => e['c']), [
-          'Közeli',
-        ]); // 60-day cap excludes September
-        expect((res['esemenyek'] as Map).keys, ['2026-05-06']);
-        expect(ev.single['k'], '09:00');
-        expect(ev.single['v'], '10:00');
-      },
-    );
+    test('get_events: window is clamped, only events in it come back, local times', () async {
+      await meeting(
+        'near',
+        floating(2026, 5, 6, 9),
+        floating(2026, 5, 6, 10),
+        title: 'Közeli',
+      );
+      await meeting(
+        'far',
+        floating(2026, 9, 1, 9),
+        floating(2026, 9, 1, 10),
+        title: 'Távoli',
+      );
+      final llm = FakeLlm([
+        (_) => calls([
+          tool('get_events', {'from': '2026-05-04', 'to': '2027-12-31'}),
+        ]),
+        (_) => say('ok'),
+      ]);
+      await service(llm).ask('x', model: 'm', settings: settings);
+      final res = lastResults(llm).single;
+      final ev = eventRows(res);
+      // the 60-day cap excludes September; a planning request is only told
+      // that the user is busy (the title of a short typed-in event stays home)
+      expect(ev.length, 1);
+      expect(ev.single['c'], 'foglalt');
+      expect((res['esemenyek'] as Map).keys, ['2026-05-06']);
+      expect(ev.single['k'], '09:00');
+      expect(ev.single['v'], '10:00');
+    });
 
     test('bad or missing arguments fall back to sane defaults', () async {
       final llm = FakeLlm([
@@ -443,7 +441,9 @@ void main() {
       ]) {
         expect(first, contains('<adat tipus="$block">'));
       }
-      expect(first, contains('Fogorvos'));
+      // planning only needs to know WHEN the user is busy
+      expect(first, contains('"c":"foglalt"'));
+      expect(first.contains('Fogorvos'), isFalse);
       expect(first, contains('Beadandó'));
       expect(first, contains('"f":4'));
       // the free slots already respect the meeting (12:00-13:00 +- 15 min)
@@ -576,10 +576,8 @@ void main() {
         final out = await service(llm).ask('x', model: 'm', settings: settings);
         expect(out.text, 'Szia');
         expect(waits, [const Duration(seconds: 6)]); // hint + 1 s safety
-        expect(
-          await store.usageToday(),
-          2,
-        ); // both attempts count against the daily limit
+        // only the ANSWERED call is counted: the limited attempt used nothing
+        expect(await store.usageToday(), 1);
       },
     );
 
@@ -693,13 +691,14 @@ void main() {
       );
       final a = FakeLlm([(_) => say('ok')]);
       await service(a).ask('Tervezz edzést', model: 'm', settings: settings);
-      expect(firstOf(a).contains('Távoli találkozó'), isFalse);
+      expect(firstOf(a).contains('2026-05-13'), isFalse);
       expect(firstOf(a), contains('7 nap (2026-05-04 – 2026-05-10)'));
 
       final b = FakeLlm([(_) => say('ok')]);
       await service(b)
           .ask('Tervezz edzést két hétre', model: 'm', settings: settings);
-      expect(firstOf(b), contains('Távoli találkozó'));
+      expect(firstOf(b), contains('"2026-05-13":[{'));
+      expect(firstOf(b).contains('Távoli találkozó'), isFalse); // title hidden
       expect(firstOf(b), contains('14 nap (2026-05-04 – 2026-05-17)'));
     });
 
@@ -930,7 +929,13 @@ void main() {
       );
       final first = firstOf(llm);
       expect(first, contains('<adat tipus="idojaras">'));
-      expect(first, contains('"helyszin":"Budapest"'));
+      // the forecast goes, the name of the place does not (the time zone, in
+      // the clock line, is not a place name)
+      expect(
+        first.replaceAll('Europe/Budapest', '').contains('Budapest'),
+        isFalse,
+      );
+      expect(first.contains('helyszin'), isFalse);
       expect(first, contains('csapadék 90%'));
       expect(fetched, 1);
     });
@@ -1074,7 +1079,9 @@ void main() {
       expect(first, contains('<adat tipus="penzugy">'));
       expect(first, contains('"keret":50000'));
       expect(first, contains('"maradt":30000'));
-      expect(first, contains('SPAR'));
+      // single payments (merchants) stay home unless the model asks for a month
+      expect(first.contains('SPAR'), isFalse);
+      expect(first, contains('"kiadas":20000'));
       for (final b in [
         'esemenyek',
         'feladatok',

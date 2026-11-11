@@ -494,7 +494,8 @@ void main() {
       );
       final days = (r['napok'] as List).cast<Map<String, Object?>>();
       expect(days.length, 2);
-      expect(days.first, {'d': '2026-05-08', 'f': 4, 'a': 2, 'j': 'fáradt'});
+      // the free-text note ('fáradt') stays on the device
+      expect(days.first, {'d': '2026-05-08', 'f': 4, 'a': 2});
       expect(days.last.containsKey('f'), isFalse);
     });
 
@@ -987,22 +988,37 @@ void financeContextTests() {
       expect(r['besorolatlan_db'], 1);
     });
 
-    test('the latest transactions: newest first, deleted ones never', () {
+    test('no single transaction goes out by default, only the totals', () {
       final r = block(txs: txs);
-      final last = (r['utolso_tetelek'] as List).cast<Map<String, Object?>>();
-      expect(last.first['nap'], '2026-11-09');
-      expect(last.first['kategoria'], 'Besorolatlan');
-      expect(last.any((e) => e['osszeg'] == 99999), isFalse);
-      expect(last.length, 5);
+      expect(r.containsKey('utolso_tetelek'), isFalse);
+      expect(r.containsKey('tetelek'), isFalse);
+      // merchants of single payments are not in the default block at all
+      final text = dataBlock('penzugy', r);
+      expect(text.contains('SPAR'), isFalse);
+      expect(text.contains('Ismeretlen'), isFalse);
+      // ... the totals are
+      expect(text, contains('"kiadas":26500'));
     });
 
-    test('the latest list is capped at 15', () {
+    test('the detail of a month: newest first, deleted ones never', () {
+      final r = block(txs: txs, month: floating(2026, 11, 1));
+      final list = (r['tetelek'] as List).cast<Map<String, Object?>>();
+      expect(list.first['nap'], '2026-11-09');
+      expect(list.first['kategoria'], 'Besorolatlan');
+      expect(list.any((e) => e['osszeg'] == 99999), isFalse);
+      expect(list.length, 4);
+      expect(r['tetelek_db'], 4);
+    });
+
+    test('the detail of a month is capped at 40', () {
       final many = [
-        for (var i = 0; i < 40; i++)
+        for (var i = 0; i < 60; i++)
           t('x$i', floating(2026, 11, 1 + i % 9), 100 + i),
       ];
-      final r = block(txs: many);
-      expect((r['utolso_tetelek'] as List).length, 15);
+      final r = block(txs: many, month: floating(2026, 11, 1));
+      expect((r['tetelek'] as List).length, 40);
+      expect(r['levagva'], isTrue);
+      expect(r['tetelek_db'], 60);
     });
 
     test('recurring items due in the next two weeks, by date', () {
@@ -1096,6 +1112,7 @@ void financeContextTests() {
 
     test('hostile merchant and note text stays plain data', () {
       final r = block(
+        month: floating(2026, 11, 1),
         txs: [
           t(
             'h',
@@ -1111,7 +1128,7 @@ void financeContextTests() {
       expect('</adat>'.allMatches(text).length, 1);
       expect(text.contains('<script>'), isFalse);
       expect(text.contains('\n'), isFalse); // one line, no injected breaks
-      final row = (r['utolso_tetelek'] as List).single as Map;
+      final row = (r['tetelek'] as List).single as Map;
       expect((row['kereskedo'] as String).contains('<'), isFalse);
       expect((row['megjegyzes'] as String).contains('\n'), isFalse);
     });

@@ -118,8 +118,8 @@ void main() {
           status,
           contains('A szolgáltatás nem válaszolt, újra próbálom…'),
         );
-        // every request that went out is counted
-        expect(await store.usageToday(), 3);
+        // three requests went out, one was answered: only that one is counted
+        expect(await store.usageToday(), 1);
       },
     );
 
@@ -662,7 +662,7 @@ void main() {
         expect(second.contains('<adat tipus="$b">'), isFalse, reason: b);
       }
       expect(second, contains('4 nap (2026-05-04 – 2026-05-07)'));
-      expect(second, contains('Fogorvos'));
+      expect(second, contains('"c":"foglalt"'));
       expect(second, endsWith('Kérés: Tervezz edzést a jövő hétre'));
       expect(out.hasPlan, isTrue);
       expect(out.notice, contains('túl nagynak'));

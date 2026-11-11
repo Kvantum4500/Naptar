@@ -407,3 +407,18 @@ Tesztek: mag 220 (volt 216), app 540 (volt 469), az elemzők és a formázás ti
 | AI-13 | kész | a katalógus presetjei: hőmérséklet 0,2, válaszkorlát (Groq 2048, a többi 4096), `reasoning_effort` a Groq gpt-oss-hoz; a `tokenBudget` a 2c-ben jön, ahol használjuk |
 | AI-24 | részben | közös HTTP-réteg (`llm_http.dart`: redakció, hibatérkép, JSON-kezelés), kérésenként egy kapcsolat, bezárva. A modell-tartalék lista (más szolgáltatókra) nem készült el. |
 
+### 2c (mérés, átláthatóság, adatminimalizálás) – kész, a build után kipróbálandó
+
+Tesztek: mag 226 (volt 220), app 588 (volt 540), az elemzők és a formázás tiszták. 24 szándékos elrontás (a költség nem összegződik, a hívás nem kerül a naplóba, a szolgáltatók összekeverednek, nincs költségvetés-őr, rossz sorrend, a haszontalan lépés is kiíródik, az előnézet nem szűkít, a feladatok nem sürgősség szerint, a címek / a check-in megjegyzés / a hely neve visszakerül, a kérés nem tisztított, a visszajelzés elárulja a címet, a Kézikönyv-kapcsoló nem hat, nincs beleegyezés-ablak, az elutasítás is elmenti a kulcsot, nincs 500 karakteres korlát, nincs „Utolsó kérés” sor, nincs előnézet-panel …) mindegyikét elkapják a tesztek (egy elrontást csak a magtesztek fogtak meg, a másik tesztfájl-választás volt a hiba). A tesztek közben egy valódi hibát találtak: az előnézet `setState`-je egy `Future`-t adott vissza (debug módban kivétel).
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| AI-9 | kész | szolgáltatónként / modellenként / naponként tokenek (be, ki, gondolkodás, gyorsítótár); csak a megválaszolt hívás számít; Beállítások-sor és „Utolsó kérés” sor; becslés „≈”-jellel, ha a szolgáltató nem közöl számot |
+| előnézet | kész | `AssistantService.preview` + összecsukható panel; ugyanaz a `_prepare`, mint a valódi kérésé (teszt: az előnézet = az elküldött); frissítés gombbal (időzítő nélkül) |
+| költségvetés-őr | kész | `ProviderInfo.tokenBudget` (Groq 5 500, többi 20 000); sorrend: időjárás, szabad idősáv, 8 legsürgősebb feladat, ablak 14→7→4, Tanult szokások; csak a ténylegesen spóroló lépés kerül a jelzésbe |
+| SEC-9 | kész | beleegyezés-ablak az első kulcs mentése előtt, szolgáltatónként egyszer; Kézikönyv-kapcsoló; a pénzügy alapból BE (a te döntésed). **Nem kérdez** a már mentett kulcsoknál. Szolgáltatói feltételekről általános figyelmeztetés, konkrét állítás nélkül. |
+| AI-17 | kész | pénz: nincs egyes tétel az alap blokkban; check-in megjegyzés ki; hely neve ki |
+| AI-21 | kész, finomítva | tervezésnél a kézzel felvett rövid esemény címe „foglalt”; **eltérés a tervtől:** a ≥ 4 órás események címe megmarad (utazás, konferencia: a „hosszú utazás napján nincs edzés” szabályhoz kell) |
+| AI-22 | kész | a kérés ≤ 500 karakter (mező + szolgáltatás), a kérés szövege tisztítva megy |
+| AI-23 | 2d | a kikapcsolt forrás helyi válasza a 2d-ben |
+

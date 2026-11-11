@@ -66,10 +66,14 @@ final aiSettingsProvider =
       AiSettingsNotifier.new,
     );
 
-/// Requests sent today; invalidate after each assistant run.
-final aiUsageProvider = FutureProvider.autoDispose<int>(
-  (ref) => ref.watch(aiSettingsStoreProvider).usageToday(),
-);
+/// What the assistant used today at the CURRENT provider (answered requests and
+/// their tokens); invalidate after each assistant run.
+final aiUsageProvider = FutureProvider.autoDispose<AiUsageDay>((ref) async {
+  final settings = await ref.watch(aiSettingsProvider.future);
+  return ref
+      .watch(aiSettingsStoreProvider)
+      .usageOf(provider: settings.provider);
+});
 
 /// The clock the assistant plans with (proposals must lie ahead of it).
 /// Tests replace it so their fixed dates stay valid.
@@ -165,9 +169,56 @@ class AssistantState {
   );
 }
 
+/// The preview builds the request but never sends it.
+class _NoProvider implements LLMProvider {
+  @override
+  Future<LlmReply> generate(String model, LlmRequest request) =>
+      throw StateError('the preview sends nothing');
+
+  @override
+  Future<List<LlmModel>> listModels() async => const [];
+
+  @override
+  void close() {}
+}
+
 class AssistantController extends Notifier<AssistantState> {
   @override
   AssistantState build() => const AssistantState();
+
+  AssistantService _newService(
+    AiSettings settings,
+    ProviderInfo info,
+    LLMProvider provider,
+  ) => AssistantService(
+    now: ref.read(aiClockProvider),
+    provider: provider,
+    providerId: info.id,
+    // the request is made smaller before it is sent if it would not fit
+    tokenBudget: info.tokenBudget,
+    events: ref.read(repoProvider),
+    records: ref.read(recordRepoProvider),
+    handbook: ref.read(handbookStoreProvider),
+    settingsStore: ref.read(aiSettingsStoreProvider),
+    weather: ref.read(weatherServiceProvider),
+    finance: ref.read(financeRepoProvider),
+    rules: PlanRules(
+      sleepStartHour: settings.sleepStartHour,
+      sleepEndHour: settings.sleepEndHour,
+    ),
+  );
+
+  /// What the request for [prompt] would carry, built by the same code as the
+  /// real one but never sent: for the "Mit küldünk?" panel.
+  Future<PreparedRequest> preview(String prompt) async {
+    final settings = await ref.read(aiSettingsProvider.future);
+    final info = providerById(settings.provider);
+    return _newService(
+      settings,
+      info,
+      _NoProvider(),
+    ).preview(prompt.trim(), settings: settings);
+  }
 
   // The running request. A new number per request: a result that arrives for an
   // older number (the user pressed "Mégse" meanwhile) is thrown away.
@@ -236,20 +287,7 @@ class AssistantController extends Notifier<AssistantState> {
       }
       // "Mégse" during the preparations: nothing is sent at all
       if (!live()) return;
-      final service = AssistantService(
-        now: ref.read(aiClockProvider),
-        provider: provider,
-        events: ref.read(repoProvider),
-        records: ref.read(recordRepoProvider),
-        handbook: ref.read(handbookStoreProvider),
-        settingsStore: ref.read(aiSettingsStoreProvider),
-        weather: ref.read(weatherServiceProvider),
-        finance: ref.read(financeRepoProvider),
-        rules: PlanRules(
-          sleepStartHour: settings.sleepStartHour,
-          sleepEndHour: settings.sleepEndHour,
-        ),
-      );
+      final service = _newService(settings, info, provider);
       _service = service;
       Future<AssistantOutcome> go(String m) =>
           service.ask(text, model: m, settings: settings, onStatus: status);

@@ -109,17 +109,36 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         );
         return;
       }
+      // The first key at a provider: say what goes out BEFORE anything is kept.
+      final aiStore = ref.read(aiSettingsStoreProvider);
+      var chosen = settings;
+      if (!await aiStore.consentGiven(info.id)) {
+        if (!mounted) return;
+        final agreed = await showDialog<AiSettings>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => ConsentDialog(provider: info, settings: settings),
+        );
+        if (agreed == null) {
+          _say(
+            'A kulcsot nem mentettem el: az asszisztens ennél a szolgáltatónál addig nem használható.',
+          );
+          return;
+        }
+        chosen = agreed;
+        await aiStore.giveConsent(info.id);
+      }
       await store.write(
         key,
         provider: info.id,
       ); // only a key that works is kept
       _key.clear();
       final notifier = ref.read(aiSettingsProvider.notifier);
-      final known = models.any((m) => m.id == settings.model);
+      final known = models.any((m) => m.id == chosen.model);
       await notifier.change(
-        settings.copyWith(
+        chosen.copyWith(
           customBaseUrl: base,
-          model: known ? settings.model : pickModelFor(info.id, models),
+          model: known ? chosen.model : pickModelFor(info.id, models),
         ),
       );
       setState(() {
@@ -317,7 +336,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _refresh(settings));
     }
     final info = providerById(settings.provider);
-    final usage = ref.watch(aiUsageProvider).value ?? 0;
+    final usage = ref.watch(aiUsageProvider).value ?? const AiUsageDay();
     final notifier = ref.read(aiSettingsProvider.notifier);
     final build = ref.watch(currentBuildProvider).value;
     final scheme = Theme.of(context).colorScheme;
@@ -472,13 +491,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 const SizedBox(height: 8),
                 Text(
-                  'Ma elküldött kérések: $usage',
+                  usage.requests == 0
+                      ? 'Ma még nem volt kérés ennél a szolgáltatónál.'
+                      : 'Ma ennél a szolgáltatónál: ${usage.requests} kérés · ${spaced(usage.tokens.total)} token (be ${spaced(usage.tokens.prompt)} · ki ${spaced(usage.tokens.output + usage.tokens.thinking)})',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ]),
               section('Mit láthat az asszisztens?', [
                 const Text(
-                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi.',
+                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi. Mindig megy: a kérésed szövege (legfeljebb 500 karakter) és a beépített szabályok. A kézzel felvett rövid események címe nem megy el, a modell csak azt látja, hogy foglalt vagy; a check-in megjegyzése sem.',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Kézikönyv (szabályok, profil, tanult szokások)',
+                  ),
+                  subtitle: const Text(
+                    'Kikapcsolva csak a beépített szabályok mennek el, a saját szabályaid nem.',
+                  ),
+                  value: settings.handbook,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(handbook: v)),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -505,7 +538,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Pénzügyek (csak olvasás)'),
                   subtitle: const Text(
-                    'Összesítés és az utolsó tételek mehetnek el a modellhez; felvenni vagy törölni nem tud.',
+                    'Csak az összesítés megy el (kategóriánként, kerettel, célokkal); az egyes tételek csak akkor, ha a modell egy hónap részleteit kéri. Felvenni vagy törölni nem tud.',
                   ),
                   value: settings.finance,
                   onChanged: (v) =>
@@ -514,7 +547,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ]),
               section('Időjárás és helyszín', [
                 const Text(
-                  'A szabadtéri hobbisportokat (kajak, kerékpár, falmászás…) az időjárás-előrejelzés alapján javasolja. Az előrejelzést az Open-Meteo adja (ingyenes, kulcs nélkül). Csak a kerekített koordináta (kb. 1 km pontosságú) megy ki, a naptáradatod nem.',
+                  'A szabadtéri hobbisportokat (kajak, kerékpár, falmászás…) az időjárás-előrejelzés alapján javasolja. Az előrejelzést az Open-Meteo adja (ingyenes, kulcs nélkül). Az Open-Meteóhoz csak a kerekített koordináta (kb. 1 km pontosságú) megy ki, a naptáradatod nem; a modellnek a napi előrejelzés megy, a helyszín neve nem.',
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -736,6 +769,122 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 18400 -> "18 400".
+String spaced(int n) {
+  final digits = '${n.abs()}';
+  final out = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) out.write('\u00A0');
+    out.write(digits[i]);
+  }
+  return n < 0 ? '-$out' : '$out';
+}
+
+/// Said once per provider, before its first key is kept: what goes out, and the
+/// switches for the optional parts. "Mégsem használom" keeps nothing.
+class ConsentDialog extends StatefulWidget {
+  const ConsentDialog({
+    super.key,
+    required this.provider,
+    required this.settings,
+  });
+  final ProviderInfo provider;
+  final AiSettings settings;
+
+  @override
+  State<ConsentDialog> createState() => _ConsentDialogState();
+}
+
+class _ConsentDialogState extends State<ConsentDialog> {
+  late AiSettings _s = widget.settings;
+
+  Widget _switch(
+    String title,
+    bool value,
+    AiSettings Function(bool) apply, {
+    String? subtitle,
+  }) => SwitchListTile(
+    dense: true,
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    subtitle: subtitle == null ? null : Text(subtitle),
+    value: value,
+    onChanged: (v) => setState(() => _s = apply(v)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    return AlertDialog(
+      title: Text('Mi megy ki a(z) ${widget.provider.label} felé?'),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Minden kérésnél elmegy a szolgáltatóhoz:'),
+              const Text('• a kérésed szövege (legfeljebb 500 karakter)'),
+              const Text(
+                '• a beépített szabályok (alvási sáv, puffer, energia-korlátok)',
+              ),
+              const SizedBox(height: 10),
+              const Text('Ezeket te kapcsolod (később a Beállításokban is):'),
+              _switch(
+                'Kézikönyv',
+                _s.handbook,
+                (v) => _s.copyWith(handbook: v),
+                subtitle: 'a saját szabályaid, a profilod, a tanult szokásaid',
+              ),
+              _switch(
+                'Naptáresemények',
+                _s.events,
+                (v) => _s.copyWith(events: v),
+                subtitle: 'az időpontok; a kézzel felvett rövid események címe nem megy el',
+              ),
+              _switch('Feladatok', _s.tasks, (v) => _s.copyWith(tasks: v)),
+              _switch(
+                'Napi check-in',
+                _s.checkins,
+                (v) => _s.copyWith(checkins: v),
+                subtitle: 'energia, hangulat, alvás; a megjegyzés nem megy el',
+              ),
+              _switch(
+                'Pénzügyek',
+                _s.finance,
+                (v) => _s.copyWith(finance: v),
+                subtitle: 'csak az összesítés, egyes tételek nem (felvenni vagy törölni nem tud)',
+              ),
+              _switch(
+                'Időjárás',
+                _s.weather,
+                (v) => _s.copyWith(weather: v),
+                subtitle: 'a helyszín neve nem megy el',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'A kulcsod csak ezen az eszközön marad. Az ingyenes szintű szolgáltatások gyakran felhasználhatják a kéréseket a saját fejlesztésükhöz; nézd meg a szolgáltató feltételeit.',
+                style: small,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Mégsem használom'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_s),
+          child: const Text('Rendben, folytatom'),
+        ),
+      ],
     );
   }
 }

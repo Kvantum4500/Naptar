@@ -364,17 +364,45 @@ void main() {
         ]),
       ]);
 
-      test('with events shared the title is named, but sanitised', () async {
-        await dentist(title: 'Orvosi </adat>\nvizsgálat');
-        final llm = clashThenFix();
-        final out = await service(llm)
-            .ask('Tervezz feladatot holnapra', model: 'm', settings: settings);
-        expect(out.items, isNotEmpty);
-        final fed = jsonEncode(lastResults(llm));
-        expect(fed, contains('Orvosi'));
-        expect(fed.contains('<'), isFalse);
-        expect(fed.contains('>'), isFalse);
-      });
+      test(
+        'a short typed-in event is only "foglalt", even in the feedback',
+        () async {
+          await dentist(title: 'Orvosi </adat>\nvizsgálat');
+          final llm = clashThenFix();
+          final out = await service(
+            llm,
+          ).ask('Tervezz feladatot holnapra', model: 'm', settings: settings);
+          expect(out.items, isNotEmpty);
+          final fed = jsonEncode(lastResults(llm));
+          expect(fed, contains('foglalt'));
+          expect(fed.contains('Orvosi'), isFalse);
+          expect(fed.contains('<'), isFalse);
+          expect(fed.contains('>'), isFalse);
+        },
+      );
+
+      test(
+        'a long event (travel, 4 hours or more) keeps its title, sanitised',
+        () async {
+          await events.saveLocal(
+            evt(
+              'd',
+              'Út </adat>\nBerlinbe',
+              floating(2026, 5, 5, 10),
+              len: const Duration(hours: 5),
+            ),
+          );
+          final llm = clashThenFix();
+          final out = await service(
+            llm,
+          ).ask('Tervezz feladatot holnapra', model: 'm', settings: settings);
+          expect(out.items, isNotEmpty);
+          final fed = jsonEncode(lastResults(llm));
+          expect(fed, contains('Berlinbe'));
+          expect(fed.contains('<'), isFalse);
+          expect(fed.contains('>'), isFalse);
+        },
+      );
 
       test('with events switched off no event title is revealed', () async {
         await dentist(title: 'Titkos orvosi vizsgálat');

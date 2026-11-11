@@ -513,6 +513,16 @@ void main() {
         expect(find.text('Nincs API-kulcs'), findsOneWidget);
         await tester.enterText(find.byType(TextField).first, 'AIza-good');
         await tester.tap(find.text('Mentés és ellenőrzés'));
+        // (the button spins while the key is checked: pumpAndSettle would wait
+        // for it forever) the first key at a provider asks what goes out
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(
+          find.text('Mi megy ki a(z) Google Gemini felé?'),
+          findsOneWidget,
+        );
+        expect(keys.value, isNull); // nothing is kept before the answer
+        await tester.tap(find.text('Rendben, folytatom'));
         await tester.pumpAndSettle();
 
         expect(find.textContaining('Rendben van, elmentve'), findsOneWidget);
@@ -527,6 +537,157 @@ void main() {
           () => db.select(db.metaRows).get(),
         ))!.map((r) => '${r.key}${r.value}').join();
         expect(dbDump.contains('AIza'), isFalse);
+        await shutdown(tester, db);
+      },
+    );
+
+    // ---- the first key at a provider says what goes out
+    Future<void> saveKey(WidgetTester tester, String key) async {
+      await tester.enterText(find.byType(TextField).first, key);
+      await tester.tap(find.text('Mentés és ellenőrzés'));
+      // (the button spins while the key is checked: no pumpAndSettle)
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Finder inDialog(String text) => find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.text(text),
+    );
+
+    testWidgets(
+      '"Mégsem használom": the key is not kept, nothing is remembered',
+      (tester) async {
+        await boot(tester, const SettingsPage());
+        await saveKey(tester, 'AIza-good');
+        expect(
+          find.text('Mi megy ki a(z) Google Gemini felé?'),
+          findsOneWidget,
+        );
+        // what always goes, and the switches for the rest (the handbook too)
+        expect(
+          inDialog('• a kérésed szövege (legfeljebb 500 karakter)'),
+          findsOneWidget,
+        );
+        for (final t in [
+          'Kézikönyv',
+          'Naptáresemények',
+          'Feladatok',
+          'Napi check-in',
+          'Pénzügyek',
+          'Időjárás',
+        ]) {
+          expect(inDialog(t), findsOneWidget, reason: t);
+        }
+        await tester.tap(find.text('Mégsem használom'));
+        await tester.pumpAndSettle();
+        expect(keys.value, isNull);
+        expect(find.textContaining('nem mentettem el'), findsOneWidget);
+        expect(
+          await tester.runAsync(
+            () =>
+                ref0(tester)
+                    .read(aiSettingsStoreProvider)
+                    .consentGiven('gemini'),
+          ),
+          isFalse,
+        );
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'accepted with a switch turned off: the choice is kept, and the dialog does not come back',
+      (tester) async {
+        await boot(tester, const SettingsPage());
+        await saveKey(tester, 'AIza-good');
+        // the optional parts start as they are in the settings (all on) ...
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.widgetWithText(SwitchListTile, 'Naptáresemények'),
+          ),
+        );
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.widgetWithText(SwitchListTile, 'Kézikönyv'),
+          ),
+        );
+        await tester.pump();
+        await tester.tap(find.text('Rendben, folytatom'));
+        await tester.pumpAndSettle();
+
+        expect(keys.value, 'AIza-good');
+        final store = ref0(tester).read(aiSettingsStoreProvider);
+        final s = (await tester.runAsync(store.load))!;
+        expect((s.events, s.handbook), (false, false));
+        expect(
+          (s.tasks, s.checkins, s.finance, s.weather),
+          (true, true, true, true),
+        );
+        expect(
+          await tester.runAsync(() => store.consentGiven('gemini')),
+          isTrue,
+        );
+
+        // a second save at the same provider does not ask again
+        await tester.enterText(find.byType(TextField).first, 'AIza-other');
+        await tester.tap(find.text('Mentés és ellenőrzés'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(keys.value, 'AIza-other');
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('the handbook switch is among the sharing switches', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      final list = find.byType(Scrollable).first;
+      final sw = find.widgetWithText(
+        SwitchListTile,
+        'Kézikönyv (szabályok, profil, tanult szokások)',
+      );
+      await tester.scrollUntilVisible(sw, 300, scrollable: list);
+      await tester.ensureVisible(sw);
+      await tester.pumpAndSettle();
+      await tester.tap(sw);
+      await tester.pumpAndSettle();
+      final s = (await tester.runAsync(
+        () => ref0(tester).read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect(s.handbook, isFalse);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'the settings show today\'s requests and tokens at this provider',
+      (tester) async {
+        await boot(tester, const SettingsPage());
+        final nb = String.fromCharCode(0xA0);
+        final store = ref0(tester).read(aiSettingsStoreProvider);
+        await tester.runAsync(() async {
+          await store.recordCall(
+            provider: 'gemini',
+            model: 'm',
+            usage: const LlmUsage(prompt: 12000, output: 500, thinking: 100),
+          );
+          await store.recordCall(
+            provider: 'groq', // another provider: not in this line
+            model: 'm',
+            usage: const LlmUsage(prompt: 999999),
+          );
+        });
+        ref0(tester).invalidate(aiUsageProvider);
+        await tester.pumpAndSettle();
+        final list = find.byType(Scrollable).first;
+        final line = find.text(
+          'Ma ennél a szolgáltatónál: 1 kérés · 12${nb}600 token (be 12${nb}000 · ki 600)',
+        );
+        await tester.scrollUntilVisible(line, 300, scrollable: list);
+        expect(line, findsOneWidget);
         await shutdown(tester, db);
       },
     );
@@ -661,6 +822,8 @@ void main() {
         300,
         scrollable: list,
       );
+      await tester.ensureVisible(find.text('Naptáresemények'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Naptáresemények'));
       await tester.pumpAndSettle();
       final s = await tester.runAsync(
@@ -668,6 +831,7 @@ void main() {
       );
       expect((s!.events, s.tasks, s.checkins), (false, true, true));
       expect(s.finance, isTrue); // on by default
+      expect(s.handbook, isTrue); // on by default
 
       final fin = find.text('Pénzügyek (csak olvasás)');
       await tester.scrollUntilVisible(fin, 300, scrollable: list);
@@ -1248,8 +1412,13 @@ void main() {
         ),
         isEmpty,
       );
+      await tester.ensureVisible(
+        find.text('Ne tervezz edzést reggel 8 előtt.'),
+      );
       await tester.tap(find.text('Ne tervezz edzést reggel 8 előtt.'));
       await tester.pump();
+      await tester.ensureVisible(find.text('Megjegyzem'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Megjegyzem'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Rögzítve a Tanult szokások'), findsOneWidget);
@@ -1272,6 +1441,8 @@ void main() {
       await tester.tap(find.byTooltip('Küldés'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Elvetem'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Nem most'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Nem most'));
       await tester.pumpAndSettle();
@@ -1369,6 +1540,117 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    // ---- what the model is sent, and what it cost
+    testWidgets(
+      '"Mit küldünk a modellnek?" shows the request and sends nothing',
+      (tester) async {
+        final llm = FakeGemini([]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        expect(find.textContaining('Becsült méret'), findsNothing);
+        await tester.enterText(find.byType(TextField), 'Tervezz edzést');
+        await tester.tap(find.text('Mit küldünk a modellnek?'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Becsült méret: ≈'), findsOneWidget);
+        expect(find.textContaining('esemenyek: ≈'), findsOneWidget);
+        expect(find.textContaining('feladatok: ≈'), findsOneWidget);
+
+        // the text itself, ending in the user's own words
+        await tester.tap(find.text('A kérés szövege (adatok, idő, kérésed)'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Kérés: Tervezz edzést'), findsOneWidget);
+        expect(find.textContaining('MOST: 2026-05-04 10:00'), findsOneWidget);
+
+        // refreshed with new words
+        await tester.enterText(
+          find.byType(TextField),
+          'Mikor férne be 45 perc?',
+        );
+        await tester.ensureVisible(find.text('Frissítés a beírt kéréssel'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Frissítés a beírt kéréssel'));
+        await tester.pumpAndSettle();
+        // (the text tile stays open across a refresh)
+        expect(
+          find.textContaining('Kérés: Mikor férne be 45 perc?'),
+          findsOneWidget,
+        );
+
+        // nothing was sent, nothing was counted
+        expect(llm.requests, isEmpty);
+        expect(
+          await tester.runAsync(
+            () => ref0(tester).read(aiSettingsStoreProvider).usageToday(),
+          ),
+          0,
+        );
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('the cost of the last request: the provider\'s numbers', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) => LlmReply(
+          parts: [
+            tool('propose_events', {
+              'summary': 'Terv',
+              'proposals': [
+                item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+              ],
+            }),
+          ],
+          promptTokens: 2700,
+          outputTokens: 420,
+          thinkingTokens: 80,
+        ),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'Tervezz edzést');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      final nb = String.fromCharCode(0xA0);
+      expect(
+        find.text(
+          'Utolsó kérés: 3${nb}200 token (be 2${nb}700 · ki 420 · gondolkodás 80)',
+        ),
+        findsOneWidget,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('no numbers from the provider: the estimate is shown as one', (
+      tester,
+    ) async {
+      final llm = FakeGemini([(_) => say('Rendben, mikor?')]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'Mikor edzek?');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Utolsó kérés: ≈'), findsOneWidget);
+      expect(
+        find.textContaining('a szolgáltató nem közölt adatot'),
+        findsOneWidget,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the request is at most 500 characters', (tester) async {
+      await boot(tester, const AssistantPage(), llm: FakeGemini([]), key: 'k');
+      await tester.enterText(find.byType(TextField), 'a' * 700);
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(find.byType(TextField))
+            .controller!
+            .text
+            .length,
+        500,
+      );
+      expect(find.text('500/500'), findsOneWidget);
+      await shutdown(tester, db);
+    });
 
     // ---- "Mégse", leaving the page, closing the connection
     Future<void> pumpBriefly(WidgetTester tester) async {

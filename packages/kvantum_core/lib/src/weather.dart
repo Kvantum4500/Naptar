@@ -110,10 +110,11 @@ String _line(DayWeather w) {
   return parts.join(', ');
 }
 
-/// Data block for the assistant. [place] is only the place's name.
+/// Data block for the assistant: one short line per day. The name of the place
+/// does not go with it (the forecast is looked up by coordinates elsewhere; the
+/// model has no use for the city).
 Map<String, Object?> weatherForTool(
   List<DayWeather> days, {
-  required String place,
   bool enabled = true,
 }) {
   if (!enabled) {
@@ -127,7 +128,6 @@ Map<String, Object?> weatherForTool(
   String md(DateTime d) =>
       '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   return {
-    'helyszin': place,
     'napok': {for (final w in days) md(w.day): _line(w)},
   };
 }

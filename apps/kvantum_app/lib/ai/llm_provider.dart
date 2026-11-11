@@ -68,12 +68,34 @@ class LlmReply {
     required this.parts,
     this.promptTokens,
     this.outputTokens,
+    this.thinkingTokens,
+    this.cachedTokens,
     this.finishReason,
   });
   final List<LlmPart> parts;
+
+  /// What the service counted for the request (null: it did not say).
   final int? promptTokens;
+
+  /// The visible answer / tool call, WITHOUT the hidden thinking.
   final int? outputTokens;
+
+  /// Hidden thinking, billed like output but counted apart.
+  final int? thinkingTokens;
+
+  /// The part of [promptTokens] that was served from the provider's cache.
+  final int? cachedTokens;
   final String? finishReason;
+
+  /// What this reply cost, when the service reported anything.
+  LlmUsage? get usage => promptTokens == null && outputTokens == null
+      ? null
+      : LlmUsage(
+          prompt: promptTokens ?? 0,
+          output: outputTokens ?? 0,
+          thinking: thinkingTokens ?? 0,
+          cached: cachedTokens ?? 0,
+        );
 
   /// The reply stopped at the length cap, so it may be incomplete.
   bool get truncated =>
@@ -82,6 +104,52 @@ class LlmReply {
   String get text =>
       parts.whereType<LlmText>().map((p) => p.text).join('\n').trim();
   List<LlmToolCall> get toolCalls => parts.whereType<LlmToolCall>().toList();
+}
+
+/// Tokens one or more model calls used. [total] is what counts against a
+/// per-minute or per-day token limit.
+class LlmUsage {
+  const LlmUsage({
+    this.prompt = 0,
+    this.output = 0,
+    this.thinking = 0,
+    this.cached = 0,
+  });
+  static const zero = LlmUsage();
+
+  final int prompt;
+  final int output;
+  final int thinking;
+
+  /// Included in [prompt] (cheaper or free at some providers).
+  final int cached;
+
+  int get total => prompt + output + thinking;
+  bool get isZero => total == 0;
+
+  LlmUsage operator +(LlmUsage o) => LlmUsage(
+    prompt: prompt + o.prompt,
+    output: output + o.output,
+    thinking: thinking + o.thinking,
+    cached: cached + o.cached,
+  );
+
+  Map<String, int> toJson() => {
+    'p': prompt,
+    'o': output,
+    't': thinking,
+    'c': cached,
+  };
+
+  static LlmUsage fromJson(Object? j) {
+    int n(String k) => j is Map && j[k] is num ? (j[k] as num).toInt() : 0;
+    return LlmUsage(
+      prompt: n('p'),
+      output: n('o'),
+      thinking: n('t'),
+      cached: n('c'),
+    );
+  }
 }
 
 class LlmModel {

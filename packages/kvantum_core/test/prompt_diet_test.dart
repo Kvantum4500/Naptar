@@ -125,6 +125,125 @@ void main() {
       expect(only(task(priority: 3, energy: 5))['e'], 5);
     });
 
+    group('planning only needs to know WHEN the user is busy', () {
+      Occurrence ev(
+        String title,
+        int fromH,
+        int toH, {
+        bool shift = false,
+        bool ai = false,
+        bool allDay = false,
+        int toMin = 0,
+      }) => Occurrence(
+        eventId: 'id-${title.length}', // (a real id never contains the title)
+        title: title,
+        allDay: allDay,
+        tzid: allDay ? null : bp,
+        startUtc: allDay ? at(5, 0) : at(5, fromH),
+        endUtc: allDay ? at(6, 0) : at(5, toH, toMin),
+        originalStart: floating(2026, 5, 5, fromH),
+        isShift: shift,
+        aiGenerated: ai,
+      );
+
+      List<String> titles(List<Occurrence> list, {required bool hide}) => [
+        for (final day
+            in (eventsForTool(list, tz: bp, hideTitles: hide)['esemenyek']
+                    as Map)
+                .values)
+          for (final row in day as List) (row as Map)['c'] as String,
+      ];
+
+      test('a short typed-in event is just "foglalt"', () {
+        final list = [ev('Fogorvos Kiss Péter', 9, 10)];
+        expect(titles(list, hide: true), [busyTitle]);
+        expect(titles(list, hide: false), ['Fogorvos Kiss Péter']);
+        expect(
+          dataBlock(
+            'esemenyek',
+            eventsForTool(list, tz: bp, hideTitles: true),
+          ).contains('Fogorvos'),
+          isFalse,
+        );
+      });
+
+      test('a long one keeps its title: travel days matter to the rules', () {
+        // 4 hours: kept; one minute less: hidden
+        expect(titles([ev('Repülőút Berlin', 8, 12)], hide: true), [
+          'Repülőút Berlin',
+        ]);
+        expect(titles([ev('Konferencia', 8, 11, toMin: 59)], hide: true), [
+          busyTitle,
+        ]);
+        expect(longEvent, const Duration(hours: 4));
+      });
+
+      test(
+        'shifts, the assistant\'s own events and all-day events keep theirs',
+        () {
+          final list = [
+            ev('Éjszakás műszak', 9, 10, shift: true),
+            ev('Calisthenics 45 perc', 11, 12, ai: true),
+            ev('Munkaszüneti nap', 0, 0, allDay: true),
+          ];
+          expect(titles(list, hide: true), [
+            'Munkaszüneti nap',
+            'Éjszakás műszak',
+            'Calisthenics 45 perc',
+          ]);
+        },
+      );
+
+      test('the times are untouched', () {
+        final r = eventsForTool(
+          [ev('Titok', 9, 10)],
+          tz: bp,
+          hideTitles: true,
+          withRefs: false,
+        );
+        final row =
+            ((r['esemenyek'] as Map).values.single as List).single as Map;
+        expect(row, {'k': '09:00', 'v': '10:00', 'c': busyTitle});
+      });
+    });
+
+    test(
+      'tasks: the most urgent come first, and a cut drops the least urgent',
+      () {
+        TaskView task(String id, {DateTime? due, int priority = 2}) => TaskView(
+          SyncRecord(id: id, kind: kindTask).edit(
+            taskFields(title: 'F $id', due: due, priority: priority),
+            ts: 1,
+            dev: 'A',
+          ),
+        );
+        final today = floating(2026, 5, 4);
+        final list = [
+          task('nodue'),
+          task('late-week', due: floating(2026, 5, 12)),
+          task('overdue', due: floating(2026, 5, 1)),
+          task('soon-low', due: floating(2026, 5, 6), priority: 1),
+          task('soon-high', due: floating(2026, 5, 6), priority: 3),
+          task('nodue-high', priority: 3),
+        ];
+        List<String> order(Map<String, Object?> r) => [
+          for (final t in r['feladatok'] as List) (t as Map)['c'] as String,
+        ];
+        expect(order(tasksForTool(list, today: today)), [
+          'F overdue',
+          'F soon-high',
+          'F soon-low',
+          'F late-week',
+          'F nodue-high',
+          'F nodue',
+        ]);
+        final cut = tasksForTool(list, today: today, max: 3);
+        expect(order(cut), ['F overdue', 'F soon-high', 'F soon-low']);
+        expect(cut['levagva'], isTrue);
+        expect(cut['osszes'], 6);
+      },
+    );
+
     test('weather lines are keyed by month-day', () {
       final days = weatherForTool([
         DayWeather(
@@ -136,7 +255,7 @@ void main() {
           windMax: 12,
           code: 1,
         ),
-      ], place: 'Budapest')['napok'];
+      ])['napok'];
       expect((days as Map).keys, ['05-05']);
     });
   });

@@ -90,11 +90,13 @@ class HandbookStore {
   /// and decoration that only help while editing ([compactHandbook]); a file
   /// with nothing left is left out altogether. With [only] just those files
   /// (by id) are included: a request that deletes an event does not need the
-  /// training rules.
-  Future<String> combined({Set<String>? only}) async {
+  /// training rules. With [skip] those files are left out (the budget guard
+  /// drops the learned habits first).
+  Future<String> combined({Set<String>? only, Set<String>? skip}) async {
     final b = StringBuffer();
     for (final (id, title) in handbookFiles) {
       if (only != null && !only.contains(id)) continue;
+      if (skip != null && skip.contains(id)) continue;
       final body = compactHandbook(await textOf(id));
       if (body.isEmpty) continue;
       b.writeln('## $title');

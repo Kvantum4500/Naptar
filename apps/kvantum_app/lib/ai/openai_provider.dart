@@ -228,14 +228,22 @@ class OpenAiProvider implements LLMProvider {
       );
     }
     final usage = json['usage'];
+    int? n(Object? v) => v is num ? v.toInt() : null;
+    final completion = usage is Map ? n(usage['completion_tokens']) : null;
+    final details = usage is Map ? usage['completion_tokens_details'] : null;
+    final thinking = details is Map ? n(details['reasoning_tokens']) : null;
+    final promptDetails = usage is Map ? usage['prompt_tokens_details'] : null;
     return LlmReply(
       parts: parts,
       finishReason: reason,
-      promptTokens: usage is Map
-          ? (usage['prompt_tokens'] as num?)?.toInt()
-          : null,
-      outputTokens: usage is Map
-          ? (usage['completion_tokens'] as num?)?.toInt()
+      promptTokens: usage is Map ? n(usage['prompt_tokens']) : null,
+      // completion_tokens counts the hidden reasoning too: split it off
+      outputTokens: completion == null
+          ? null
+          : (completion - (thinking ?? 0)).clamp(0, completion),
+      thinkingTokens: thinking,
+      cachedTokens: promptDetails is Map
+          ? n(promptDetails['cached_tokens'])
           : null,
     );
   }

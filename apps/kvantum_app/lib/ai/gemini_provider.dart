@@ -149,15 +149,16 @@ class GeminiProvider implements LLMProvider {
       );
     }
     final usage = json['usageMetadata'];
+    int? n(String key) =>
+        usage is Map && usage[key] is num ? (usage[key] as num).toInt() : null;
     return LlmReply(
       parts: parts,
       finishReason: reason,
-      promptTokens: usage is Map
-          ? (usage['promptTokenCount'] as num?)?.toInt()
-          : null,
-      outputTokens: usage is Map
-          ? (usage['candidatesTokenCount'] as num?)?.toInt()
-          : null,
+      promptTokens: n('promptTokenCount'),
+      outputTokens: n('candidatesTokenCount'),
+      // hidden thinking is billed as output but not part of candidatesTokenCount
+      thinkingTokens: n('thoughtsTokenCount'),
+      cachedTokens: n('cachedContentTokenCount'),
     );
   }
 

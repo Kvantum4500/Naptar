@@ -2,6 +2,25 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 2c. fázis – átláthatóság: mit küld ki az asszisztens, és mennyibe kerül
+
+**Látod, mit küldünk, és mennyi az**
+- **„Mit küldünk a modellnek?”** összecsukható panel az Asszisztens oldalon: a kérés becsült mérete részekre bontva (utasítás, eszközök, adatblokkok), és maga a szöveg (adatok, idő, a kérésed; az utasítások). Ugyanaz a kód állítja össze, mint a valódi kérést, tehát amit itt látsz, azt küldjük; hálózati hívás és számlálás nélkül. A „Frissítés a beírt kéréssel” gombbal újraépíthető.
+- **Használat:** a Beállításokban „Ma ennél a szolgáltatónál: N kérés · M token (be X · ki Y)” a szolgáltató saját számaiból (a rejtett gondolkodás és a gyorsítótár külön tartva); az Asszisztens oldalon „Utolsó kérés: …”, a szolgáltató adataival, ennek híján a program becslésével („≈”). Csak a **megválaszolt** hívás számít: egy 429-es vagy szerverhibás próba semmit sem használt el.
+- **Költségvetés-őr:** ha a kérés becsült mérete meghaladná a szolgáltató percenkénti keretét (Groq: 5 500 token a 8 000-ből, a válaszkeret levonása után; a többi: 20 000), a program sorban elhagy részeket: időjárás → szabad idősáv-lista (a `find_free_slots` eszköz marad) → a feladatok a 8 legsürgősebbre → az időablak 14→7→4 napra → a Tanult szokások. Csak azt sorolja fel, amivel tényleg spórolt, és a válasz mellett jelzi, mi maradt ki. Ha így sem fér, a kérés elmegy (413-ra a 2b szűkített újrapróbálása van).
+
+**Mi megy ki, és mi nem**
+- **Beleegyezés:** az első kulcs elmentésekor (szolgáltatónként egyszer, a mentés **előtt**) párbeszéd mondja el, mi megy a szolgáltatóhoz: a kérésed (legfeljebb 500 karakter) és a beépített szabályok mindig; a Kézikönyv és az adatkategóriák kapcsolóval. „Mégsem használom”: a kulcs nem mentődik. A már mentett kulcsoknál nem kérdez újra. A pénzügy alapból BE marad (a te döntésed), de itt látszik.
+- **Kézikönyv-kapcsoló** (Beállítások → Mit láthat az asszisztens?): kikapcsolva csak a beépített szabályok mennek el.
+- **Kevesebb személyes adat:** a pénzügyi alap blokkban nincs egyes tétel (kereskedő, megjegyzés), csak az összesítés, a keretek és a célok; egy hónap tételei csak akkor mennek, ha a modell azt kéri. A check-in szöveges megjegyzése nem megy ki. Az időjárás-blokkban nincs a helyszín neve. Tervezésnél a kézzel felvett, 4 óránál rövidebb események címe „foglalt” (a modellnek az időpont kell, nem az ok); a hosszabbaké (utazás, konferencia), a műszakoké, a saját javaslatoké és az egész napos eseményeké megmarad. Törlésnél / áthelyezésnél a nevek kellenek, ott látszanak. A szabálysértés visszajelzése sem árulja el a rövid események címét.
+- A kérés szövege legfeljebb 500 karakter (a mező is korlátozza), és tisztítva megy.
+- A feladatok sürgősség szerint rendezve mennek (késésben → határidő → prioritás).
+- Szövegek igazítva (pénz-kapcsoló, időjárás-bekezdés).
+
+Becsült kérésméretek (mintanaptár, 3 karakter = 1 token): tervezés ≈ 2 900, törlés ≈ 1 400, pénzügyi kérdés ≈ 460.
+
+**Nem ellenőrizhető itt:** a szolgáltatók valódi használat-mezői élőben (a feldolgozás a dokumentált alakra épül); hogy a „foglalt” címek mellett a modell jól tartja-e az utazás-szabályt; a becslés pontossága a szolgáltató saját számlálójához képest.
+
 ## 2b. fázis – az asszisztens kitartóbb, ha valami elromlik
 
 **Mi történik most, ha valami elromlik**
