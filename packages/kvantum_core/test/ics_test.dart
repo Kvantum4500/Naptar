@@ -160,4 +160,235 @@ END:VCALENDAR
     expect(r.events.length, 4);
     expect(r.problems, isNotEmpty);
   });
+
+  group('UNTIL: a UTC instant in the file, a wall-clock limit in the app', () {
+    String file(String dtstart, String rrule, {String extra = ''}) =>
+        'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:u1\r\n'
+        '$dtstart\r\nDTEND;TZID=Europe/Budapest:20260504T100000\r\n'
+        'SUMMARY:Edzés\r\nRRULE:$rrule\r\n$extra'
+        'END:VEVENT\r\nEND:VCALENDAR\r\n';
+
+    Future<int> count(CalEvent e) async =>
+        expand(e, DateTime.utc(2026, 5, 1), DateTime.utc(2026, 6, 1)).length;
+
+    test('a timed series ends on the day the file says (not one early)', () async {
+      // 07:00 UTC is 09:00 in Budapest in May: the fifth occurrence is the last
+      final imp = parseIcs(
+        file(
+          'DTSTART;TZID=Europe/Budapest:20260504T090000',
+          'FREQ=DAILY;UNTIL=20260508T070000Z',
+        ),
+        calendarId: 'c',
+      );
+      final e = imp.events.single;
+      expect(e.rrule, 'FREQ=DAILY;UNTIL=20260508T090000Z');
+      expect(await count(e), 5);
+    });
+
+    test('an all-day series includes its last day', () async {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u2\r\n'
+        'DTSTART;VALUE=DATE:20260504\r\nDTEND;VALUE=DATE:20260505\r\n'
+        'SUMMARY:Szabi\r\nRRULE:FREQ=DAILY;UNTIL=20260508\r\n'
+        'END:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      final e = imp.events.single;
+      expect(e.rrule, 'FREQ=DAILY;UNTIL=20260508T235959Z');
+      expect(await count(e), 5);
+    });
+
+    test(
+      'the file we write says UTC, and reads back as the same series',
+      () async {
+        final series = ev(
+          's',
+          'Edzés',
+          floating(2026, 5, 4, 9),
+          floating(2026, 5, 4, 10),
+          rrule: 'FREQ=DAILY;UNTIL=20260508T090000Z',
+        );
+        final text = exportIcs([series]);
+        expect(text, contains('UNTIL=20260508T070000Z'));
+        final back = parseIcs(text, calendarId: 'c').events.single;
+        expect(back.rrule, series.rrule);
+        expect(await count(back), 5);
+      },
+    );
+
+    test('a COUNT rule is left as it is', () {
+      final imp = parseIcs(
+        file(
+          'DTSTART;TZID=Europe/Budapest:20260504T090000',
+          'FREQ=DAILY;COUNT=3',
+        ),
+        calendarId: 'c',
+      );
+      expect(imp.events.single.rrule, 'FREQ=DAILY;COUNT=3');
+    });
+  });
+
+  group('deleted occurrences travel as EXDATEs of their series', () {
+    CalEvent series() => ev(
+      'm',
+      'Edzés',
+      floating(2026, 5, 4, 9),
+      floating(2026, 5, 4, 10),
+      rrule: 'FREQ=DAILY;COUNT=5',
+      ex: [floating(2026, 5, 5, 9)],
+    );
+    CalEvent cancelled(DateTime at) => CalEvent(
+      id: 'x-${at.day}',
+      calendarId: 'naptar',
+      title: 'Edzés',
+      tzid: 'Europe/Budapest',
+      start: at,
+      end: at.add(const Duration(hours: 1)),
+      recurringEventId: 'm',
+      originalStart: at,
+      cancelled: true,
+    );
+
+    test(
+      'the cancelled row is not an event of its own, the series says it',
+      () {
+        final text = exportIcs([series(), cancelled(floating(2026, 5, 6, 9))]);
+        expect('BEGIN:VEVENT'.allMatches(text), hasLength(1));
+        expect(text, contains('EXDATE;TZID=Europe/Budapest:20260505T090000'));
+        expect(text, contains('EXDATE;TZID=Europe/Budapest:20260506T090000'));
+      },
+    );
+
+    test('after reading it back the occurrence is still gone', () {
+      final text = exportIcs([series(), cancelled(floating(2026, 5, 6, 9))]);
+      final back = parseIcs(text, calendarId: 'c').events.single;
+      final days = expand(
+        back,
+        DateTime.utc(2026, 5, 1),
+        DateTime.utc(2026, 6, 1),
+      ).map((o) => toWallClock('Europe/Budapest', o.startUtc).day);
+      expect(days, [4, 7, 8]);
+    });
+
+    test('a date listed twice is written once', () {
+      final text = exportIcs([series(), cancelled(floating(2026, 5, 5, 9))]);
+      expect('EXDATE'.allMatches(text), hasLength(1));
+    });
+
+    test('an exception that is NOT cancelled is still an event of its own', () {
+      final moved = cancelled(floating(2026, 5, 6, 9))
+          .copyWith(cancelled: false, title: 'Átrakva', bumpVersion: false);
+      final text = exportIcs([series(), moved]);
+      expect('BEGIN:VEVENT'.allMatches(text), hasLength(2));
+      expect(
+        text,
+        contains('RECURRENCE-ID;TZID=Europe/Budapest:20260506T090000'),
+      );
+    });
+  });
+
+  group('what is refused, with a reason', () {
+    String one(
+      String start,
+      String end, {
+      String tz = ';TZID=Europe/Budapest',
+    }) =>
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\n'
+        'DTSTART$tz:$start\r\nDTEND$tz:$end\r\nSUMMARY:Valami\r\n'
+        'END:VEVENT\r\nEND:VCALENDAR\r\n';
+
+    test('a timed event of years (an end date of 9999) is skipped', () {
+      final imp = parseIcs(
+        one('20260504T090000', '99990504T090000'),
+        calendarId: 'c',
+      );
+      expect(imp.events, isEmpty);
+      expect(imp.problems.single, contains('túl hosszú'));
+    });
+
+    test(
+      'a year or two of timed event is skipped, a normal long one is kept',
+      () {
+        expect(
+          parseIcs(
+            one('20260504T090000', '20270910T090000'),
+            calendarId: 'c',
+          ).events,
+          isEmpty,
+        );
+        expect(
+          parseIcs(
+            one('20260504T090000', '20260801T090000'),
+            calendarId: 'c',
+          ).events,
+          hasLength(1),
+          reason: 'a three-month event is fine',
+        );
+      },
+    );
+
+    test('all-day: up to ten years is fine, more is skipped', () {
+      String allDay(String a, String b) => one(a, b, tz: ';VALUE=DATE');
+      expect(
+        parseIcs(allDay('20260504', '20300504'), calendarId: 'c').events,
+        hasLength(1),
+      );
+      final imp = parseIcs(allDay('20260504', '20400504'), calendarId: 'c');
+      expect(imp.events, isEmpty);
+      expect(imp.problems.single, contains('túl hosszú'));
+    });
+
+    test('dates far from this century are skipped', () {
+      for (final y in ['18500101', '21500101']) {
+        final imp = parseIcs(
+          one('${y}T090000', '${y}T100000'),
+          calendarId: 'c',
+        );
+        expect(imp.events, isEmpty, reason: y);
+        expect(imp.problems.single, contains('időpont'));
+      }
+    });
+
+    test('a file beyond the size limit is not read at all', () {
+      final text = one('20260504T090000', '20260504T100000');
+      final imp = parseIcs(text, calendarId: 'c', maxChars: 100);
+      expect(imp.events, isEmpty);
+      expect(imp.problems.single, contains('túl nagy'));
+      expect(parseIcs(text, calendarId: 'c').events, hasLength(1));
+    });
+  });
+
+  group('long folded lines', () {
+    test(
+      'a description of megabytes in 75-octet pieces is read in moments',
+      () {
+        final b = StringBuffer(
+          'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:big\r\n'
+          'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+          'DTEND;TZID=Europe/Budapest:20260504T100000\r\nSUMMARY:Nagy\r\n'
+          'DESCRIPTION:start',
+        );
+        for (var i = 0; i < 30000; i++) {
+          b.write('\r\n ${'x' * 73}');
+        }
+        b.write('\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n');
+        final sw = Stopwatch()..start();
+        final imp = parseIcs(b.toString(), calendarId: 'c');
+        sw.stop();
+        expect(imp.events.single.notes.length, 5 + 30000 * 73);
+        expect(sw.elapsedMilliseconds, lessThan(3000));
+      },
+    );
+
+    test('a folded title is joined back together', () {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:f\r\n'
+        'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+        'SUMMARY:Hosszú\r\n  cím\r\n\tfolytatás\r\n'
+        'END:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      expect(imp.events.single.title, 'Hosszú címfolytatás');
+    });
+  });
 }

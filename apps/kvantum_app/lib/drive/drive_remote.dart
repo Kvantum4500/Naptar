@@ -109,6 +109,8 @@ class DriveReport {
     this.full = false,
     this.stoppedEarly = false,
     this.finChanged = true,
+    this.newerFormat = 0,
+    this.purged = 0,
     this.hint,
   });
   final int pulled;
@@ -121,6 +123,12 @@ class DriveReport {
 
   /// See [DrivePull.finChanged].
   final bool finChanged;
+
+  /// Files a newer version of the app wrote: left exactly as they are.
+  final int newerFormat;
+
+  /// Old markers of deleted records forgotten in this run.
+  final int purged;
 
   /// Why the run stopped early (when it did).
   final RetryHint? hint;

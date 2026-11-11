@@ -472,10 +472,75 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visszaállítás fájlból'));
       await tester.pumpAndSettle();
+      // the event changed since the backup: the app asks before overwriting
+      expect(find.byKey(const Key('import-choice')), findsOneWidget);
+      expect(
+        (await tester.runAsync(() => events.byId('b2')))!.title,
+        'Átírt',
+        reason: 'nothing is written before the answer',
+      );
+      await tester.tap(find.byKey(const Key('import-all')));
+      await tester.pumpAndSettle();
       final e = (await tester.runAsync(() => events.byId('b2')))!;
       expect(e.title, 'Edzés');
       expect(e.googleId, 'g-1');
       expect(e.version, greaterThan(linked.version + 1));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a restore never overwrites a changed event unasked', (
+      tester,
+    ) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      final changed = evt('c1', 'Edzés', floating(2026, 11, 20, 9));
+      final gone = evt('c2', 'Fogorvos', floating(2026, 11, 21, 9));
+      await tester.runAsync(() => events.saveAll([changed, gone]));
+      final backup = (await tester.runAsync(() => exportBackup(events)))!;
+      await tester.runAsync(() async {
+        await events.saveLocal(changed.copyWith(title: 'Átírt'));
+        await events.deleteLocal('c2');
+      });
+      io.toPick = backup;
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: scroll,
+      );
+      Future<void> restore() async {
+        await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Visszaállítás fájlból'));
+        await tester.pumpAndSettle();
+      }
+
+      // Mégse: nothing at all is written, not even the missing event
+      await restore();
+      expect(find.byKey(const Key('import-choice')), findsOneWidget);
+      expect(find.textContaining('Átírt'), findsOneWidget, reason: 'listed');
+      await tester.tap(find.byKey(const Key('import-cancel')));
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.byId('c1')))!.title, 'Átírt');
+      expect(await tester.runAsync(() => events.byId('c2')), isNull);
+
+      // Csak az újak: the missing event returns, the changed one stays
+      await restore();
+      await tester.tap(find.byKey(const Key('import-new')));
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.byId('c1')))!.title, 'Átírt');
+      expect(await tester.runAsync(() => events.byId('c2')), isNotNull);
+      expect(
+        find.textContaining('1 módosult eseményt nem írtam felül'),
+        findsOneWidget,
+      );
+
+      // the second time there is nothing new: only the overwrite is offered
+      await restore();
+      expect(find.byKey(const Key('import-new')), findsNothing);
+      await tester.tap(find.text('Felülírás'));
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.byId('c1')))!.title, 'Edzés');
       await shutdown(tester, db);
     });
 

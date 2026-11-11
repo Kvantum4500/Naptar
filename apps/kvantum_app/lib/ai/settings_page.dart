@@ -8,6 +8,7 @@ import '../finance/wallet_settings.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import '../ui/backup_io.dart';
+import '../ui/import_choice.dart';
 import '../update/update_dialog.dart';
 import 'ai_providers.dart';
 import 'location_service.dart';
@@ -262,6 +263,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         _toast('Ez nem pénzügyi mentésfájl.', error: true);
         return;
       }
+      if (r.newer) {
+        _toast(
+          'Ezt a mentést az alkalmazás egy újabb verziója készítette; frissítsd az alkalmazást, hogy visszaállíthasd.',
+          error: true,
+        );
+        return;
+      }
       _toast(
         any
             ? 'Pénzügyi adat visszaállítva: ${r.added} új, ${r.updated} frissítve${r.skipped > 0 ? ', ${r.skipped} elem kihagyva' : ''}.'
@@ -279,22 +287,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     try {
       final text = await ref.read(backupIoProvider).pick();
       if (text == null) return;
-      final r = await importBackup(
-        ref.read(repoProvider),
-        text,
-        calendarId: kNaptarCalendar,
-      );
+      final repo = ref.read(repoProvider);
+      final plan = await previewBackup(repo, text, calendarId: kNaptarCalendar);
+      // Events that changed on this device since the file was written are
+      // only overwritten when the user says so.
+      var overwrite = false;
+      if (plan.changes.isNotEmpty) {
+        if (!mounted) return;
+        final choice = await askImportChoice(context, plan);
+        if (choice == null) return;
+        overwrite = choice == ImportChoice.all;
+      }
+      final r = await applyBackup(repo, plan, overwrite: overwrite);
       if (r.total > 0) {
         ref.read(syncControllerProvider.notifier).requestSync();
       }
       final extra = r.problems.isEmpty
           ? ''
           : ' (${r.problems.length} elemet kihagytam vagy figyelmeztetéssel olvastam be)';
+      final nothing = r.total == 0 && r.unchanged == 0 && r.kept == 0;
+      final kept = r.kept > 0
+          ? ' ${r.kept} módosult eseményt nem írtam felül.'
+          : '';
       _toast(
-        r.total == 0 && r.unchanged == 0
+        nothing
             ? 'Nem találtam beolvasható eseményt a fájlban.$extra'
-            : 'Visszaállítva: ${r.added} új, ${r.updated} frissítve, ${r.unchanged} változatlan.$extra',
-        error: r.total == 0 && r.unchanged == 0,
+            : 'Visszaállítva: ${r.added} új, ${r.updated} frissítve, ${r.unchanged} változatlan.$kept$extra',
+        error: nothing,
       );
     } catch (e) {
       _toast('A visszaállítás nem sikerült: $e', error: true);

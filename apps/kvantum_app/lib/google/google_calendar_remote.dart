@@ -9,7 +9,6 @@ import '../data/event_repository.dart' show kNaptarCalendar;
 import '../sync/api_errors.dart';
 import '../sync/remote.dart';
 import '../sync/retry_after_client.dart';
-import 'rrule_convert.dart';
 
 const _appKey = 'appEventId';
 const _aiKey = 'ai';

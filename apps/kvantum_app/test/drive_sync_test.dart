@@ -366,4 +366,82 @@ void main() {
       expect(drive.files.values.single.name, 'workoutlog-$id.json');
     });
   });
+
+  group('files from a newer version of the app', () {
+    const future =
+        '{"v":2,"id":"t1","kind":"task","f":{"title":"a different shape"}}';
+
+    test(
+      'are not read, not overwritten and not mistaken for damaged ones',
+      () async {
+        await addTask('t1', 'Helyi');
+        drive.externalWrite('task-t1.json', future);
+        final r = await engine.sync();
+        expect(r.newerFormat, 1);
+        expect(r.skippedCorrupt, 0);
+        expect(r.pushed, 0);
+        expect(drive.files.values.single.content, future, reason: 'untouched');
+        expect(drive.writes, 0);
+        expect(await repo.dirtyCount(), 1, reason: 'ours waits for the update');
+      },
+    );
+
+    test('and stay that way run after run', () async {
+      await addTask('t1', 'Helyi');
+      drive.externalWrite('task-t1.json', future);
+      for (var i = 0; i < 3; i++) {
+        final r = await engine.sync();
+        expect(r.newerFormat, i == 0 ? 1 : lessThanOrEqualTo(1));
+        expect(drive.files.values.single.content, future);
+      }
+      expect(drive.writes, 0);
+    });
+
+    test('duplicates of such a file are not cleaned up', () async {
+      drive.externalWrite('task-t1.json', future);
+      drive.externalWrite('task-t1.json', future, duplicate: true);
+      await engine.sync();
+      expect(drive.files.length, 2);
+      expect(drive.deletes, 0);
+    });
+
+    test('a readable file next to them is handled as usual', () async {
+      drive.externalWrite('task-t1.json', future);
+      final other = repoFor(await newDb(), 'B');
+      final rec = await addTask('t2', 'Rendes', r: other);
+      drive.externalWrite('task-t2.json', rec.encode());
+      final r = await engine.sync();
+      expect((r.pulled, r.newerFormat), (1, 1));
+      expect(TaskView((await repo.get(kindTask, 't2'))!).title, 'Rendes');
+    });
+
+    test(
+      'once the file is in the old format again, it merges normally',
+      () async {
+        await addTask('t1', 'Helyi');
+        drive.externalWrite('task-t1.json', future);
+        await engine.sync();
+        final id = drive.files.keys.single;
+        drive.externalDelete(id);
+        drive.externalWrite(
+          'task-t1.json',
+          (await repo.get(kindTask, 't1'))!.encode(),
+        );
+        await engine.sync();
+        expect(await repo.dirtyCount(), 0);
+      },
+    );
+
+    test('a really damaged file is still replaced by ours', () async {
+      await addTask('t1', 'Helyi');
+      drive.externalWrite('task-t1.json', '{"id":"t1","kind":"task","f":5}');
+      final r = await engine.sync();
+      expect(r.skippedCorrupt, 1);
+      expect(r.newerFormat, 0);
+      expect(
+        SyncRecord.decode(drive.files.values.single.content)['title'],
+        'Helyi',
+      );
+    });
+  });
 }

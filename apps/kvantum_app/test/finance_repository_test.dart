@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -252,6 +253,36 @@ void main() {
         '{"records": [{"kind": "tx", "data": {"id": "x"}}, {"kind": "ufo", "data": 1}, 7]}',
       );
       expect((r.added, r.skipped, r.recognized), (0, 3, true));
+    });
+
+    test('a backup of a newer version is not read, and says why', () async {
+      await repo.saveTx(
+        FinTx(
+          id: 'x',
+          date: DateTime.utc(2026, 11, 8),
+          amount: 500,
+          kind: FinKind.expense,
+        ),
+      );
+      final text = await repo.exportJson();
+      expect(jsonDecode(text)['version'], financeBackupVersion);
+      final newer = text.replaceFirst(
+        '"version":$financeBackupVersion',
+        '"version":${financeBackupVersion + 1}',
+      );
+      expect(newer, isNot(text));
+
+      final db2 = await newDb();
+      final repo2 = FinanceRepository(db2);
+      final r = await repo2.importJson(newer);
+      expect(r.newer, isTrue);
+      expect(r.recognized, isTrue);
+      expect((r.added, r.updated), (0, 0));
+      expect(await repo2.txs(), isEmpty);
+      // the same file in this version's format is restored
+      final ok = await repo2.importJson(text);
+      expect((ok.newer, ok.added), (false, 1));
+      await db2.close();
     });
   });
 

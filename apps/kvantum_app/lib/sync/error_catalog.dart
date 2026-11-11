@@ -35,6 +35,10 @@ String refusedText(String channel, int n) =>
 String skippedText(String channel, int n) =>
     '$channel: $n Google-esemény nem olvasható be, kihagytam.';
 
+String newerFormatText(String channel, int n) =>
+    '$channel: $n elemet az alkalmazás egy újabb verziója írt; ezeket nem '
+    'bántom, és nem is írom felül. Telepítsd az újabb verziót.';
+
 const calendarGoneText =
     'A Google-naptár eltűnt (törölték vagy átnevezték). Megkeresem, és ha '
     'másik naptár van a helyén, megkérdezlek, mit tegyek.';

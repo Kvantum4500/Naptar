@@ -418,4 +418,120 @@ void main() {
       expect((await b.repo.txs()).length, 1);
     },
   );
+
+  group('letters from a newer version of the app', () {
+    String letterFor(String to, Map<String, Object?> body) =>
+        'fin-letter-bbbb2222-to-$to-1000-0.json';
+
+    test('stay in Drive, are not applied, and are counted', () async {
+      await introduce();
+      drive.externalWrite(
+        letterFor('aaaa1111', {}),
+        jsonEncode({
+          'v': 2,
+          'from': 'bbbb2222',
+          'to': 'aaaa1111',
+          'sent': 1000,
+          'records': [
+            {
+              'kind': 'tx',
+              'data': {'a': 'different shape'},
+            },
+          ],
+        }),
+      );
+      final r = await a.mail.sync();
+      expect(r.newerLetters, 1);
+      expect(r.receivedLetters, 0);
+      expect(r.corrupt, 0);
+      expect(r.applied, 0);
+      expect(
+        letters(drive),
+        1,
+        reason: 'not deleted: the newer version needs it',
+      );
+      expect(await a.repo.txs(), isEmpty);
+    });
+
+    test('are not read again while the app runs', () async {
+      await introduce();
+      drive.externalWrite(
+        letterFor('aaaa1111', {}),
+        jsonEncode({
+          'v': 3,
+          'from': 'bbbb2222',
+          'to': 'aaaa1111',
+          'records': [],
+        }),
+      );
+      await a.mail.sync();
+      final again = await a.mail.sync();
+      expect(again.newerLetters, 1, reason: 'still counted');
+      expect(
+        drive.readNames.where((n) => n.startsWith('fin-letter-')),
+        hasLength(1),
+        reason: 'downloaded once, not on every run',
+      );
+    });
+
+    test('a kind this version does not know: the rest is applied, the letter stays', () async {
+      await introduce();
+      final known = FinTx(
+        id: 't9',
+        date: floating(2026, 11, 8),
+        amount: 700,
+        kind: FinKind.expense,
+        updatedAt: 5000,
+      );
+      drive.externalWrite(
+        letterFor('aaaa1111', {}),
+        jsonEncode({
+          'v': 1,
+          'from': 'bbbb2222',
+          'to': 'aaaa1111',
+          'sent': 1000,
+          'records': [
+            {'kind': 'tx', 'data': known.toJson()},
+            {
+              'kind': 'workout-plan',
+              'data': {'id': 'w1'},
+            },
+          ],
+        }),
+      );
+      final r = await a.mail.sync();
+      expect(r.applied, 1);
+      expect(r.newerLetters, 1);
+      expect(r.receivedLetters, 0);
+      expect(await a.amounts(), {'t9': 700});
+      expect(
+        letters(drive),
+        1,
+        reason: 'kept for the version that knows the rest',
+      );
+    });
+
+    test('a damaged letter is still thrown away, as before', () async {
+      await introduce();
+      drive.externalWrite(letterFor('aaaa1111', {}), 'not json at all');
+      final r = await a.mail.sync();
+      expect(r.corrupt, 1);
+      expect(r.newerLetters, 0);
+      expect(letters(drive), 0);
+    });
+
+    test('our own letters carry the version this build writes', () async {
+      await introduce();
+      await a.addTx('t1', 500);
+      a.now += 10;
+      await a.mail.sync();
+      final letter = drive.files.values.firstWhere(
+        (f) => f.name.startsWith(FinanceMailbox.letterPrefix),
+      );
+      expect(
+        (jsonDecode(letter.content) as Map)['v'],
+        FinanceMailbox.letterVersion,
+      );
+    });
+  });
 }

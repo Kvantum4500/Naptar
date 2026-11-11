@@ -441,6 +441,9 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
         } else if (r.skippedCorrupt > 0) {
           errors.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
         }
+        if (!r.stoppedEarly && r.newerFormat > 0) {
+          errors.add(newerFormatText('Drive', r.newerFormat));
+        }
         busy |= r.pulled > 0 || r.pushed > 0;
       } catch (e) {
         if (isAuthExpired(e)) {
@@ -477,6 +480,9 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
           } else {
             if (r.corrupt > 0) {
               errors.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
+            }
+            if (r.newerLetters > 0) {
+              errors.add(newerFormatText('Pénzügy', r.newerLetters));
             }
             if (r.sentLetters + r.receivedLetters > 0) {
               note =

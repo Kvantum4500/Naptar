@@ -125,7 +125,6 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
     });
     try {
       final repo = ref.read(repoProvider);
-      var removed = 0;
       final all = await repo.all();
       // days where the user changed or added a shift: kept as they are
       final keptDays = <DateTime>{
@@ -133,34 +132,35 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
           if (isEditedShiftNotes(e.notes))
             DateTime.utc(e.start.year, e.start.month, e.start.day),
       };
-      for (final e in all) {
-        if (e.notes == kShiftMarker &&
-            !e.isRecurring &&
-            !e.start.isBefore(_from)) {
-          await repo.deleteLocal(e.id);
-          removed++;
-        }
-      }
-      var created = 0;
-      for (final s in plan) {
-        if (keptDays.contains(
-          DateTime.utc(s.start.year, s.start.month, s.start.day),
-        )) {
-          continue;
-        }
-        created++;
-        await repo.saveLocal(
-          CalEvent(
-            id: const Uuid().v4(),
-            calendarId: kNaptarCalendar,
-            title: s.title,
-            notes: kShiftMarker,
-            start: s.start,
-            end: s.end,
-            tzid: defaultTz,
-          ),
-        );
-      }
+      final removeIds = [
+        for (final e in all)
+          if (e.notes == kShiftMarker &&
+              !e.isRecurring &&
+              !e.start.isBefore(_from))
+            e.id,
+      ];
+      final fresh = [
+        for (final s in plan)
+          if (!keptDays.contains(
+            DateTime.utc(s.start.year, s.start.month, s.start.day),
+          ))
+            CalEvent(
+              id: const Uuid().v4(),
+              calendarId: kNaptarCalendar,
+              title: s.title,
+              notes: kShiftMarker,
+              start: s.start,
+              end: s.end,
+              tzid: defaultTz,
+            ),
+      ];
+      // One unit: the screens change once (not ninety times), and an
+      // interruption leaves the old plan or the new one, never half of each.
+      await repo.atomically(() async {
+        await repo.deleteAll(removeIds);
+        await repo.saveAll(fresh);
+      });
+      final removed = removeIds.length, created = fresh.length;
       ref.read(syncControllerProvider.notifier).requestSync();
       await _reload();
       if (!mounted) return;

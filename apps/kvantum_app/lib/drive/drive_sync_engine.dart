@@ -1,5 +1,6 @@
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../data/housekeeping.dart' show tombstoneRetention;
 import '../data/record_repository.dart';
 import 'drive_remote.dart';
 
@@ -14,6 +15,10 @@ class DriveSyncEngine {
   final RecordRepository repo;
   final DriveRemote remote;
   Future<void>? _running;
+
+  /// Names of record files a NEWER version of the app wrote (this run): they
+  /// are neither read, nor overwritten, nor deleted.
+  final _newerNames = <String>{};
 
   /// Serialised: a call during a running sync waits, then runs once more.
   Future<DriveReport> sync() async {
@@ -33,8 +38,13 @@ class DriveSyncEngine {
     return result;
   }
 
+  /// The day (UTC date) of the last look for old markers.
+  static const purgeDayKey = 'tombstonePurgeDay';
+
   Future<DriveReport> _run() async {
-    var pulled = 0, pushed = 0, corrupt = 0, dups = 0, failed = 0;
+    _newerNames.clear();
+    var pulled = 0, pushed = 0, corrupt = 0, dups = 0, failed = 0, newer = 0;
+    var purged = 0;
     var full = false;
     var fin = true; // unknown until a pull succeeded: assume there is mail
     try {
@@ -65,7 +75,11 @@ class DriveSyncEngine {
         for (final f in files) {
           final rec = _parse(entry.key, f.content);
           if (rec == null) {
-            if (_looksLikeRecordFile(entry.key)) corrupt++;
+            if (_newerNames.contains(entry.key)) {
+              newer++;
+            } else if (_looksLikeRecordFile(entry.key)) {
+              corrupt++;
+            }
             continue;
           }
           await repo.applyRemote(rec);
@@ -75,7 +89,7 @@ class DriveSyncEngine {
           await repo.setFileId(entry.key, canonical.id);
           seen.add(canonical.id);
         }
-        if (files.length > 1) {
+        if (files.length > 1 && !_newerNames.contains(entry.key)) {
           // everything is merged locally; make sure the canonical file gets
           // the merged result, then drop the extra copies
           final rec = await _recordForName(entry.key);
@@ -124,6 +138,7 @@ class DriveSyncEngine {
           failed++; // keep it queued, try again next run
         }
       }
+      purged = await _purgeTombstones();
     } on DriveTransientError catch (e) {
       return DriveReport(
         pulled: pulled,
@@ -134,6 +149,8 @@ class DriveSyncEngine {
         full: full,
         stoppedEarly: true,
         finChanged: fin,
+        newerFormat: newer,
+        purged: purged,
         hint: e,
       );
     }
@@ -145,7 +162,45 @@ class DriveSyncEngine {
       failed: failed,
       full: full,
       finChanged: fin,
+      newerFormat: newer,
+      purged: purged,
     );
+  }
+
+  /// Once a day: forgets the records deleted more than [tombstoneRetention]
+  /// ago, on this device and in Drive. The Drive file goes first: without it
+  /// the next pull would hand the marker back. Only what has already been
+  /// uploaded is touched.
+  Future<int> _purgeTombstones() async {
+    final now = repo.now();
+    final day = DateTime.fromMillisecondsSinceEpoch(
+      now,
+      isUtc: true,
+    ).toIso8601String().substring(0, 10);
+    if (await repo.meta(purgeDayKey) == day) return 0;
+    var purged = 0;
+    for (final rec in await repo.oldTombstones(
+      now - tombstoneRetention.inMilliseconds,
+    )) {
+      final name = recordFileName(rec.kind, rec.id);
+      if (_newerNames.contains(name)) continue;
+      try {
+        final known = await repo.fileId(name);
+        for (final id
+            in known != null ? [known] : await remote.findByName(name)) {
+          await remote.delete(id);
+        }
+        if (known != null) await repo.forgetFile(known);
+      } on DriveTransientError {
+        rethrow;
+      } catch (_) {
+        continue; // the marker stays; the next day tries again
+      }
+      await repo.purge(rec.kind, rec.id);
+      purged++;
+    }
+    await repo.setMeta(purgeDayKey, day);
+    return purged;
   }
 
   /// Uploads one dirty record. Returns true when a write happened.
@@ -167,6 +222,11 @@ class DriveSyncEngine {
         fileId = null;
       } else {
         remoteRec = _parse(name, content); // corrupt -> overwritten by ours
+        if (remoteRec == null && _newerNames.contains(name)) {
+          // A newer version of the app owns this file: leave it exactly as it
+          // is. Ours stays queued, and is uploaded once this version is updated.
+          return false;
+        }
         if (remoteRec != null) {
           merged = rec.merge(remoteRec);
           if (!merged.sameAs(rec)) {
@@ -201,6 +261,9 @@ class DriveSyncEngine {
       // The name is the identity; a mismatching body is not ours to trust.
       if (r.kind != m[1] || r.id != m[2]) return null;
       return r;
+    } on NewerFormatException {
+      _newerNames.add(name);
+      return null;
     } on FormatException {
       return null;
     }

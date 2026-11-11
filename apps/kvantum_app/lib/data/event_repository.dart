@@ -351,6 +351,44 @@ class EventRepository {
     await (db.delete(db.eventRows)..where((t) => t.id.isIn(ids))).go();
   });
 
+  /// Puts right what an interrupted run could leave behind: a deleted event
+  /// that still has a Google link but no queued deletion gets the deletion
+  /// queued again (the user did delete it); one without a link has nothing to
+  /// delete over there and goes; queue entries for events that no longer
+  /// exist go too.
+  Future<({int requeued, int removed, int stale})> purgeOrphans() =>
+      db.transaction(() async {
+        final queued = {
+          for (final r in await db.select(db.outboxRows).get()) r.eventId,
+        };
+        final dead = await (db.select(
+          db.eventRows,
+        )..where((t) => t.deleted.equals(true))).get();
+        var requeued = 0;
+        final unlinked = <String>[];
+        for (final r in dead) {
+          if (queued.contains(r.id)) continue;
+          if (r.googleId == null) {
+            unlinked.add(r.id);
+          } else {
+            await _queue(r.id, 'delete');
+            requeued++;
+          }
+        }
+        if (unlinked.isNotEmpty) {
+          await (db.delete(
+            db.eventRows,
+          )..where((t) => t.id.isIn(unlinked))).go();
+        }
+        final stale = await db.customUpdate(
+          'DELETE FROM outbox_rows WHERE event_id NOT IN '
+          '(SELECT id FROM event_rows)',
+          updates: {db.outboxRows},
+          updateKind: UpdateKind.delete,
+        );
+        return (requeued: requeued, removed: unlinked.length, stale: stale);
+      });
+
   Future<String?> meta(String key) async => (await (db.select(
     db.metaRows,
   )..where((t) => t.key.equals(key))).getSingleOrNull())?.value;

@@ -10,6 +10,7 @@ export 'src/ics.dart';
 export 'src/local_answers.dart';
 export 'src/models.dart';
 export 'src/reconcile.dart';
+export 'src/rrule_convert.dart';
 export 'src/recurrence.dart';
 export 'src/recurrence_spec.dart';
 export 'src/rules.dart';

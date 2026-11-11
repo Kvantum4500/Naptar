@@ -9,6 +9,13 @@ class FakeDrive implements DriveRemote {
 
   bool offline = false;
 
+  /// Makes only writing fail (a refused upload).
+  Object? failWrite;
+
+  /// Makes only deleting fail (e.g. a refused delete, or the network dropping
+  /// at that very call).
+  Object? failDelete;
+
   /// Makes every call fail with this error (e.g. an expired login).
   Object? failWith;
   bool expireToken = false;
@@ -18,6 +25,9 @@ class FakeDrive implements DriveRemote {
 
   /// How often the mailbox listed letters / peer notes.
   int listCalls = 0;
+
+  /// The names of the files whose content was read, in order.
+  final List<String> readNames = [];
 
   /// Overrides what a pull reports about finance mailbox news (null: derive it
   /// from the files, like Drive's change list does).
@@ -82,6 +92,7 @@ class FakeDrive implements DriveRemote {
 
   @override
   Future<String?> read(String fileId) async {
+    readNames.add(files[fileId]?.name ?? '?');
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     return files[fileId]?.content;
@@ -117,6 +128,7 @@ class FakeDrive implements DriveRemote {
   }) async {
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
+    if (failWrite != null) throw failWrite!;
     if (duringWrite != null) {
       final f = duringWrite!;
       duringWrite = null;
@@ -137,6 +149,7 @@ class FakeDrive implements DriveRemote {
   Future<void> delete(String fileId) async {
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
+    if (failDelete != null) throw failDelete!;
     deletes++;
     files.remove(fileId);
     _removedAt[fileId] = _bump();

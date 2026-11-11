@@ -15,6 +15,7 @@ class MailReport {
     this.expired = 0,
     this.peers = 0,
     this.stoppedEarly = false,
+    this.newerLetters = 0,
     this.hint,
   });
   final int sentLetters;
@@ -28,6 +29,10 @@ class MailReport {
   final int expired;
   final int peers;
   final bool stoppedEarly;
+
+  /// Letters from a newer version of the app (or with records of kinds this
+  /// version does not know): kept in Drive, not deleted.
+  final int newerLetters;
 
   /// Why the run stopped early (when it did).
   final RetryHint? hint;
@@ -64,6 +69,9 @@ class FinanceMailbox {
   static const peerPrefix = 'fin-peer-';
   static const letterPrefix = 'fin-letter-';
   static const maxPerLetter = 400;
+
+  /// The letter format this build writes and reads.
+  static const letterVersion = 1;
   static const announceEvery = Duration(hours: 12);
   static const peerGone = Duration(days: 180);
   static const letterTtl = Duration(days: 60);
@@ -77,6 +85,10 @@ class FinanceMailbox {
   static final _peerName = RegExp(r'^fin-peer-([0-9a-zA-Z]+)\.json$');
 
   Future<MailReport>? _running;
+
+  /// Letters (Drive file ids) left alone because a newer version wrote them:
+  /// not read again until the app is started anew.
+  final _leftAlone = <String>{};
 
   Future<MailReport> sync() => _running ??= _run().whenComplete(() {
     _running = null;
@@ -92,7 +104,7 @@ class FinanceMailbox {
 
   Future<MailReport> _run() async {
     var sent = 0, received = 0, applied = 0, corrupt = 0, expired = 0;
-    var peerCount = 0;
+    var peerCount = 0, newerLetters = 0;
     try {
       await _announce();
 
@@ -101,18 +113,38 @@ class FinanceMailbox {
       for (final l in letters) {
         final m = _letterName.firstMatch(l.name);
         if (m == null || m[2] != deviceId) continue;
+        if (_leftAlone.contains(l.id)) {
+          newerLetters++;
+          continue;
+        }
         final text = await drive.read(l.id);
         if (text == null) continue; // already gone
-        final records = _records(text);
-        if (records == null) {
+        final letter = _letter(text);
+        if (letter == null) {
           corrupt++;
           await drive.delete(l.id);
           continue;
         }
-        for (final r in records) {
-          if (r is Map && await repo.applyIncoming('${r['kind']}', r['data'])) {
-            applied++;
-          }
+        if (letter.newer) {
+          // A newer version of the app wrote it: it stays in Drive until this
+          // version is updated and can read it.
+          _leftAlone.add(l.id);
+          newerLetters++;
+          continue;
+        }
+        applied += await repo.applyIncomingAll([
+          for (final r in letter.records)
+            if (r is Map) ('${r['kind']}', r['data']),
+        ]);
+        final unknownKind = letter.records.any(
+          (r) => r is Map && !repo.knowsKind('${r['kind']}'),
+        );
+        if (unknownKind) {
+          // what is understood has been applied (applying it again later is
+          // harmless); the letter stays for the version that knows the rest
+          _leftAlone.add(l.id);
+          newerLetters++;
+          continue;
         }
         await drive.delete(l.id); // "it has arrived"
         received++;
@@ -166,6 +198,7 @@ class FinanceMailbox {
         expired: expired,
         peers: peerCount,
         stoppedEarly: true,
+        newerLetters: newerLetters,
         hint: e,
       );
     }
@@ -176,14 +209,22 @@ class FinanceMailbox {
       corrupt: corrupt,
       expired: expired,
       peers: peerCount,
+      newerLetters: newerLetters,
     );
   }
 
-  List<Object?>? _records(String text) {
+  /// null: not a letter at all. A letter of a newer format is reported as such
+  /// without looking at its records (their shape may have changed).
+  ({List<Object?> records, bool newer})? _letter(String text) {
     try {
       final j = jsonDecode(text);
-      final r = j is Map ? j['records'] : null;
-      return r is List ? r : null;
+      if (j is! Map) return null;
+      final v = j['v'];
+      if (v is num && v > letterVersion) {
+        return (records: const [], newer: true);
+      }
+      final r = j['records'];
+      return r is List ? (records: r, newer: false) : null;
     } on FormatException {
       return null;
     }
@@ -251,7 +292,7 @@ class FinanceMailbox {
       await drive.write(
         name: '$letterPrefix$deviceId-to-$peer-$ts-${i ~/ maxPerLetter}.json',
         content: jsonEncode({
-          'v': 1,
+          'v': letterVersion,
           'from': deviceId,
           'to': peer,
           'sent': ts,

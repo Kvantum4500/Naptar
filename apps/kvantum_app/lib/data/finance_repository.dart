@@ -13,6 +13,9 @@ const _kRecurring = 'recurring';
 const _kGoal = 'goal';
 const _kDeposit = 'deposit';
 
+/// The version of the finance backup file this build writes and reads.
+const financeBackupVersion = 1;
+
 /// Local finance store. The database file on the device is the source of
 /// truth; [FinRows.dirty] marks what still has to be mailed to other devices.
 class FinanceRepository {
@@ -99,6 +102,18 @@ class FinanceRepository {
   Future<List<FinGoal>> goals() => _all(_kGoal, FinGoal.fromJson);
   Future<List<FinDeposit>> deposits() => _all(_kDeposit, FinDeposit.fromJson);
 
+  /// Forgets the markers of records deleted before [olderThanMs]. A marker only
+  /// exists so that a device which still has the record learns it is gone; one
+  /// that has been away for that long would bring the record back, which is the
+  /// price of not keeping markers for ever. Returns how many rows went.
+  Future<int> purgeTombstones(int olderThanMs) =>
+      (db.delete(db.finRows)..where(
+            (t) =>
+                t.deleted.equals(true) &
+                t.updatedAt.isSmallerThanValue(olderThanMs),
+          ))
+          .go();
+
   // ---------------------------------------------------------------- writes
 
   Future<void> _put(
@@ -122,38 +137,50 @@ class FinanceRepository {
       );
 
   Future<void> saveTx(FinTx t) async {
-    final x = t.copyWith(updatedAt: await _nextStamp(_kTx, t.id));
-    await _put(_kTx, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = t.copyWith(updatedAt: await _nextStamp(_kTx, t.id));
+      await _put(_kTx, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
   Future<void> saveCategory(FinCategory c) async {
-    final x = c.copyWith(updatedAt: await _nextStamp(_kCategory, c.id));
-    await _put(_kCategory, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = c.copyWith(updatedAt: await _nextStamp(_kCategory, c.id));
+      await _put(_kCategory, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
   Future<void> saveBudget(FinBudget b) async {
-    final x = b.copyWith(updatedAt: await _nextStamp(_kBudget, b.id));
-    await _put(_kBudget, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = b.copyWith(updatedAt: await _nextStamp(_kBudget, b.id));
+      await _put(_kBudget, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
   Future<void> saveRecurring(FinRecurring r) async {
-    final x = r.copyWith(updatedAt: await _nextStamp(_kRecurring, r.id));
-    await _put(_kRecurring, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = r.copyWith(updatedAt: await _nextStamp(_kRecurring, r.id));
+      await _put(_kRecurring, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
   Future<void> saveGoal(FinGoal g) async {
-    final x = g.copyWith(updatedAt: await _nextStamp(_kGoal, g.id));
-    await _put(_kGoal, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = g.copyWith(updatedAt: await _nextStamp(_kGoal, g.id));
+      await _put(_kGoal, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
   Future<void> saveDeposit(FinDeposit d) async {
-    final x = d.copyWith(updatedAt: await _nextStamp(_kDeposit, d.id));
-    await _put(_kDeposit, x.id, x.toJson(), x.updatedAt, x.deleted);
+    await db.transaction(() async {
+      final x = d.copyWith(updatedAt: await _nextStamp(_kDeposit, d.id));
+      await _put(_kDeposit, x.id, x.toJson(), x.updatedAt, x.deleted);
+    });
     onChanged?.call();
   }
 
@@ -177,14 +204,14 @@ class FinanceRepository {
   }
 
   /// Deleting a goal also removes its deposits.
-  Future<void> deleteGoal(String id) async {
+  Future<void> deleteGoal(String id) => db.transaction(() async {
     for (final g in await goals()) {
       if (g.id == id) await saveGoal(g.copyWith(deleted: true));
     }
     for (final d in await deposits()) {
       if (d.goalId == id) await saveDeposit(d.copyWith(deleted: true));
     }
-  }
+  });
 
   Future<void> deleteDeposit(String id) async {
     for (final d in await deposits()) {
@@ -267,7 +294,22 @@ class FinanceRepository {
   /// Merges one record from a letter: the newer one wins; on equal times the
   /// larger JSON text wins, so every device decides the same way. Returns
   /// true when the local copy changed.
-  Future<bool> applyIncoming(String kind, Object? data) async {
+  Future<bool> applyIncoming(String kind, Object? data) =>
+      db.transaction(() => _applyIncoming(kind, data));
+
+  /// A whole letter at once: one unit (a failure half-way leaves nothing
+  /// half-applied) and one change for the screens. Returns how many records
+  /// changed this device's data.
+  Future<int> applyIncomingAll(Iterable<(String kind, Object? data)> records) =>
+      db.transaction(() async {
+        var n = 0;
+        for (final (kind, data) in records) {
+          if (await _applyIncoming(kind, data)) n++;
+        }
+        return n;
+      });
+
+  Future<bool> _applyIncoming(String kind, Object? data) async {
     final rec = _decodeRecord(kind, data);
     if (rec == null) return false;
     final existing =
@@ -330,15 +372,17 @@ class FinanceRepository {
     while (map.length > 300) {
       map.remove(map.keys.first);
     }
-    await setMeta(_merchantKey, jsonEncode(map));
-    var n = 0;
-    for (final t in await txs()) {
-      if (t.categoryId == kUncategorized && merchantKey(t.merchant) == key) {
-        await saveTx(t.copyWith(categoryId: categoryId));
-        n++;
+    return db.transaction(() async {
+      await setMeta(_merchantKey, jsonEncode(map));
+      var n = 0;
+      for (final t in await txs()) {
+        if (t.categoryId == kUncategorized && merchantKey(t.merchant) == key) {
+          await saveTx(t.copyWith(categoryId: categoryId));
+          n++;
+        }
       }
-    }
-    return n;
+      return n;
+    });
   }
 
   Future<bool> hasTx(String id) => _exists(_kTx, id);
@@ -353,18 +397,18 @@ class FinanceRepository {
 
   /// Seeds the default categories. Their ids are fixed, so every device
   /// creates the same rows and nothing needs to be mailed for them.
-  Future<void> ensureDefaults() async {
+  Future<void> ensureDefaults() => db.transaction(() async {
     for (final c in defaultCategories()) {
       if (!await _exists(_kCategory, c.id)) {
         await _put(_kCategory, c.id, c.toJson(), 0, false, dirty: false);
       }
     }
-  }
+  });
 
   /// Creates the transactions the recurring rules expect in [year]/[month]
   /// that do not exist yet (a deleted one is NOT brought back). Generated
   /// rows have a fixed id and need no mailing: every device derives them.
-  Future<int> ensureRecurring(int year, int month) async {
+  Future<int> ensureRecurring(int year, int month) => db.transaction(() async {
     var created = 0;
     for (final t in dueRecurring(await recurring(), year, month)) {
       if (await _exists(_kTx, t.id)) continue;
@@ -372,7 +416,7 @@ class FinanceRepository {
       created++;
     }
     return created;
-  }
+  });
 
   // ------------------------------------------------------- backup (JSON)
 
@@ -383,7 +427,7 @@ class FinanceRepository {
     )..where((t) => t.deleted.equals(false))).get();
     return jsonEncode({
       'format': 'kvantum-finance',
-      'version': 1,
+      'version': financeBackupVersion,
       'records': [
         for (final r in rows) {'kind': r.kind, 'data': jsonDecode(r.json)},
       ],
@@ -392,42 +436,80 @@ class FinanceRepository {
 
   /// Restores a backup: creates missing records and updates older ones; never
   /// deletes. Unusable records are counted and skipped.
-  Future<({int added, int updated, int skipped, bool recognized})> importJson(
-    String text,
-  ) async {
+  ///
+  /// A backup made by a NEWER version of the app (its `version` is higher than
+  /// [financeBackupVersion]) is not read: it may hold what this version does
+  /// not know, and restoring half of it would look like success. `newer` says so.
+  Future<({int added, int updated, int skipped, bool recognized, bool newer})>
+  importJson(String text) async {
     Object? root;
     try {
       root = jsonDecode(text);
     } on FormatException {
-      return (added: 0, updated: 0, skipped: 0, recognized: false);
+      return (
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        recognized: false,
+        newer: false,
+      );
     }
     final list = root is Map ? root['records'] : null;
     if (list is! List) {
-      return (added: 0, updated: 0, skipped: 0, recognized: false);
+      return (
+        added: 0,
+        updated: 0,
+        skipped: 0,
+        recognized: false,
+        newer: false,
+      );
     }
-    var added = 0, updated = 0, skipped = 0;
-    for (final item in list) {
-      final kind = item is Map ? item['kind'] : null;
-      final data = item is Map ? item['data'] : null;
-      final rec = _decodeRecord('$kind', data);
-      if (rec == null) {
-        skipped++;
-        continue;
-      }
-      final existing =
-          await (db.select(db.finRows)
-                ..where((t) => t.kind.equals(rec.kind) & t.id.equals(rec.id)))
-              .getSingleOrNull();
-      if (existing == null) {
-        await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
-        added++;
-      } else if (rec.updatedAt > existing.updatedAt) {
-        await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
-        updated++;
-      }
+    final version = (root as Map)['version'];
+    if (version is num && version > financeBackupVersion) {
+      return (added: 0, updated: 0, skipped: 0, recognized: true, newer: true);
     }
-    return (added: added, updated: updated, skipped: skipped, recognized: true);
+    return db.transaction(() async {
+      var added = 0, updated = 0, skipped = 0;
+      for (final item in list) {
+        final kind = item is Map ? item['kind'] : null;
+        final data = item is Map ? item['data'] : null;
+        final rec = _decodeRecord('$kind', data);
+        if (rec == null) {
+          skipped++;
+          continue;
+        }
+        final existing =
+            await (db.select(db.finRows)
+                  ..where((t) => t.kind.equals(rec.kind) & t.id.equals(rec.id)))
+                .getSingleOrNull();
+        if (existing == null) {
+          await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          added++;
+        } else if (rec.updatedAt > existing.updatedAt) {
+          await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          updated++;
+        }
+      }
+      return (
+        added: added,
+        updated: updated,
+        skipped: skipped,
+        recognized: true,
+        newer: false,
+      );
+    });
   }
+
+  /// Whether this build knows records of [kind] (a letter may carry kinds of
+  /// a newer version).
+  bool knowsKind(String kind) => const {
+    _kTx,
+    _kCategory,
+    _kBudget,
+    _kRecurring,
+    _kGoal,
+    _kDeposit,
+  }.contains(kind);
 
   _Rec? _decodeRecord(String kind, Object? data) {
     switch (kind) {

@@ -26,31 +26,30 @@ Future<bool> deleteOccurrence(
   final overrides = await repo.overridesOf(master.id);
   final orig = o.originalStart;
 
-  Future<void> deleteSeries() async {
-    for (final x in overrides) {
-      await repo.deleteLocal(x.id);
-    }
-    await repo.deleteLocal(master.id);
-  }
+  Future<void> deleteSeries() =>
+      repo.deleteAll([for (final x in overrides) x.id, master.id]);
 
-  switch (scope) {
-    case Scope.only:
-      await repo.saveLocal(deleteInstance(master, orig));
-      if (e.isException) await repo.deleteLocal(e.id);
-    case Scope.following:
-      final cut = deleteFollowing(master, orig);
-      if (cut == null) {
-        await deleteSeries();
-      } else {
-        await repo.saveLocal(cut);
-        for (final x in overrides) {
-          if (x.originalStart != null && !x.originalStart!.isBefore(orig)) {
-            await repo.deleteLocal(x.id);
-          }
+  // All or nothing, and one change for the screens.
+  await repo.atomically(() async {
+    switch (scope) {
+      case Scope.only:
+        await repo.saveLocal(deleteInstance(master, orig));
+        if (e.isException) await repo.deleteLocal(e.id);
+      case Scope.following:
+        final cut = deleteFollowing(master, orig);
+        if (cut == null) {
+          await deleteSeries();
+        } else {
+          await repo.saveLocal(cut);
+          await repo.deleteAll([
+            for (final x in overrides)
+              if (x.originalStart != null && !x.originalStart!.isBefore(orig))
+                x.id,
+          ]);
         }
-      }
-    case Scope.all:
-      await deleteSeries();
-  }
+      case Scope.all:
+        await deleteSeries();
+    }
+  });
   return true;
 }

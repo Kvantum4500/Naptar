@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'event.dart';
+import 'rrule_convert.dart';
 import 'time.dart';
 
 /// iCalendar (RFC 5545) export/import of [CalEvent]s: a portable backup that
@@ -57,6 +58,15 @@ void _put(StringBuffer out, String line) {
 /// Cancelled events are left out.
 String exportIcs(Iterable<CalEvent> events, {DateTime? nowUtc}) {
   final stamp = _dateTime((nowUtc ?? DateTime.now()).toUtc());
+  // An occurrence that was deleted is stored as a cancelled exception row. It
+  // is not written as an event of its own; the series carries it as an EXDATE,
+  // which is how every other calendar program understands "this one is gone".
+  final deleted = <String, List<DateTime>>{};
+  for (final e in events) {
+    if (e.cancelled && e.isException && e.originalStart != null) {
+      (deleted[e.recurringEventId!] ??= []).add(e.originalStart!);
+    }
+  }
   final out = StringBuffer();
   _put(out, 'BEGIN:VCALENDAR');
   _put(out, 'VERSION:2.0');
@@ -86,9 +96,15 @@ String exportIcs(Iterable<CalEvent> events, {DateTime? nowUtc}) {
     if (e.notes.isNotEmpty) _put(out, 'DESCRIPTION:${_esc(e.notes)}');
     if (e.location.isNotEmpty) _put(out, 'LOCATION:${_esc(e.location)}');
     if (e.isRecurring) {
-      _put(out, 'RRULE:${e.rrule!.replaceFirst(RegExp('^RRULE:'), '')}');
+      // UNTIL is a UTC instant in iCalendar (the app keeps a wall-clock limit)
+      final rule = e.rrule!.replaceFirst(RegExp('^RRULE:'), '');
+      _put(
+        out,
+        'RRULE:${rruleToGoogle(rule, e.start, e.tzid, allDay: e.allDay)}',
+      );
     }
-    for (final x in e.exdates) {
+    final gone = <DateTime>{...e.exdates, ...?deleted[e.id]};
+    for (final x in gone) {
       _put(
         out,
         e.allDay
@@ -159,6 +175,15 @@ class IcsImport {
   final List<String> problems;
 }
 
+/// The longest text [parseIcs] reads (a backup of years is far smaller).
+const maxIcsChars = 5000000;
+
+/// The longest span of one event that is read: a timed event of more than a
+/// year, or an all-day one of more than ten years, is a mistake (or an attack
+/// on the calendar views, which build a cell for every day it touches).
+const maxTimedEvent = Duration(days: 366);
+const maxAllDayEvent = Duration(days: 3660);
+
 /// Reads VEVENTs from an iCalendar text. Never throws: unusable events are
 /// skipped and explained in [IcsImport.problems]. Times without a zone and
 /// UTC times become wall-clock times in [defaultTz].
@@ -167,17 +192,31 @@ IcsImport parseIcs(
   required String calendarId,
   String defaultTz = 'Europe/Budapest',
   int maxEvents = 5000,
+  int maxChars = maxIcsChars,
 }) {
   final problems = <String>[];
   final events = <CalEvent>[];
+  if (text.length > maxChars) {
+    return IcsImport(const [], [
+      'A fájl túl nagy (${(text.length / 1000000).toStringAsFixed(1)} millió '
+          'karakter; legfeljebb ${(maxChars / 1000000).toStringAsFixed(0)} millió '
+          'olvasható be), nem olvastam be.',
+    ]);
+  }
+  // Unfold the physical lines (a line continues where the next starts with a
+  // space or a tab). Pieces are collected in a buffer: gluing strings one by
+  // one made a file with very long lines take minutes.
   final lines = <String>[];
+  StringBuffer? current;
   for (final raw in text.split(RegExp(r'\r?\n'))) {
-    if ((raw.startsWith(' ') || raw.startsWith('\t')) && lines.isNotEmpty) {
-      lines[lines.length - 1] += raw.substring(1);
+    if ((raw.startsWith(' ') || raw.startsWith('\t')) && current != null) {
+      current.write(raw.substring(1));
     } else if (raw.isNotEmpty) {
-      lines.add(raw);
+      if (current != null) lines.add(current.toString());
+      current = StringBuffer(raw);
     }
   }
+  if (current != null) lines.add(current.toString());
 
   List<_Prop>? cur;
   var depth = 0; // nested components (VALARM...) inside a VEVENT
@@ -268,6 +307,17 @@ CalEvent? _toEvent(
   }
   if (end.isBefore(start)) end = start;
   if (allDay && !end.isAfter(start)) end = start.add(const Duration(days: 1));
+  if (start.year < 1970 || start.year > 2100) {
+    problems.add('$label: ${start.year}. évi időpont, kihagytam.');
+    return null;
+  }
+  final span = end.difference(start);
+  if (span > (allDay ? maxAllDayEvent : maxTimedEvent)) {
+    problems.add(
+      '$label: túl hosszú (${span.inDays} nap egyetlen eseményként), kihagytam.',
+    );
+    return null;
+  }
 
   final uid = one('UID')?.value.trim() ?? '';
   final rid = one('RECURRENCE-ID');
@@ -319,7 +369,15 @@ CalEvent? _toEvent(
     end: end,
     tzid: allDay ? null : tz,
     allDay: allDay,
-    rrule: rr == null || rr.isEmpty ? null : rr,
+    rrule: rr == null || rr.isEmpty
+        ? null
+        // iCalendar writes UNTIL as a UTC instant; the app keeps the limit as
+        // a wall-clock time, which is what its recurrence engine compares with
+        : rruleFromGoogle(
+            rr.replaceFirst(RegExp('^RRULE:', caseSensitive: false), ''),
+            allDay ? null : tz,
+            allDay: allDay,
+          ),
     exdates: exdates,
     recurringEventId: rid != null ? uid : null,
     originalStart: recurrenceWall,
