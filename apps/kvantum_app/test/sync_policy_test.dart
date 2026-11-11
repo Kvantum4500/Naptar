@@ -408,6 +408,24 @@ void main() {
       expect(occ.where((o) => o.title == 'Átrakva').length, 1);
     });
 
+    test('not even when the deletion cannot go out right now', () async {
+      await repo.saveLocal(ev('a', 'x'));
+      await engine.sync(cal);
+      final g = (await repo.byId('a'))!.googleId!;
+      await repo.deleteLocal('a');
+      remote.externalUpdate(g, (e) => e.copyWith(title: 'changed in Google'));
+      remote.failDelete = TransientSyncError('offline');
+      final r = await engine.sync(cal);
+      expect(r.stoppedEarly, isTrue);
+      expect(
+        await repo.all(),
+        isEmpty,
+        reason: 'it must not come back to life',
+      );
+      expect(await repo.isTombstone('a'), isTrue);
+      expect((await repo.pending()).single.op, 'delete');
+    });
+
     test('a change for an event whose deletion is still waiting does not bring it back', () async {
       await repo.saveLocal(ev('a', 'x'));
       await engine.sync(cal);

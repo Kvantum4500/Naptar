@@ -449,3 +449,19 @@ Tesztek: mag 417 (volt 335), app 693 (volt 627), az elemzők és a formázás ti
 | AI-9/AI-17 kapcsolat | kész | a modell az utolsó 10 visszajelzés rövid sorait kapja (≈ +175 token); cím és megjegyzés soha; a Napi check-in kapcsolóval együtt kapcsol; a költségvetés-őr a Tanult szokások előtt hagyja el |
 | UX-8 (hozzáférhetőség) – részben | részben | a napi check-in űrlap skála-feliratai kilógtak volna nagy betűnél / keskeny képernyőn: javítva, tesztelve (a check-in sávnak és űrlapnak eddig nem volt tesztje). A nagy betű / Semantics / golden körút a 3. fázisban jön |
 | ikertelenség / eltérések | – | **Eltérés a tervtől:** a kérdés a „legutóbb véget ért” edzésre szól (nem egy listára), mert a kártya egyszerre egy kérdést tesz fel; a nem-kötelező megjegyzés nem megy a modellhez; a tanulás a *legutóbbi* 3 / 5 alkalmat nézi (nem a teljes sáv átlagát), mert különben a régi könnyű alkalmak elnyomnák az új nehezeket |
+
+### 1a (a szinkron a hibákat az okuk szerint kezeli) – kész, a build után kipróbálandó
+
+Tesztek: mag 422 (volt 417), app 865 (volt 693), az elemzők és a formázás tiszták. 61 szándékos elrontás (a használati korlát újra végleges hiba, az átmeneti hiba elhasználja a próbát, nincs parkolás / kézi nullázás / feltöltés-plafon / szünet, bármely fiókot elfogad, eltérésnél mégis szinkronizál, a távoli törlés elnyeli a helyi szerkesztést, az örökölt azonosító felülírja a sorozatot, a várakozó törlés visszajön, a régi etag visszakerül, sima felülírás az összefésülés helyett, hibás visszalépés / Retry-After / korlát, a háttérben is fut az időzítő, a postaláda mindig vagy soha, az alaphelyzet nem vág kapcsolatot / nem nulláz / nem sorol, az óra-bélyeg …) mind elbukik a tesztekkel.
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| REL-7 (osztályozás, visszalépés, Retry-After, próbaszám) | kész | `sync/api_errors.dart`: a 403-as használati korlátok / 429 / 5xx átmeneti, a tétel-hiba külön; `sync/retry_after_client.dart` kinyeri a fejlécet; a motor az átmeneti hibával nem fogyasztja a próbát, a tétel-hiba 5 után „feladott”, a kézi szinkron nulláz; `sync/sync_pacer.dart`: 1→2→4→8→15 perc ±20 %, napi keret ≥ 30 perc, soha nem hamarabb, mint a szerver kéri. **Eltérés:** nincs determinisztikus Google-azonosító (nem ellenőrizhető élőben), helyette ütemezés (200 ms) és futásonként ≤ 150 feltöltés |
+| REL-8 (kevesebb lekérdezés) | kész | egyszeri időzítő a periodikus helyett; tétlenül 3→5→10 perc; háttérben nincs időzítő; a postaláda a Drive-jelzésre / saját módosításra / minden 5. futásnál / kézi kérésre |
+| REL-4 (fiók-/naptárkötés, alaphelyzet) | kész | `RemoteCalendar.identity` (az elsődleges naptár azonosítója = a fiók címe, extra jogosultság nélkül), `sync.binding` meta, `SyncBindingMismatch` → semmi nem húz/tölt/töröl; három kimenet; „Szinkron alaphelyzetbe…” |
+| REL-2 (kivétel-példány) | kész | a `reconcile` példány-szabályai (a sorozat azonosítói nem párosítanak), ütközés-őr az új sor azonosítójánál |
+| REL-10 (lehúzás-izoláció) | kész | eseményenkénti try/catch, `PullResult.skipped`, eltűnt naptár (`CalendarGoneError`, a gyorsítótár ürül); a `timeMin` már a 0. fázisban egyszer számolódik |
+| REL-11 (olvasás + összefésülés) | kész | `events.get` → saját mezők → `events.update` a friss `etag`-gel, 412-nél újraolvas; RDATE / EXRULE megmarad |
+| REL-12 (törlés vs. szerkesztés, etag) | kész | a helyi szerkesztés nyer a távoli törlés felett; a lehúzás eseményenként tranzakció; `saveLocal` megőrzi a tárolt Google-kapcsolatot. **Nem készült:** a szerkesztő mezőszintű összefésülése (a felhasználó mentése egészében érvényes) |
+| REL-9 (időbélyeg) | kész | `max(óra, felváltott+1)`; óraeltérés-észlelés a Diagnosztikához. **Eltérés:** SEC-16 (bejövő bélyeg lefogása) nincs – az eszközök eltérő lefogott értéket tárolnának, és a Drive-fájl oda-vissza íródna |
+| UX-5 (magyar hibák) – első rész | részben | `sync/error_catalog.dart` a szinkron-állapotokra; a teljes katalógus és az „akció” gombok az 1c-ben |

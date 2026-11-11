@@ -288,6 +288,24 @@ void main() {
       },
     );
 
+    test(
+      'a manual sync that fails starts the ladder from its first step',
+      () async {
+        remote.offline = true;
+        await ctl.signIn();
+        for (var i = 0; i < 3; i++) {
+          await ctl.syncNow();
+        }
+        expect(
+          planned(),
+          const Duration(minutes: 5),
+          reason: 'the fourth failure',
+        );
+        await ctl.syncNow(manual: true);
+        expect(planned(), const Duration(seconds: 60), reason: 'a new series');
+      },
+    );
+
     test('given-up uploads are tried again by a manual sync only', () async {
       await repo.saveLocal(ev('a'));
       for (var i = 1; i <= 10; i++) {
@@ -432,7 +450,8 @@ void main() {
       switchAccount();
       remote.externalCreate(ev('theirs', day: 9));
       await ctl.syncNow();
-      expect(await ctl.localEventCount(), 1);
+      await repo.saveLocal(ev('b', day: 5)); // not uploaded yet
+      expect(await ctl.localEventCount(), 2);
       await ctl.startFreshAfterMismatch();
       expect(st().mismatch, isNull);
       final all = await repo.all();

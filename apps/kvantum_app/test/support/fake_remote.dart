@@ -56,6 +56,9 @@ class FakeRemote implements RemoteCalendar {
 
   /// Fails the Nth upsert (1-based) with this error instead of storing it.
   final Map<int, Object> failUpsertAt = {};
+
+  /// Makes every delete fail with this error (the pull still works).
+  Object? failDelete;
   final Map<String, int> _changedAt = {};
 
   String _etag(String g) => 'etag-${_rev[g]}';
@@ -176,6 +179,7 @@ class FakeRemote implements RemoteCalendar {
   Future<void> delete(CalEvent event) async {
     if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
+    if (failDelete != null) throw failDelete!;
     pushLog.add(('delete', event.id));
     final g = event.googleId ?? appIdToGoogle[event.id];
     if (g != null && events.containsKey(g)) {

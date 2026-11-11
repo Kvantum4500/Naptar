@@ -2,6 +2,26 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 1a. fázis – a szinkron a hibákat az okuk szerint kezeli
+
+**Mit javít**
+- **A Google korlátja nem „végleges hiba” (REL-7):** a tömeges feltöltés (pl. egy félévnyi műszak) a Google „használati korlát” hibáját váltotta ki (`calendarUsageLimitsExceeded`, `quotaExceeded`), amit az app eddig végleges hibának vett: 5 próba (≈ 5 perc) után az elem csendben feladódott. Most a korlát, a 429 és az 5xx megállítja a futást, az elem érintetlen marad, és az app **visszalép**: 1 → 2 → 4 → 8 → 15 perc (±20 % szórással; a szerver `Retry-After` fejlécénél soha nem hamarabb; napi keretnél legalább fél óra; hálózati hibánál legfeljebb 5 perc). Ha a Google magát az elemet utasítja el (hibás adat, jogosultság), az 5. elutasítás után az elem **„feladott”** (a Szinkron → Részletek mutatja), és a „Szinkron most” vagy az esemény szerkesztése újra megpróbálja. Két feltöltés közt 200 ms szünet, futásonként legfeljebb 150 feltöltés (a többi 5 másodperc múlva).
+- **Ritkább kérés tétlenül (REL-8):** a percenkénti lekérdezés helyett egy percig él a ritmus, amíg van tennivaló, tétlenül 3 → 5 → 10 percre lassul; a háttérben nincs időzítő, visszatéréskor csak akkor néz rá, ha az utolsó futás több mint fél perce volt; a pénzügyi postaláda csak akkor kerül listázásra, ha a Drive jelezte (levél / törlés), van küldendő saját módosítás, vagy minden 5. futásnál. A „Szinkron most” mindig azonnal fut, és újraindítja a ritmust.
+- **Másik fiók vagy naptár nem keveredik (REL-4):** az eszköz megjegyzi, melyik Google-fiók melyik „Naptar” naptárával szinkronizál. Ha más jön (új fiók, törölt és újra létrehozott naptár), a naptár-szinkron **megáll** („Döntés kell”; a Drive és a pénzügy megy tovább), és három út közül választhatsz: *a helyi események megtartása és feltöltése az új naptárba* (semmi nem törlődik), *üres indulás* (a helyi naptáresemények törlődnek, számmal megerősítve), *később*. A fiók a felületen maszkolva látszik (`a***@gmail.com`).
+- **„Szinkron alaphelyzetbe…” (a szinkron menüjében):** az események kapcsolatait elfelejti, és újra sorba állít mindent (a feltöltés az esemény saját azonosítója alapján megtalálja a meglévő Google-eseményt, **nincs duplikátum**); a feladatok, check-inek és pénzügyi levelek szinkronja a nulláról indul. Semmi nem törlődik, a Google-ban sem; amit közben a Google-ban töröltél, azt visszateszi.
+- **A szerkesztés nem törli a Google-oldali mezőket (REL-11):** az esemény módosítása eddig az egész eseményt felülírta (az emlékeztetők, vendégek, Meet-link, „szabad/foglalt” elvesztek). Most az app beolvassa a Google-beli eseményt, ráteszi a saját mezőit (cím, leírás, hely, szín, idő, ismétlődés + kivételek), és a friss `etag`-gel írja vissza (412-nél újraolvas); a nem szerkeszthető ismétlődés-sorok (RDATE, EXRULE) is megmaradnak. Szerkesztésenként +1 hívás.
+- **Egy kivétel-példány nem írja felül a sorozatot (REL-2):** ha a Google-ban egyetlen előfordulást átírtál, az eddig a sorozat sorát is felülírhatta (a példány a sorozat azonosítóit viseli). Most a példányt csak saját kivétel-sorral párosítja.
+- **A Google-ban törölt, de közben szerkesztett esemény visszakerül (REL-12):** a távoli törlés eddig elnyelte a fel nem töltött helyi szerkesztést; most a szerkesztés nyer. A lehúzás eseményenként egy tranzakcióban olvas és ír, így a közben végzett szerkesztést nem írja felül; a szerkesztő elavult pillanatképe nem teszi vissza a régi `etag`-et (örök „elavult” elutasítást okozott).
+- **Egy olvashatatlan Google-esemény nem állítja meg a többit (REL-10):** ismeretlen időzónájú / hibás dátumú esemény kimarad, és a szinkron jelzi („N Google-esemény nem olvasható be”); az eltűnt naptár külön, érthető jelzést kap.
+- **Az óraeltérés ne némítsa el a szerkesztést (REL-9):** az írás bélyege legalább 1 ms-mal a felváltott változaté után jön (rekordok és pénzügy), ezért ha egy másik eszköz órája előrejár, a rá épülő szerkesztés akkor is nyer. Az óraeltérést (2 napnál jövőbelibb bélyeg) az 1c Diagnosztikája jelzi majd.
+- **Magyar állapotszövegek:** korlát, napi korlát, nincs kapcsolat, feladott módosítás, nem olvasható esemény, eltűnt naptár, váratlan hiba – a felületen nincs többé osztálynév. A Részletek mutatja a következő automatikus próbát és a feladott módosításokat.
+
+**Szándékos eltérések az audit szövegétől:** nincs determinisztikus Google-esemény-azonosító (az azonosító-szabályok és a törölt azonosítók viselkedése élőben nem ellenőrizhető; helyette ütemezés + visszalépés); a bejövő időbélyeg lefogását (SEC-16) nem építettem be (két eszköz eltérő értéket tárolna, és a Drive-fájl oda-vissza íródna) – helyette a rá épülő szerkesztés nyer; az újrapróbálás állapota memóriában van (nincs séma-változás; az az 1b-ben jön).
+
+Tesztek: mag 422 (volt 417), app 865 (volt 693); 61 szándékos elrontást mind elkapnak a tesztek.
+
+**Nem ellenőrizhető itt:** a Google valódi hibakódjai és `Retry-After` fejlécei; hogy a Google kivétel-példánya örökli-e a sorozat `appEventId`-jét (a védelem mindkét esetben jó); a `conferenceData` sorsa az `events.update`-nél; a naptár törlésekor kapott pontos státusz; a valódi kvóta-küszöbök; a visszalépés és a háttér-szünet valódi telefonon / gépen.
+
 ## 2e. fázis – edzés utáni visszajelzés, és a program tanul belőle
 
 **Mit kérdez**
