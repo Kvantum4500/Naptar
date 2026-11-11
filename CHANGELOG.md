@@ -2,6 +2,12 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## Eszközlánc – a Flutter 3.50.0-hoz igazítás
+
+- **Mi történt:** a CI rögzítetlen „stable” Flutter-t használ, és a 2026-11-09-én megjelent 3.50.0 két helyen megtörte a buildet (az 1b első buildje, a Build 59 emiatt csak a Windows-csomagot adta): **(1) Android** – az új Flutter legalább Android Gradle Plugin 9.1.1-et és Kotlin 2.4.10-et kér (nálunk 9.1.0 és 2.4.0 volt), és figyelmeztet, hogy a Gradle 9.3.1 támogatása hamarosan megszűnik; **(2) elemzés** – a Material kiköltözött a `material_ui` csomagba, ezért a `package:flutter/material.dart` minden importját elavultnak jelzi (43 jelzés), és a `flutter analyze` ilyenkor hibakóddal lép ki, így a CI `app` jobja a tesztek előtt megállt.
+- **Javítás:** az Android-projekt a Flutter 3.50.0 saját sablonjának verzióira lépett: **Android Gradle Plugin 9.3.1, Kotlin 2.4.20, Gradle 9.5.0**; az elemzés „elavult használat” jelzése (`deprecated_member_use`) kikapcsolva az `analysis_options.yaml`-ban (a régi import továbbra is működik). Az app tesztjei a 3.50.0-n is mind zöldek (974).
+- **Nyitva marad:** az áttérés a `material_ui` csomagra külön, szándékos feladat (új függőség, 40 fájl, harmadik fél csomagok áthidalása, témaellenőrzés); a Flutter-verzió rögzítése a CI-ben külön PR a `main`-be (audit CMP-1 / SEC-18), a felhasználó jóváhagyásával.
+
 ## 1b. fázis – az adatréteg megbízhatósága: biztonságos frissítés, egy egység az összetartozó írás, újabb formátum védelme
 
 **Adatbázis és Windows**
