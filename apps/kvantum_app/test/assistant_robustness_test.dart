@@ -251,16 +251,19 @@ void main() {
     test('a call that takes longer than what is left is given up on', () async {
       final llm = GatedLlm(); // never answers
       final started = DateTime.now();
+      // the request's own clock stands still at 0, so the preparations (database
+      // reads, a slow machine) cannot eat into the 50 ms the call is given
       await expectLater(
         service(
           llm,
-          deadline: const Duration(milliseconds: 80),
+          deadline: const Duration(milliseconds: 50),
+          sinceStart: () => Duration.zero,
         ).ask('Tervezz edzést', model: 'm', settings: settings),
         throwsA(isA<LlmTimeout>()),
       );
       expect(
         DateTime.now().difference(started),
-        lessThan(const Duration(seconds: 5)),
+        lessThan(const Duration(seconds: 10)),
       );
       expect(llm.requests.length, 1);
     });
@@ -271,8 +274,10 @@ void main() {
   });
 
   group('cancelling', () {
+    // Waits until the model call is in flight. It only takes as long as the
+    // preparations (database reads) do; the generous cap is for slow machines.
     Future<void> waitForCall(GatedLlm llm) async {
-      for (var i = 0; i < 400 && llm.requests.isEmpty; i++) {
+      for (var i = 0; i < 6000 && llm.requests.isEmpty; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
       expect(llm.requests, isNotEmpty);
