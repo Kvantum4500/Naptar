@@ -18,7 +18,7 @@ A részletes ellenőrzés és a fejlesztési terv: [`docs/audit-es-fejlesztesi-t
 
 ## Futtatás fejlesztéshez
 
-Flutter **3.47.9** (Dart 3.13.7) kell; a CI is ezt használja.
+Flutter **3.47.9** (Dart 3.13.7) kell, ezzel futnak a tesztek (a CI-ben a verzió rögzítése a `main`-en keresztül érkezik, lásd lent).
 
 ```bash
 # mag (tiszta Dart)
@@ -44,7 +44,7 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 ## Kiadás és önfrissítés
 
 - A `build.yml` megépíti a Windows-zipet és az Android-APK-t, SHA-256 összeggel, és GitHub-kiadást (`build-<szám>`) készít belőle.
-- **Stabil kiadás:** a `main`-re és a `v*` címkére küldött változás. **Előzetes kiadás** (pre-release): a munkaágakról (`[build]` a commit üzenetben, vagy kézi indítás) készült build; ezt az app csak akkor ajánlja fel, ha a Frissítés ablakban az „Előzetes verziókat is keressen” be van kapcsolva.
+- Jelenleg minden build „latest” kiadás, a `main`-é és a munkaágaké is. Az **előzetes csatorna** (a munkaági buildek pre-release-ként, a „latest” csak a `main`/`v*` buildje) és a rögzített Flutter-verzió elkészült, de külön lépésben, a `main`-en keresztül kerül be: ha a build workflow-fájljai eltérnek a `main`-étől, a GitHub 403-mal elutasítja a kiadás létrehozását (ezt a Build 34 mutatta meg). Az app erre már fel van készítve: a Frissítés ablak „Előzetes verziókat is keressen” kapcsolója (alapból be) az előzetes kiadásokat is felkínálja.
 - Az app „Frissítés keresése” menüpontja a csak olvasó `UPDATE_TOKEN`-nel kérdezi le a kiadásokat, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit. Az ellenőrzés csak kézi indításra fut.
 - Az első indításnál a Windows figyelmeztet („ismeretlen kiadó”): a ZIP tulajdonságainál jelöld be a **Feloldás** (Unblock) négyzetet kicsomagolás előtt. A frissítések már nem figyelmeztetnek.
 - Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja; a kulcsot **őrizd meg**, elvesztése után újra kell telepíteni az appot). Aláírt kulcs nélkül az APK nem kerül a kiadásba.

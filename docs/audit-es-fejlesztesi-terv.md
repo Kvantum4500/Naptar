@@ -369,8 +369,14 @@ Tesztek: mag 194 (volt 173), app 441 (volt 405), az elemzők tiszták. Minden ja
 | REL-3 | kész | 30 s válasz- és 30 s tétlenségi határidő minden Google-hívásra; egyszerre egy szinkron, a közben érkezők egy követő futásba olvadnak |
 | REL-4 (minimum) | kész | az időablak előtti, helyi történet nem törlődik újraszinkronnál; a fiók-/naptárkötés az 1. fázisban |
 | REL-5 | kész | |
-| SEC-1 | kész, részben | a munkaági build előzetes kiadás, a „latest” csak `main`/`v*`; az appban kapcsoló az előzetes verziókhoz. **Marad a felhasználónak:** GitHub Environment a titkokhoz (D. rész 2.). |
-| SEC-18 | részben | Flutter 3.47.9 rögzítve, `permissions`, `concurrency`. Elmaradt: Actions SHA-pin (hálózat kell a feloldáshoz), Gradle `distributionSha256Sum`; a debug-kulcsos visszaesés a CI-ben nem kerül kiadásba (`SIGNED` kapu), ezért a Gradle-t nem módosítottam. |
+| SEC-1 | részben, a CI-oldal visszavonva | az appban kész a kapcsoló az előzetes verziókhoz. A munkaági build előzetes kiadássá tétele elkészült, de **visszavontam**: a Build 34 kiadása 403-at kapott (lásd lent). **Marad a felhasználónak:** GitHub Environment a titkokhoz (D. rész 2.). |
+| SEC-18 | elhalasztva | a Flutter 3.47.9 rögzítése, a `permissions` és a `concurrency` elkészült, de a workflow-fájlok visszaálltak a `main` változatára (lásd lent). Elmaradt: Actions SHA-pin (hálózat kell a feloldáshoz), Gradle `distributionSha256Sum`; a debug-kulcsos visszaesés a CI-ben nem kerül kiadásba (`SIGNED` kapu), ezért a Gradle-t nem módosítottam. |
 | QA-1 | kész | README, CHANGELOG, ez a dokumentum; a `secrets.example.json` mostantól követett (a `.gitignore` nem rejti el) |
 
 **Átállás az előzetes csatornára:** a 0. fázis buildje még „latest” kiadásként jelenik meg (hogy a mostani app megtalálja). Ezután a munkaági buildek előzetesek; a Frissítés ablakban az „Előzetes verziókat is keressen” kapcsoló alapból BE van, így a tesztelés ugyanúgy megy.
+
+### A Build 34 kiadási hibája (403)
+
+A Windows- és az Android-build is sikeres volt (a Kotlin-kód lefordult, az APK aláírt), de a **kiadás lépése** `Resource not accessible by integration` (403) hibával elbukott, kétszer is (újrafuttatva is). A token jogai (`Contents: write`), a runner és az action-verzió megegyezett a sikeres Build 33-éval. Az egyetlen különbség: ez volt az első build, amelynek workflow-fájljai (`build.yml`, `ci.yml`) eltértek a `main`-étől; a korábbi munkaági buildeké azonos volt, és a `main`-en a build-13 (amely a workflow-fájlokat adta a `main`-hez) sikerült. **Az ok nem bizonyított**, de a munkaág workflow-fájljait visszaállítottam a `main` változatára, és a következő build ezzel indul.
+
+**Tanulság:** a workflow-fájlok módosítását külön lépésben kell a `main`-be juttatni (külön PR, `[build]` nélkül), és csak utána szabad rájuk épülő munkaági buildet indítani. A CI-szigorítás (előzetes csatorna, Flutter-rögzítés, jogosultságok) ezen az úton jön vissza.

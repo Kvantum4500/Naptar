@@ -24,8 +24,8 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - Javítva: a „Limit miatt várok N másodpercet…” állapotsor sosem látszott.
 
 **Kiadás**
-- A munkaágak buildjei előzetes kiadások, a „latest” csak a `main`/`v*` buildje. A Frissítés ablak „Előzetes verziókat is keressen” kapcsolója dönt.
-- A CI a Flutter 3.47.9-et használja rögzítve, minimális jogosultsággal.
+- A Frissítés ablakban új kapcsoló: „Előzetes verziókat is keressen” (alapból be). Ha egy kiadás előzetes (pre-release), így is megtalálja.
+- A CI-szigorítás (előzetes csatorna a munkaágaknak, rögzített Flutter 3.47.9, minimális jogosultság) elkészült, de **egyelőre nincs érvényben**: a Build 34 kiadás-lépése 403-mal elbukott, mert a workflow-fájljai eltértek a `main`-étől. A munkaág workflow-fájljai visszaálltak a `main`-ére; a szigorítás a `main`-en keresztül kerül vissza. A Build 34 csomagjai nem kerültek kiadásba, a következő build viszi a változásokat.
 - README és dokumentáció frissítve.
 
 ## Korábbi állapot (Build 33-ig)
