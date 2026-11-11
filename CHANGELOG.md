@@ -10,19 +10,20 @@ A modellnek küldött kérés mérete, **becsléssel** (3 karakter = 1 token, sz
 |---|---|---|
 | „Tervezz edzést a jövő hétre” | ≈ 6 100 | ≈ 3 000 |
 | „Tervezz edzést” (7 nap) | ≈ 5 500 | ≈ 2 700 |
-| „Töröld a kézzel felvett programokat holnapra” | ≈ 4 800 | ≈ 1 300 |
+| „Töröld a kézzel felvett programokat holnapra” | ≈ 4 800 | ≈ 1 400 |
 | „Hogy állok a költségkerettel?” | ≈ 4 450 | ≈ 500 |
-| Állandó rész tervezésnél (rendszerprompt + eszközök) | ≈ 4 250 | ≈ 2 050 |
+| Állandó rész tervezésnél (rendszerprompt + eszközök) | ≈ 4 250 | ≈ 2 000 |
 
 Ez a program saját becslése, nem a szolgáltató számlálója; a tényleges értéket a 2c lépés kijelzése fogja mutatni.
 
 **Mi változott**
 - A kérés fajtája (terv / törlés-áthelyezés / pénzügyi kérdés) dönti el, mit kap a modell: utasítást, kézikönyvet, adatot és eszközt. Törlésnél nem megy el az edzésszabály-gyűjtemény, pénzügyi kérdésnél sem a kézikönyv, sem a naptár.
 - Az adat rövid kulcsokkal megy (a jelmagyarázat a rendszerpromptban van): az események naponként csoportosítva, a feladatok rövid azonosítóval (`t1`, `t2` …), a szabad idősávok naponként egy sorban, az időjárás napi egy rövid sor (csapadék és szél csak ha jelentős).
-- Az eseményhivatkozás (`r`) csak törlésnél és áthelyezésnél megy; tervezésnél nincs is rá szükség. A tervezési kérés eszközei között nincs törlés/áthelyezés, és nincs `get_tasks` (az első üzenet már tartalmazza az összes nyitott feladatot).
+- Az eseményhivatkozás (`r`) csak törlésnél és áthelyezésnél megy; tervezésnél nincs is rá szükség. A tervezési kérés eszközei között nincs törlés/áthelyezés, és nincs `get_tasks` (az első üzenet már tartalmazza az összes nyitott feladatot). A törlés/áthelyezés kérés kap szabad-idősáv eszközt (egy áthelyezés gyakran „egy szabad időpontra” szól).
+- A tervezési prompt csak akkor szól a pénzről (és csak akkor kapja a pénzügyi eszközt), ha a kérés pénzt is érint.
 - Az eszközleírások rövidek, a `tzid` mezők kikerültek (alapzóna: a program ezt tölti ki).
 - Az első üzenet sorrendje: adatok → pontos idő → a te kérésed. A rendszerprompt és az eszközlista nem tartalmaz órát, így azonos fajtájú kérések között bájtra azonos (a szolgáltatók előtag-gyorsítótárának kedvez).
-- A kézikönyv alapszövegei rövidebbek, a szabályok tartalma ugyanaz (edzéstípusok, hobbisportok és évszakok, séta, időjárási küszöbök, `outdoor`); a számszerű korlátok (alvási sáv, puffer, 48 óra, heti plafon) csak egyszer, az élő beállításokból kerülnek a promptba. Új a 12 napos műszakciklus leírása (3 éjszaka 18–06, 3 szabad, 3 nappal 06–18, 3 szabad). A sablonsorok (üres „Sérülések:” stb.) nem mennek el a modellnek.
+- A kézikönyv alapszövegei rövidebbek, a szabályok tartalma ugyanaz (edzéstípusok, hobbisportok és évszakok, séta, időjárási küszöbök, `outdoor`); a számszerű korlátok (alvási sáv, puffer, 48 óra, heti plafon) csak egyszer, az élő beállításokból kerülnek a promptba. Új a 12 napos műszakciklus leírása (3 éjszaka 18–06, 3 szabad, 3 nappal 06–18, 3 szabad) és egy új alapfeltevés a Profilban: éjszakás műszak után aznap reggel/délelőtt nem tervez edzést (ha ez nálad nem igaz, javítsd a Beállítások → Kézikönyv → Profil fájlban). A „Naptár-jelentések” már nem hivatkozik olyan adatra, amit nem küldünk (résztvevők, belső jelölők). A sablonsorok (üres „Sérülések:” stb.) nem mennek el a modellnek.
 - **A kézikönyv-migráció:** ha egy fájl mentett példánya pontosan a régi, mellékelt alapszöveg volt (sosem szerkesztetted), az új alapszöveg lép érvénybe. A ténylegesen szerkesztett fájlokhoz (pl. Profil, Tanult szokások) nem nyúl a program.
 - Hiba javítva: a modell a feladat azonosítóját (`taskId`) csak a promptból tudta, a mezőleírásban nem szerepelt; most szerepel.
 - Tervezési kérésnél a modell törlési/áthelyezési kísérlete kérésre sem indít felesleges javítókört; röviden elutasítódik („csak kifejezett kérésre”).

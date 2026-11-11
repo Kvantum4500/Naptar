@@ -222,6 +222,29 @@ void main() {
       }
     });
 
+    test('a plan without money data is not told about money', () {
+      final withMoney = buildSystemPrompt(
+        handbook: 'H',
+        rules: const PlanRules(),
+      );
+      final without = buildSystemPrompt(
+        handbook: 'H',
+        rules: const PlanRules(),
+        finance: false,
+      );
+      expect(withMoney, contains('get_finance'));
+      expect(without.contains('get_finance'), isFalse);
+      expect(without.contains('penzugy'), isFalse);
+      expect(without.length, lessThan(withMoney.length));
+      // the rest is the same
+      expect(without, contains('KEMÉNY SZABÁLYOK'));
+      expect(without, contains('taskId'));
+    });
+
+    test('a move can ask for a free time', () {
+      expect(prompt(PromptKind.edit), contains('find_free_slots'));
+    });
+
     test('each kind is smaller than the one with more to say', () {
       final plan = prompt(PromptKind.plan, hb: '').length;
       final edit = prompt(PromptKind.edit, hb: '').length;

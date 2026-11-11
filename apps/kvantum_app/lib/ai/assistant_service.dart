@@ -128,7 +128,8 @@ const _proposeEdit = ToolDecl('propose_events', _proposeDescription, {
 /// needs only the events, a pure money question only the money data, a plan the
 /// lot. Every tool left out is some hundred tokens saved on every model call.
 List<ToolDecl> assistantToolsFor(AskScope scope) {
-  if (scope.edit) return const [_getEvents, _proposeEdit];
+  // a move often means "to a free time": the free slots are one call away
+  if (scope.edit) return const [_getEvents, _findFreeSlots, _proposeEdit];
   if (scope.finance && !scope.events) return const [_getFinance];
   // No get_tasks here: the first message already carries every open task, so
   // the tool could only repeat it.
@@ -288,6 +289,7 @@ class AssistantService {
       handbook: await _handbookFor(scope.kind),
       rules: rules,
       kind: scope.kind,
+      finance: scope.finance,
     );
     final tools = assistantToolsFor(scope);
     // The usual data goes into the first message, so a normal request needs

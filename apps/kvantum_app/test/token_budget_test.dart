@@ -292,7 +292,8 @@ void main() {
       final size = _Size(r);
       expect(first, contains('<adat tipus="penzugy">'));
       expect(first.contains('<adat tipus="esemenyek">'), isFalse);
-      expect(size.total, lessThanOrEqualTo(2300), reason: '$size');
+      // a money question needs no handbook and no calendar: well under 1 000
+      expect(size.total, lessThanOrEqualTo(1000), reason: '$size');
     });
   });
 
@@ -365,6 +366,18 @@ void main() {
     );
 
     test(
+      'a plan is told about money only when the request is about money',
+      () async {
+        final (plain, _) = await sent('Tervezz edzést a jövő hétre');
+        expect(plain.system.contains('get_finance'), isFalse);
+        expect(plain.tools.map((t) => t.name), isNot(contains('get_finance')));
+        final (mixed, _) = await sent('Tervezz edzést, de figyelj a pénzemre');
+        expect(mixed.system, contains('get_finance'));
+        expect(mixed.tools.map((t) => t.name), contains('get_finance'));
+      },
+    );
+
+    test(
       'a plan is not offered deleting or moving, a deletion request is',
       () async {
         final (plan, _) = await sent('Tervezz edzést a jövő hétre');
@@ -402,9 +415,10 @@ void main() {
       );
     });
 
-    test('deleting or moving needs only events and the proposal tool', () {
+    test('deleting or moving gets the events, the free slots and the proposal tool', () {
       expect(names('Töröld a holnapi edzést'), {
         'get_events',
+        'find_free_slots',
         'propose_events',
       });
     });
@@ -496,10 +510,29 @@ void main() {
       }
     });
 
-    test('the profile knows the 12-day shift cycle', () {
-      final p = File('assets/handbook/profile.md').readAsStringSync();
-      expect(p, contains('12 napos'));
-      expect(p, contains('18–06'));
+    test(
+      'the profile knows the 12-day shift cycle and the rest after nights',
+      () {
+        final p = File('assets/handbook/profile.md').readAsStringSync();
+        expect(p, contains('12 napos'));
+        expect(p, contains('18–06'));
+        expect(p, contains('Éjszakás műszak (18–06) után'));
+      },
+    );
+
+    test('the calendar meanings do not refer to data that is never sent', () {
+      final t = File('assets/handbook/calendar-semantics.md')
+          .readAsStringSync();
+      for (final gone in [
+        'résztvev',
+        'appEventId',
+        'extended property',
+        'ai=1',
+      ]) {
+        expect(t.contains(gone), isFalse, reason: gone);
+      }
+      // what the data really carries: the flags of the legend
+      expect(t, contains('f: a'));
     });
   });
 
@@ -538,6 +571,29 @@ void main() {
         expect(text, contains('Rögzített'));
       },
     );
+
+    // The default of calendar-semantics.md in Build 38 (before the attendee
+    // remark went), a text a device may have saved unedited.
+    const build38Semantics = '''# Naptár-jelentések
+- Rögzített (nem mozgatható): munka, megbeszélés, orvos, utazás, meghívott résztvevős esemény, és a műszak.
+- Mozgatható: az AI korábbi edzés- és tanulásblokkjai (f: a).
+- Egész napos esemény (ünnep, szabadság) nem blokkol, de jelzi, hogy szabadnap vagy utazás lehet: nézd meg a címét.
+- Naptárak/színek jelentése: (töltsd ki, pl. Munka = kék, Magán = zöld)
+''';
+
+    test('the default of the previous build is recognised too', () async {
+      expect(
+        isLegacyHandbookDefault('calendar-semantics', build38Semantics),
+        isTrue,
+      );
+      final hb = handbook();
+      await hb.save('calendar-semantics', build38Semantics);
+      expect(await hb.isCustomized('calendar-semantics'), isFalse);
+      expect(
+        (await hb.textOf('calendar-semantics')).contains('résztvev'),
+        isFalse,
+      );
+    });
 
     test('a copy the user really changed is never replaced', () async {
       final hb = handbook();

@@ -383,7 +383,7 @@ A Windows- és az Android-build is sikeres volt (a Kotlin-kód lefordult, az APK
 
 ### 2a (kisebb asszisztens-kérés) – kész, a build után kipróbálandó
 
-Tesztek: mag 214 (volt 194), app 466 (volt 441), az elemzők és a formázás tiszták. A mérés a `test/token_budget_test.dart`-ban fut (rögzített mintanaptár, a ténylegesen mellékelt kézikönyv, 3 karakter = 1 token). Az új tesztek 12 szándékos elrontással (más sorrend, minden kérés ugyanazt az eszközlistát kapja, a törlés is a teljes kézikönyvet kapja, hivatkozás a tervezésben, a régi alapszöveg „testreszabott” marad, a feladat-alias nem fejtődik vissza, az alapértékek kiíródnak, az időjárás-sor mindig kiír mindent …) próbára téve: mindegyiket elkapják.
+Tesztek: mag 216 (volt 194), app 469 (volt 441), az elemzők és a formázás tiszták. A mérés a `test/token_budget_test.dart`-ban fut (rögzített mintanaptár, a ténylegesen mellékelt kézikönyv, 3 karakter = 1 token). Az új tesztek 12 szándékos elrontással (más sorrend, minden kérés ugyanazt az eszközlistát kapja, a törlés is a teljes kézikönyvet kapja, hivatkozás a tervezésben, a régi alapszöveg „testreszabott” marad, a feladat-alias nem fejtődik vissza, az alapértékek kiíródnak, az időjárás-sor mindig kiír mindent …) próbára téve: mindegyiket elkapják.
 
 | Tétel | Állapot | Megjegyzés |
 |---|---|---|
@@ -391,5 +391,5 @@ Tesztek: mag 214 (volt 194), app 466 (volt 441), az elemzők és a formázás ti
 | AI-8 | kész | nincs óra a rendszerpromptban; adat → idő → kérés |
 | AI-14 (rész) | kész | eszközök a kérés fajtája szerint; a hatókör-felismerés javítása (ékezet, tagadás, vegyes kérés) a 2d-ben marad |
 | AI-21, AI-25 | részben | a tömör alak mindenhol; a „cím csak műszak/AI/egész napos esetén” és a tanult szokások korlátja a 2c/2d-ben |
-| token-cél | teljesült, becsléssel | terv ≈ 3,0 k (cél ≤ 3,2 k), törlés ≈ 1,3 k (cél ≤ 2,2 k), állandó rész ≈ 2,05 k (cél ≤ 2,3 k), pénz ≈ 0,5 k. A „pénz helyi válasz = 0” a 2d-ben jön. |
+| token-cél | teljesült, becsléssel | terv ≈ 3,0 k (cél ≤ 3,2 k), törlés ≈ 1,4 k (cél ≤ 2,2 k), állandó rész ≈ 2,0 k (cél ≤ 2,3 k), pénz ≈ 0,5 k. A „pénz helyi válasz = 0” a 2d-ben jön. |
 | **Eltérés a tervtől** | | A rendszerprompt a kérés fajtája szerint három változatú (terv / törlés-áthelyezés / pénz); a terv azt írta, hogy minden kérésnél bájtra azonos. Azonos fajtájú kérések között az (cache-barát), a különböző fajták között nem; a törlés és a pénzügyi kérdés így lényegesen kisebb. |

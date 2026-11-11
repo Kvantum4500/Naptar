@@ -22,10 +22,14 @@ const kLegacyHandbookHashes = <String, Set<String>>{
     'cf72dd24ccab81045eda0d527ba8a472b4872cc8',
   },
   'relations': {'c2f2d1d3470144b1a3929f749e6582f5f193e499'},
-  'calendar-semantics': {'df6f0502524fa1967c9aa456de9a5a2183433aba'},
+  'calendar-semantics': {
+    'df6f0502524fa1967c9aa456de9a5a2183433aba',
+    'f53022933d3ed5c8d0a9ebb4aeb3d8259ed3d875',
+  },
   'profile': {
     'b9586c61395fc345eb03863988f6ddcaaaac720a',
     'e3d57150878d10e7e7546db3f139c5f5250769f7',
+    '2ee30032f4cbd10b126805cd63d093cc5329b520',
   },
 };
 

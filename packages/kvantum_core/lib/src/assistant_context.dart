@@ -431,11 +431,13 @@ String dataBlock(String type, Map<String, Object?> data) =>
 /// and NO clock: for one [kind] of request it is byte-identical from one
 /// request to the next, so providers with automatic prefix caching can reuse
 /// it. The current time goes into the first message ([nowLine]). An empty
-/// [handbook] leaves the handbook section out.
+/// [handbook] leaves the handbook section out. [finance] says whether the
+/// request carries money data (a plan without it is not told about money).
 String buildSystemPrompt({
   required String handbook,
   required PlanRules rules,
   PromptKind kind = PromptKind.plan,
+  bool finance = true,
 }) {
   String hh(int h) => h.toString().padLeft(2, '0');
   final b = StringBuffer();
@@ -471,7 +473,7 @@ String buildSystemPrompt({
       );
       section('MŰKÖDÉS', [
         'Az első üzenet <adat> blokkja a következő napok eseményeit tartalmazza; más időszakhoz használd a get_events eszközt. Ne találj ki adatot; ha nem egyértelmű, melyik eseményre gondol a felhasználó, kérdezz vissza (questions).',
-        'A kérést a propose_events eszközzel add le: törlés → deletions (az r érték), áthelyezés → moves (az r érték és az ÚJ kezdés/vég helyi időben, zóna nélkül: 2026-05-04T18:00:00). Csak a kifejezetten megnevezett eseményeket add meg. Semmi nem történik a felhasználó külön jóváhagyása nélkül. Műszak nem törölhető és nem mozgatható; az új időpont ne ütközzön.',
+        'A kérést a propose_events eszközzel add le: törlés → deletions (az r érték), áthelyezés → moves (az r érték és az ÚJ kezdés/vég helyi időben, zóna nélkül: 2026-05-04T18:00:00). Csak a kifejezetten megnevezett eseményeket add meg. Semmi nem történik a felhasználó külön jóváhagyása nélkül. Műszak nem törölhető és nem mozgatható; az új időpont ne ütközzön (szabad időpontot a find_free_slots eszközzel kérhetsz).',
       ]);
       section('ADATJELÖLÉSEK', [legendEventsEdit]);
       section('BIZALMI SZABÁLY', [trust]);
@@ -484,13 +486,13 @@ String buildSystemPrompt({
         'A tervet MINDIG a propose_events eszközzel add le (proposals). Semmi nem történik a felhasználó külön jóváhagyása nélkül. Meglévő eseményt nem módosítasz, nem törölsz és nem mozgatsz.',
         'Időpont: helyi idő, zóna nélkül (2026-05-04T18:00:00); a szabad_idosavok adatból vagy a find_free_slots eszközből válassz, ne számold ki.',
         'Feladatnál (kind: task) a taskId a feladat t értéke; a becsült időt (p) teljesen ütemezd be (bonthatod) a határidő (h) napja előtt; nagy energiaigényű (e 4–5) feladat jó energiájú napra; a késésben lévőt (k) vedd előre; becslés nélkül észszerű hosszt javasolj.',
-        'penzugy: a felhasználó saját adata (Ft); csak ebből számolj, befektetési vagy hitel-tanácsot nem adsz; pénzügyi tételt nem veszel fel és nem törölsz; részlet: get_finance (honap: ÉÉÉÉ-HH).',
+        if (finance) 'penzugy: a felhasználó saját adata (Ft); csak ebből számolj, befektetési vagy hitel-tanácsot nem adsz; pénzügyi tételt nem veszel fel és nem törölsz; részlet: get_finance (honap: ÉÉÉÉ-HH).',
       ]);
       section('ADATJELÖLÉSEK', [
         legendEventsPlan,
         'feladatok: t=azonosító, c=cím, h=határidő, p=becsült perc, pr=prioritás 1–3 (alapból 2), e=energiaigény 1–5 (alapból 3), k=késésben.',
         'check_in: d=nap, f=fizikai, m=mentális, h=hangulat, a=alvás (1 rossz … 5 kiváló), j=megjegyzés.',
-        'szabad_idosavok: napok szerint, HH:MM-HH:MM. idojaras (HH-NN szerint, szabadtéri tevékenységnél outdoor: true): csapadék és szél csak ha jelentős.',
+        'szabad_idosavok: napok szerint, HH:MM-HH:MM. idojaras: napok szerint (HH-NN), csapadék és szél csak ha jelentős; szabadtéri tevékenységnél állítsd outdoor: true-ra.',
       ]);
       section('BIZALMI SZABÁLY', [trust]);
       section(
