@@ -757,24 +757,33 @@ void scopeTests() {
   final wed = floating(2026, 5, 6);
   group('scopeFor', () {
     test('delete and move requests need only the events', () {
-      for (final q in [
-        'töröld a manuálisan beírt programokat',
-        'Told át a holnapi edzést este 7-re',
-        'helyezd át a fogorvost',
-        'módosítsd a megbeszélést',
+      for (final (q, days) in [
+        ('töröld a manuálisan beírt programokat', 14),
+        // a day named: a window of that day and the day after (see scope_test)
+        ('Told át a holnapi edzést este 7-re', 3),
+        ('helyezd át a fogorvost', 14),
+        ('módosítsd a megbeszélést', 14),
       ]) {
         final s = scopeFor(q, wed);
         expect(s.edit, isTrue, reason: q);
         expect((s.tasks, s.checkins, s.slots), (false, false, false));
-        expect(s.days, 14);
+        expect(s.days, days, reason: q);
       }
     });
 
     test('a normal request covers 7 days with every block', () {
-      final s = scopeFor('Mikor férne be 45 perc mozgás ma?', wed);
+      final s = scopeFor('Mikor férne be 45 perc mozgás?', wed);
       expect(
         (s.edit, s.days, s.tasks, s.checkins, s.slots),
         (false, 7, true, true, true),
+      );
+    });
+
+    test('a request for today covers today, with every block', () {
+      final s = scopeFor('Mikor férne be 45 perc mozgás ma?', wed);
+      expect(
+        (s.edit, s.days, s.tasks, s.checkins, s.slots),
+        (false, 1, true, true, true),
       );
     });
 

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/assistant_service.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
+import 'package:kvantum_app/ai/llm_provider.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
@@ -32,7 +33,7 @@ void main() {
     provider: llm,
     events: events,
     records: records,
-    handbook: HandbookStore(records, loader: (path) async => ''),
+    handbook: HandbookStore(records, loader: (path) async => 'H[$path]'),
     settingsStore: store,
     now: () => now,
     delay: (d) async {},
@@ -209,5 +210,75 @@ void main() {
         .ask('Tervezz valamit', model: 'm', settings: settings);
     expect(told(llm), contains('alvási sávba esik'));
     expect(out.items.single.title, 'Túra');
+  });
+
+  group('what a request is sent, by what it asks (2d)', () {
+    String first(FakeLlm llm) => llm.requests.first.turns.first.parts
+        .whereType<LlmText>()
+        .map((t) => t.text)
+        .join();
+
+    test('deleting and planning in one request carries both', () async {
+      await booked('p1', 'Magánügy', floating(2026, 5, 5, 9));
+      await records.edit(kindTask, 't1', taskFields(title: 'Beadandó'));
+      await records.edit(
+        kindCheckIn,
+        '2026-05-04',
+        checkInFields(physical: 4, mood: 3),
+      );
+      final llm = FakeLlm([(_) => say('ok')]);
+      await service(llm).ask(
+        'Töröld a kézzel felvett programokat és tervezz edzést a jövő hétre',
+        model: 'm',
+        settings: settings,
+      );
+      final req = llm.requests.first;
+      // the events come with references (a deletion needs them) and their names
+      expect(first(llm), contains('"r":"e1"'));
+      expect(first(llm), contains('Magánügy'));
+      // ... and the planning data is there too
+      expect(first(llm), contains('<adat tipus="feladatok">'));
+      expect(first(llm), contains('<adat tipus="check_in">'));
+      expect(first(llm), contains('<adat tipus="szabad_idosavok">'));
+      // the instructions: references AND the hard rules AND the user's handbook
+      expect(req.system, contains('deletions'));
+      expect(req.system, contains('KEMÉNY SZABÁLYOK'));
+      expect(req.system, contains('H[assets/handbook/rules.md]'));
+      final names = [for (final t in req.tools) t.name];
+      expect(
+        names,
+        containsAll(['get_events', 'get_checkins', 'propose_events']),
+      );
+      final propose = req.tools.firstWhere((t) => t.name == 'propose_events');
+      expect(propose.parameters.toString(), contains('deletions'));
+    });
+
+    test(
+      'a plain deleting request stays small: events only, a short window',
+      () async {
+        final llm = FakeLlm([(_) => say('ok')]);
+        await service(llm)
+            .ask('Töröld a holnapi edzést', model: 'm', settings: settings);
+        expect(first(llm), contains('3 nap (2026-05-04 – 2026-05-06)'));
+        expect(first(llm).contains('feladatok'), isFalse);
+        expect(first(llm).contains('check_in'), isFalse);
+        expect(llm.requests.first.system.contains('KEMÉNY SZABÁLYOK'), isFalse);
+        final names = [for (final t in llm.requests.first.tools) t.name];
+        expect(names.contains('get_checkins'), isFalse);
+      },
+    );
+
+    test(
+      'a question about the calendar gets the events and nothing else',
+      () async {
+        final llm = FakeLlm([(_) => say('ok')]);
+        await service(llm)
+            .ask('Mikor szabad a szerda este?', model: 'm', settings: settings);
+        expect(first(llm), contains('<adat tipus="esemenyek">'));
+        expect(first(llm), contains('<adat tipus="szabad_idosavok">'));
+        expect(first(llm).contains('<adat tipus="feladatok">'), isFalse);
+        expect(first(llm).contains('<adat tipus="check_in">'), isFalse);
+      },
+    );
   });
 }

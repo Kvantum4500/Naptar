@@ -43,3 +43,17 @@ String safeId(String id, {int max = 64}) {
   final clean = id.replaceAll(RegExp(r'[^A-Za-z0-9_.:\-]'), '');
   return clean.length > max ? clean.substring(0, max) : clean;
 }
+
+const _accented = 'áéíóöőúüű';
+const _plain = 'aeiooouuu';
+
+/// Lower case and without accents ("Töröld" -> "torold"), so a wording typed
+/// without accents (as many do on a phone) reads the same as the accented one.
+String foldHu(String s) {
+  final b = StringBuffer();
+  for (final ch in s.toLowerCase().split('')) {
+    final i = _accented.indexOf(ch);
+    b.write(i >= 0 ? _plain[i] : ch);
+  }
+  return b.toString();
+}

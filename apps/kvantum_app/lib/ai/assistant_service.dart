@@ -131,8 +131,16 @@ const _proposeEdit = ToolDecl('propose_events', _proposeDescription, {
 /// needs only the events, a pure money question only the money data, a plan the
 /// lot. Every tool left out is some hundred tokens saved on every model call.
 List<ToolDecl> assistantToolsFor(AskScope scope) {
-  // a move often means "to a free time": the free slots are one call away
-  if (scope.edit) return const [_getEvents, _findFreeSlots, _proposeEdit];
+  // a move often means "to a free time": the free slots are one call away;
+  // with planning in the same request the check-ins are one call away too
+  if (scope.edit) {
+    return [
+      _getEvents,
+      if (scope.mixed) _getCheckins,
+      _findFreeSlots,
+      _proposeEdit,
+    ];
+  }
   if (scope.finance && !scope.events) return const [_getFinance];
   // No get_tasks here: the first message already carries every open task, so
   // the tool could only repeat it.
@@ -638,10 +646,16 @@ class AssistantService {
     // No clock in here: the system prompt and the tool list stay the same from
     // one request to the next (providers with prefix caching reuse them).
     final system = buildSystemPrompt(
-      handbook: await _handbookFor(scope.kind, settings, learned: k.learned),
+      handbook: await _handbookFor(
+        scope.kind,
+        settings,
+        learned: k.learned,
+        mixed: scope.mixed,
+      ),
       rules: rules,
       kind: scope.kind,
       finance: scope.finance,
+      mixed: scope.mixed,
     );
     return PreparedRequest(
       scope: scope,
@@ -666,10 +680,15 @@ class AssistantService {
     PromptKind kind,
     AiSettings settings, {
     bool learned = true,
+    bool mixed = false,
   }) {
     if (!settings.handbook) return Future.value('');
     return switch (kind) {
       PromptKind.plan => handbook.combined(skip: learned ? null : {'learned'}),
+      // (deleting and planning in one request: the user's planning rules too)
+      PromptKind.edit when mixed => handbook.combined(
+        skip: learned ? null : {'learned'},
+      ),
       PromptKind.edit => handbook.combined(only: const {'calendar-semantics'}),
       PromptKind.money => Future.value(''),
     };
