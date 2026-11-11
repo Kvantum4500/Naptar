@@ -597,6 +597,42 @@ void main() {
     );
 
     testWidgets(
+      'the dialog says what is true: titles go with delete/move, the money detail only on request',
+      (tester) async {
+        await boot(tester, const SettingsPage());
+        await saveKey(tester, 'AIza-good');
+        Finder said(String part) => find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining(part),
+        );
+        expect(said('törlésnél és áthelyezésnél igen'), findsOneWidget);
+        expect(said('egy hónap részleteit kéri'), findsOneWidget);
+        expect(said('a napi előrejelzés megy el'), findsOneWidget);
+        expect(said('a nyitott feladataid'), findsOneWidget);
+        await tester.tap(find.text('Mégsem használom'));
+        await tester.pumpAndSettle();
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'the sharing text on the settings page says that titles go with delete/move too',
+      (tester) async {
+        await boot(tester, const SettingsPage());
+        final part = find.textContaining(
+          'törlésnél és áthelyezésnél a címek elmennek',
+        );
+        await tester.scrollUntilVisible(
+          part,
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(part, findsOneWidget);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
       'accepted with a switch turned off: the choice is kept, and the dialog does not come back',
       (tester) async {
         await boot(tester, const SettingsPage());

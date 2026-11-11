@@ -597,6 +597,9 @@ void main() {
         expect(out.hasPlan, isTrue);
         expect(out.notice, contains('kimaradt'));
         expect(out.notice, contains('időjárás'));
+        // the limit is per request (not "per minute" at every provider)
+        expect(out.notice, contains('méretkorlát'));
+        expect(out.notice!.contains('percenkénti'), isFalse);
       });
     });
 

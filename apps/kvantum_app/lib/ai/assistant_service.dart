@@ -462,7 +462,7 @@ class AssistantService {
     // what the budget made smaller is said with the answer
     final reduced = req.reductions.isEmpty
         ? null
-        : 'A kérés a szolgáltató percenkénti keretéhez igazítva kisebb adattal ment, kimaradt: ${req.reductions.join('; ')}.';
+        : 'A kérés a méretkorlát miatt kisebb adattal ment, kimaradt: ${req.reductions.join('; ')}.';
     final done = reduced == null
         ? (AssistantOutcome o) => o
         : (AssistantOutcome o) => o.withNotice(reduced);

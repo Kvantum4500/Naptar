@@ -499,7 +499,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ]),
               section('Mit láthat az asszisztens?', [
                 const Text(
-                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi. Mindig megy: a kérésed szövege (legfeljebb 500 karakter) és a beépített szabályok. A kézzel felvett rövid események címe nem megy el, a modell csak azt látja, hogy foglalt vagy; a check-in megjegyzése sem.',
+                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi. Mindig megy: a kérésed szövege (legfeljebb 500 karakter) és a beépített szabályok. Tervezésnél a kézzel felvett rövid események címe nem megy el, a modell csak azt látja, hogy foglalt; törlésnél és áthelyezésnél a címek elmennek, mert abból tudja, melyik eseményről van szó. A check-in megjegyzése soha nem megy el.',
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -845,9 +845,15 @@ class _ConsentDialogState extends State<ConsentDialog> {
                 'Naptáresemények',
                 _s.events,
                 (v) => _s.copyWith(events: v),
-                subtitle: 'az időpontok; a kézzel felvett rövid események címe nem megy el',
+                subtitle: 'az időpontok; tervezésnél a kézzel felvett rövid események címe nem megy el, törlésnél és áthelyezésnél igen',
               ),
-              _switch('Feladatok', _s.tasks, (v) => _s.copyWith(tasks: v)),
+              _switch(
+                'Feladatok',
+                _s.tasks,
+                (v) => _s.copyWith(tasks: v),
+                subtitle:
+                    'a nyitott feladataid címe, határideje, becsült ideje',
+              ),
               _switch(
                 'Napi check-in',
                 _s.checkins,
@@ -858,13 +864,13 @@ class _ConsentDialogState extends State<ConsentDialog> {
                 'Pénzügyek',
                 _s.finance,
                 (v) => _s.copyWith(finance: v),
-                subtitle: 'csak az összesítés, egyes tételek nem (felvenni vagy törölni nem tud)',
+                subtitle: 'alapból csak az összesítés; az egyes tételek csak akkor, ha a modell egy hónap részleteit kéri (felvenni vagy törölni nem tud)',
               ),
               _switch(
                 'Időjárás',
                 _s.weather,
                 (v) => _s.copyWith(weather: v),
-                subtitle: 'a helyszín neve nem megy el',
+                subtitle: 'a napi előrejelzés megy el, a helyszín neve nem',
               ),
               const SizedBox(height: 8),
               Text(

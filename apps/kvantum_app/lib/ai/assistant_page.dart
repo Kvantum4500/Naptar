@@ -724,7 +724,7 @@ class _PreviewPanel extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        'A szolgáltató percenkénti keretéhez igazítva kimarad: ${r.reductions.join('; ')}.',
+                        'A méretkorlát miatt kimarad: ${r.reductions.join('; ')}.',
                         style: small,
                       ),
                     ),
