@@ -65,11 +65,21 @@ EventRowsCompanion _toRow(CalEvent e, {bool deleted = false}) =>
     );
 
 class OutboxItem {
-  const OutboxItem(this.seq, this.event, this.op, this.attempts);
+  const OutboxItem(
+    this.seq,
+    this.event,
+    this.op,
+    this.attempts, [
+    this.lastError,
+  ]);
   final int seq;
   final CalEvent event;
   final String op; // upsert | delete
   final int attempts;
+
+  /// Why the last try did not go through (null: it has not been tried or the
+  /// reason was only that the network / a limit made it wait).
+  final String? lastError;
 }
 
 class EventRepository {
@@ -106,11 +116,43 @@ class EventRepository {
     return r == null ? null : _fromRow(r);
   }
 
+  /// Runs [action] as one unit: nothing else reads or writes in between.
+  Future<T> atomically<T>(Future<T> Function() action) =>
+      db.transaction(action);
+
   /// Local edit: persists the event and queues ONE pending upsert per event
   /// (later edits replace the earlier queued op instead of piling up).
+  ///
+  /// The link to Google (id, etag, iCalUID) is written only by the sync. An
+  /// editor works on a snapshot taken when it was opened; if the sync updated
+  /// the event meanwhile, saving that snapshot would put an old etag back and
+  /// every later upload would be refused as outdated. So the stored values win.
   Future<void> saveLocal(CalEvent e) => db.transaction(() async {
-    await db.into(db.eventRows).insertOnConflictUpdate(_toRow(e));
+    final stored = await byId(e.id);
+    final keep = stored == null
+        ? e
+        : e.copyWith(
+            googleId: stored.googleId ?? e.googleId,
+            etag: stored.etag ?? e.etag,
+            iCalUid: stored.iCalUid ?? e.iCalUid,
+            bumpVersion: false,
+          );
+    await db.into(db.eventRows).insertOnConflictUpdate(_toRow(keep));
     await _queue(e.id, 'upsert');
+  });
+
+  /// Several local edits at once: one transaction, one change notification.
+  Future<void> saveAll(Iterable<CalEvent> events) => db.transaction(() async {
+    for (final e in events) {
+      await saveLocal(e);
+    }
+  });
+
+  /// Several local deletions at once (see [deleteLocal]).
+  Future<void> deleteAll(Iterable<String> ids) => db.transaction(() async {
+    for (final id in ids) {
+      await deleteLocal(id);
+    }
   });
 
   /// Local delete: tombstone so the delete can still be pushed (and survive
@@ -164,7 +206,7 @@ class EventRepository {
         )..where((t) => t.seq.equals(r.seq))).go();
         continue;
       }
-      out.add(OutboxItem(r.seq, _fromRow(ev), r.op, r.attempts));
+      out.add(OutboxItem(r.seq, _fromRow(ev), r.op, r.attempts, r.lastError));
     }
     return out;
   }
@@ -187,6 +229,7 @@ class EventRepository {
         }
       });
 
+  /// The item itself was refused: one more failed attempt.
   Future<void> markFailed(OutboxItem item, String error) =>
       (db.update(db.outboxRows)..where((t) => t.seq.equals(item.seq))).write(
         OutboxRowsCompanion(
@@ -194,6 +237,119 @@ class EventRepository {
           lastError: Value(error),
         ),
       );
+
+  /// The try did not go through because of the moment (network, a limit): the
+  /// reason is kept for display, the attempts are NOT used up.
+  Future<void> noteError(OutboxItem item, String error) =>
+      (db.update(db.outboxRows)..where((t) => t.seq.equals(item.seq))).write(
+        OutboxRowsCompanion(lastError: Value(error)),
+      );
+
+  /// Gives every given-up item its attempts back (a manual sync, "retry").
+  Future<int> resetAttempts() =>
+      (db.update(db.outboxRows)..where((t) => t.attempts.isBiggerThanValue(0)))
+          .write(const OutboxRowsCompanion(attempts: Value(0)));
+
+  /// Event id -> the operation waiting for it (the newest one).
+  Future<Map<String, String>> pendingOps() async {
+    final rows = await (db.select(
+      db.outboxRows,
+    )..orderBy([(t) => OrderingTerm.asc(t.seq)])).get();
+    return {for (final r in rows) r.eventId: r.op};
+  }
+
+  /// A deleted event whose deletion has not been uploaded yet.
+  Future<bool> isTombstone(String id) async =>
+      await (db.select(db.eventRows)
+            ..where((t) => t.id.equals(id) & t.deleted.equals(true)))
+          .getSingleOrNull() !=
+      null;
+
+  // ----- links to Google (reset, re-linking)
+
+  /// Cuts the link of one event and of the exceptions that hang on it, so the
+  /// next upload finds or creates the Google event again.
+  Future<void> unlink(String id) =>
+      (db.update(
+        db.eventRows,
+      )..where((t) => t.id.equals(id) | t.recurringEventId.equals(id))).write(
+        const EventRowsCompanion(
+          googleId: Value(null),
+          etag: Value(null),
+          iCalUid: Value(null),
+        ),
+      );
+
+  Future<int> countLive(String calendarId) async =>
+      (await (db.selectOnly(db.eventRows)
+                ..addColumns([db.eventRows.id.count()])
+                ..where(
+                  db.eventRows.calendarId.equals(calendarId) &
+                      db.eventRows.deleted.equals(false),
+                ))
+              .getSingle())
+          .read(db.eventRows.id.count()) ??
+      0;
+
+  /// Cuts the Google link of every live event of [calendarId].
+  Future<void> unlinkLive(String calendarId) =>
+      (db.update(db.eventRows)..where(
+            (t) => t.calendarId.equals(calendarId) & t.deleted.equals(false),
+          ))
+          .write(
+            const EventRowsCompanion(
+              googleId: Value(null),
+              etag: Value(null),
+              iCalUid: Value(null),
+            ),
+          );
+
+  /// Forgets deletions that were still waiting to be uploaded (they belong to
+  /// a calendar that is not the one in use any more).
+  Future<void> dropTombstones(String calendarId) => db.transaction(() async {
+    final ids = [
+      for (final r
+          in await (db.select(db.eventRows)..where(
+                (t) => t.calendarId.equals(calendarId) & t.deleted.equals(true),
+              ))
+              .get())
+        r.id,
+    ];
+    if (ids.isEmpty) return;
+    await (db.delete(db.outboxRows)..where((t) => t.eventId.isIn(ids))).go();
+    await (db.delete(db.eventRows)..where((t) => t.id.isIn(ids))).go();
+  });
+
+  /// Queues an upload for every live event of [calendarId] (series first, so
+  /// their exceptions find them in Google).
+  Future<int> requeueLive(String calendarId) => db.transaction(() async {
+    final rows =
+        await (db.select(db.eventRows)..where(
+              (t) => t.calendarId.equals(calendarId) & t.deleted.equals(false),
+            ))
+            .get();
+    final ordered = [
+      ...rows.where((r) => r.recurringEventId == null),
+      ...rows.where((r) => r.recurringEventId != null),
+    ];
+    for (final r in ordered) {
+      await _queue(r.id, 'upsert');
+    }
+    return ordered.length;
+  });
+
+  /// Removes every event of [calendarId] and everything queued for them.
+  Future<void> clearCalendar(String calendarId) => db.transaction(() async {
+    final ids = [
+      for (final r in await (db.select(
+        db.eventRows,
+      )..where((t) => t.calendarId.equals(calendarId))).get())
+        r.id,
+    ];
+    if (ids.isEmpty) return;
+    await (db.delete(db.outboxRows)..where((t) => t.eventId.isIn(ids))).go();
+    await (db.delete(db.eventRows)..where((t) => t.id.isIn(ids))).go();
+  });
 
   Future<String?> meta(String key) async => (await (db.select(
     db.metaRows,

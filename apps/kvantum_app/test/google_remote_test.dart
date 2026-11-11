@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kvantum_app/google/google_calendar_remote.dart';
+import 'package:kvantum_app/sync/api_errors.dart';
 import 'package:kvantum_app/sync/remote.dart';
+import 'package:kvantum_app/sync/retry_after_client.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 const cal = 'primary';
@@ -317,20 +319,22 @@ void main() {
       expect(body['end'], {'date': '2026-05-05'});
     });
 
-    test('update sends If-Match; 412 -> ConflictException', () async {
-      final ok = Fake((r) => _json({'id': 'g1', 'etag': 'E9'}));
-      await GoogleCalendarRemote(ok.client)
-          .upsert(ev(googleId: 'g1', etag: 'E1'));
-      expect(ok.reqs.last.method, 'PUT');
-      expect(ok.reqs.last.headers['If-Match'], 'E1');
-
-      final stale = Fake((r) => _err(412));
-      expect(
-        GoogleCalendarRemote(stale.client)
-            .upsert(ev(googleId: 'g1', etag: 'old')),
-        throwsA(isA<ConflictException>()),
-      );
-    });
+    test(
+      'update sends the etag it just read as If-Match (not the old one)',
+      () async {
+        final ok = Fake(
+          (r) => r.method == 'GET'
+              ? _json({'id': 'g1', 'etag': 'E7'})
+              : _json({'id': 'g1', 'etag': 'E9'}),
+        );
+        final res = await GoogleCalendarRemote(ok.client)
+            .upsert(ev(googleId: 'g1', etag: 'stale-local'));
+        expect(res.etag, 'E9');
+        final put = ok.reqs.last;
+        expect(put.method, 'PUT');
+        expect(put.headers['If-Match'], 'E7');
+      },
+    );
 
     test(
       'update of an event deleted remotely recreates it (local wins)',
@@ -581,6 +585,369 @@ void main() {
       // last occurrence 10.05 09:00 Budapest (CEST) = 07:00Z
       expect(rec.first, 'RRULE:FREQ=DAILY;UNTIL=20260510T070000Z');
       expect(rec[1], startsWith('EXDATE;TZID=$bp:'));
+    });
+  });
+
+  group('edits keep what only Google knows (read, merge, write)', () {
+    Map<String, dynamic> googleSide({String status = 'confirmed'}) => {
+      'id': 'g1',
+      'etag': 'E7',
+      'status': status,
+      'summary': 'Régi cím',
+      'description': 'Régi leírás',
+      'location': 'Régi hely',
+      'colorId': '5',
+      'start': {'dateTime': '2026-05-04T08:00:00+02:00', 'timeZone': bp},
+      'end': {'dateTime': '2026-05-04T09:00:00+02:00', 'timeZone': bp},
+      'recurrence': ['RRULE:FREQ=DAILY;COUNT=5', 'RDATE:20260601T070000Z'],
+      'reminders': {
+        'useDefault': false,
+        'overrides': [
+          {'method': 'popup', 'minutes': 30},
+        ],
+      },
+      'attendees': [
+        {'email': 'bela@example.com'},
+      ],
+      'conferenceData': {'conferenceId': 'abc-defg-hij'},
+      'transparency': 'transparent',
+      'visibility': 'private',
+      'extendedProperties': {
+        'private': {'appEventId': 'L1', 'ai': '1', 'other': 'keep'},
+        'shared': {'s': '1'},
+      },
+    };
+
+    test('reminders, guests, Meet, availability, extra keys survive; ours replace theirs', () async {
+      final f = Fake(
+        (r) => r.method == 'GET'
+            ? _json(googleSide())
+            : _json({'id': 'g1', 'etag': 'E8'}),
+      );
+      await GoogleCalendarRemote(f.client)
+          .upsert(ev(googleId: 'g1', etag: 'old', rrule: 'FREQ=DAILY;COUNT=5'));
+      expect(
+        f.reqs.where((r) => r.method == 'GET').last.url.path,
+        endsWith('/events/g1'),
+      );
+      final put = f.reqs.last;
+      expect(put.method, 'PUT');
+      final b = jsonDecode(put.body) as Map<String, dynamic>;
+      // what only Google has
+      expect(b['reminders']['overrides'][0]['minutes'], 30);
+      expect(b['attendees'][0]['email'], 'bela@example.com');
+      expect(b['conferenceData']['conferenceId'], 'abc-defg-hij');
+      expect(b['transparency'], 'transparent');
+      expect(b['visibility'], 'private');
+      expect(b['extendedProperties']['shared'], {'s': '1'});
+      expect(b['extendedProperties']['private']['other'], 'keep');
+      // what the app owns
+      expect(b['summary'], 'Edzés');
+      expect(b['start']['dateTime'], '2026-05-04T07:00:00.000Z');
+      expect(b['extendedProperties']['private']['appEventId'], 'L1');
+      expect(
+        (b['extendedProperties']['private'] as Map).containsKey('ai'),
+        isFalse,
+        reason: 'no longer AI generated here',
+      );
+      expect(b.containsKey('description'), isFalse, reason: 'cleared here');
+      expect(b.containsKey('location'), isFalse);
+      expect(b.containsKey('colorId'), isFalse);
+      // the series: our rule and EXDATE, and the RDATE we cannot edit stays
+      expect(b['recurrence'], [
+        'RRULE:FREQ=DAILY;COUNT=5',
+        'EXDATE;TZID=$bp:20260506T090000',
+        'RDATE:20260601T070000Z',
+      ]);
+    });
+
+    test(
+      'an event that is not a series here is not one afterwards either',
+      () async {
+        final f = Fake(
+          (r) => r.method == 'GET'
+              ? _json(googleSide())
+              : _json({'id': 'g1', 'etag': 'E8'}),
+        );
+        await GoogleCalendarRemote(f.client).upsert(ev(googleId: 'g1'));
+        final b = jsonDecode(f.reqs.last.body) as Map<String, dynamic>;
+        expect(b.containsKey('recurrence'), isFalse);
+      },
+    );
+
+    test('the AI marker is set when the event is AI generated', () async {
+      final f = Fake(
+        (r) => r.method == 'GET'
+            ? _json({'id': 'g1', 'etag': 'E7'})
+            : _json({'id': 'g1', 'etag': 'E8'}),
+      );
+      await GoogleCalendarRemote(f.client)
+          .upsert(ev(googleId: 'g1').copyWith(aiGenerated: true));
+      final b = jsonDecode(f.reqs.last.body) as Map<String, dynamic>;
+      expect(b['extendedProperties']['private']['ai'], '1');
+    });
+
+    test(
+      'somebody changed it meanwhile (412): read again, write again',
+      () async {
+        var gets = 0, puts = 0;
+        final f = Fake((r) {
+          if (r.method == 'GET') {
+            gets++;
+            return _json({'id': 'g1', 'etag': 'E$gets'});
+          }
+          puts++;
+          return puts == 1 ? _err(412) : _json({'id': 'g1', 'etag': 'done'});
+        });
+        final res = await GoogleCalendarRemote(f.client)
+            .upsert(ev(googleId: 'g1'));
+        expect(res.etag, 'done');
+        expect((gets, puts), (2, 2));
+        expect(f.reqs.last.headers['If-Match'], 'E2', reason: 'the NEW etag');
+      },
+    );
+
+    test('a write that keeps conflicting gives up after three tries', () async {
+      var puts = 0;
+      final f = Fake((r) {
+        if (r.method == 'GET') return _json({'id': 'g1', 'etag': 'E'});
+        puts++;
+        return _err(412);
+      });
+      await expectLater(
+        GoogleCalendarRemote(f.client).upsert(ev(googleId: 'g1')),
+        throwsA(isA<ConflictException>()),
+      );
+      expect(puts, 3);
+    });
+
+    test(
+      'deleted in Google (cancelled or 404 on read): created again, local wins',
+      () async {
+        for (final kind in ['cancelled', '404']) {
+          final f = Fake((r) {
+            if (r.method == 'GET') {
+              return kind == '404'
+                  ? _err(404)
+                  : _json(googleSide(status: 'cancelled'));
+            }
+            if (r.method == 'POST') return _json({'id': 'gNew', 'etag': 'N'});
+            return _err(500); // a PUT must not happen
+          });
+          final res = await GoogleCalendarRemote(f.client)
+              .upsert(ev(googleId: 'g1'));
+          expect(res.googleId, 'gNew', reason: kind);
+          expect(f.reqs.where((r) => r.method == 'PUT'), isEmpty, reason: kind);
+        }
+      },
+    );
+  });
+
+  group('failures keep their meaning (limits are not rejections)', () {
+    for (final (reason, wantDaily) in [
+      ('rateLimitExceeded', false),
+      ('userRateLimitExceeded', false),
+      ('calendarUsageLimitsExceeded', false),
+      ('quotaExceeded', false),
+      ('dailyLimitExceeded', true),
+    ]) {
+      test(
+        '403 $reason -> transient, throttled${wantDaily ? ', daily' : ''}',
+        () async {
+          final f = Fake(
+            (r) => r.method == 'GET' ? _json({'items': []}) : _err(403, reason),
+          );
+          try {
+            await GoogleCalendarRemote(f.client).upsert(ev());
+            fail('should have thrown');
+          } on TransientSyncError catch (e) {
+            expect(e.throttled, isTrue);
+            expect(e.dailyLimit, wantDaily);
+          }
+        },
+      );
+    }
+
+    test('403 forbiddenForNonOrganizer is a rejection of THIS item', () async {
+      final f = Fake(
+        (r) => r.method == 'GET'
+            ? _json({'items': []})
+            : _err(403, 'forbiddenForNonOrganizer'),
+      );
+      await expectLater(
+        GoogleCalendarRemote(f.client).upsert(ev()),
+        throwsA(isA<ItemRejectedError>()),
+      );
+    });
+
+    test(
+      '429 and 503 are transient; the server\'s Retry-After is passed on',
+      () async {
+        final inner = MockClient((r) async {
+          if (r.url.path.endsWith('/calendars/primary')) {
+            return _json({'timeZone': bp});
+          }
+          if (r.method == 'GET') return _json({'items': []});
+          return http.Response(
+            jsonEncode({
+              'error': {
+                'code': 429,
+                'message': 'x',
+                'errors': [
+                  {'reason': 'rateLimitExceeded'},
+                ],
+              },
+            }),
+            429,
+            headers: {'content-type': 'application/json', 'retry-after': '45'},
+          );
+        });
+        try {
+          await GoogleCalendarRemote(RetryAfterClient(inner)).upsert(ev());
+          fail('should have thrown');
+        } on TransientSyncError catch (e) {
+          expect(e.throttled, isTrue);
+          expect(e.retryAfter, const Duration(seconds: 45));
+        }
+        final f = Fake(
+          (r) => r.method == 'GET' ? _json({'items': []}) : _err(503),
+        );
+        try {
+          await GoogleCalendarRemote(f.client).upsert(ev());
+          fail('should have thrown');
+        } on TransientSyncError catch (e) {
+          expect(e.throttled, isFalse);
+          expect(e.retryAfter, isNull);
+        }
+      },
+    );
+  });
+
+  group('pull: one unreadable event does not stop the others', () {
+    Map<String, dynamic> item(String id, {String? zone}) => {
+      'id': id,
+      'etag': 'e-$id',
+      'summary': 'Esemény $id',
+      'start': {
+        'dateTime': '2026-05-04T09:00:00+02:00',
+        'timeZone': zone ?? bp,
+      },
+      'end': {'dateTime': '2026-05-04T10:00:00+02:00', 'timeZone': zone ?? bp},
+    };
+
+    test(
+      'an unknown time zone is skipped and reported, the rest arrive',
+      () async {
+        final f = Fake(
+          (r) => _json({
+            'nextSyncToken': 'T',
+            'items': [item('a'), item('bad', zone: 'Mars/Phobos'), item('c')],
+          }),
+        );
+        final res = await GoogleCalendarRemote(f.client).pull(cal, null);
+        expect(res.changes.map((c) => c.ref.googleId), ['a', 'c']);
+        expect(res.skipped.single.googleId, 'bad');
+        expect(res.skipped.single.reason, isNotEmpty);
+        expect(res.skipped.single.reason, isNot(contains('Esemény')));
+        expect(res.nextSyncToken, 'T', reason: 'the listing still completes');
+      },
+    );
+
+    test('instances say so: kind and the occurrence they replace', () async {
+      final f = Fake(
+        (r) => _json({
+          'nextSyncToken': 'T',
+          'items': [
+            item('series'),
+            {
+              ...item('series_20260506T070000Z'),
+              'recurringEventId': 'series',
+              'originalStartTime': {
+                'dateTime': '2026-05-06T09:00:00+02:00',
+                'timeZone': bp,
+              },
+              'extendedProperties': {
+                'private': {'appEventId': 'L-series'},
+              },
+            },
+          ],
+        }),
+      );
+      final res = await GoogleCalendarRemote(f.client).pull(cal, null);
+      final series = res.changes[0].ref, inst = res.changes[1].ref;
+      expect(series.isInstance, isFalse);
+      expect(inst.isInstance, isTrue);
+      expect(inst.originalStart, floating(2026, 5, 6, 9));
+      expect(inst.appEventId, 'L-series', reason: 'copied from the series');
+    });
+  });
+
+  group('the calendar vanishing and the identity of the account', () {
+    http.Response calList(List<Map<String, Object?>> items) =>
+        _json({'items': items});
+
+    test('404 on the listing: CalendarGoneError, and the calendar is looked up again', () async {
+      var listing = 0;
+      var eventsGone = false;
+      final f = Fake((r) {
+        if (r.url.path.endsWith('/users/me/calendarList')) {
+          listing++;
+          return calList([
+            {'id': 'nap', 'accessRole': 'owner', 'description': calendarMarker},
+          ]);
+        }
+        if (r.url.path.endsWith('/calendars/nap')) {
+          return _json({'timeZone': bp});
+        }
+        if (eventsGone) return _err(404);
+        return _json({'items': [], 'nextSyncToken': 'T'});
+      });
+      final remote = GoogleCalendarRemote(f.client);
+      await remote.pull('naptar', null);
+      expect(listing, 1);
+      eventsGone = true;
+      await expectLater(
+        remote.pull('naptar', 'T'),
+        throwsA(isA<CalendarGoneError>()),
+      );
+      eventsGone = false;
+      await remote.pull('naptar', null);
+      expect(listing, 2, reason: 'the cached calendar id was dropped');
+    });
+
+    test('410 with a token is an expired token, 404 with a token is a missing calendar', () async {
+      final expired = Fake((r) => _err(410));
+      await expectLater(
+        GoogleCalendarRemote(expired.client).pull(cal, 'T'),
+        throwsA(isA<SyncTokenExpired>()),
+      );
+      final missing = Fake((r) => _err(404));
+      await expectLater(
+        GoogleCalendarRemote(missing.client).pull(cal, 'T'),
+        throwsA(isA<CalendarGoneError>()),
+      );
+    });
+
+    test('identity: the primary calendar id is the account, the Naptar id the calendar; asked once', () async {
+      var primary = 0;
+      final client = MockClient((r) async {
+        if (r.url.path.endsWith('/calendars/primary')) {
+          primary++;
+          return _json({'id': 'anna@gmail.com', 'timeZone': bp});
+        }
+        if (r.url.path.endsWith('/users/me/calendarList')) {
+          return calList([
+            {'id': 'nap', 'accessRole': 'owner', 'description': calendarMarker},
+          ]);
+        }
+        return _json({'items': []});
+      });
+      final remote = GoogleCalendarRemote(client);
+      final id = await remote.identity('naptar');
+      expect(id.account, 'anna@gmail.com');
+      expect(id.calendar, 'nap');
+      await remote.identity('naptar');
+      expect(primary, 1);
     });
   });
 

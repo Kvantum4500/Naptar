@@ -38,6 +38,7 @@ class DriveSyncEngine {
   Future<DriveReport> _run() async {
     var pulled = 0, pushed = 0, corrupt = 0, dups = 0, failed = 0;
     var full = false;
+    var fin = true; // unknown until a pull succeeded: assume there is mail
     try {
       // ---------------------------------------------------------- pull
       var token = await repo.meta(_tokenKey);
@@ -50,6 +51,7 @@ class DriveSyncEngine {
         res = await remote.pull(null);
       }
       full = res.full || token == null;
+      fin = res.finChanged || full;
 
       // Group by name: two devices may have created the same file.
       final byName = <String, List<DriveRecordFile>>{};
@@ -124,7 +126,7 @@ class DriveSyncEngine {
           failed++; // keep it queued, try again next run
         }
       }
-    } on DriveTransientError {
+    } on DriveTransientError catch (e) {
       return DriveReport(
         pulled: pulled,
         pushed: pushed,
@@ -133,6 +135,8 @@ class DriveSyncEngine {
         failed: failed,
         full: full,
         stoppedEarly: true,
+        finChanged: fin,
+        hint: e,
       );
     }
     return DriveReport(
@@ -142,6 +146,7 @@ class DriveSyncEngine {
       mergedDuplicates: dups,
       failed: failed,
       full: full,
+      finChanged: fin,
     );
   }
 

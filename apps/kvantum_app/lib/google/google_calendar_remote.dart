@@ -6,7 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../data/event_repository.dart' show kNaptarCalendar;
+import '../sync/api_errors.dart';
 import '../sync/remote.dart';
+import '../sync/retry_after_client.dart';
 import 'rrule_convert.dart';
 
 const _appKey = 'appEventId';
@@ -42,7 +44,13 @@ class GoogleCalendarRemote implements RemoteCalendar {
 
   final Map<String, String> _tzCache = {};
   String? _naptarId;
+  String? _account;
   g.CalendarApi get _api => g.CalendarApi(_client);
+
+  /// Runs an API call and maps its failures to the sync vocabulary, with the
+  /// server's `Retry-After` when the client in use records it.
+  Future<T> _g<T>(Future<T> Function() call) =>
+      _guard(call, retryAfter: () => retryAfterOf(_client));
 
   // ---------------------------------------------------------- calendar
 
@@ -52,11 +60,26 @@ class GoogleCalendarRemote implements RemoteCalendar {
     return _naptarId ??= await _findOrCreate();
   }
 
+  /// The calendar turned out not to exist: the next call looks it up again.
+  void _forgetCalendar() {
+    _naptarId = null;
+    _tzCache.clear();
+  }
+
+  @override
+  Future<RemoteIdentity> identity(String calendarId) async {
+    final real = await _cal(calendarId);
+    // The id of the primary calendar is the account's address: a free way to
+    // tell accounts apart without asking for any extra permission.
+    _account ??= (await _g(() => _api.calendars.get('primary'))).id ?? '';
+    return RemoteIdentity(account: _account!, calendar: real);
+  }
+
   Future<String> _findOrCreate() async {
     final found = <g.CalendarListEntry>[];
     String? page;
     do {
-      final res = await _guard(
+      final res = await _g(
         () => _api.calendarList.list(
           pageToken: page,
           minAccessRole: 'owner',
@@ -79,7 +102,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
       found.sort((a, b) => (a.id ?? '').compareTo(b.id ?? ''));
       return found.first.id!;
     }
-    final created = await _guard(
+    final created = await _g(
       () => _api.calendars.insert(
         g.Calendar(
           summary: calendarName,
@@ -92,15 +115,22 @@ class GoogleCalendarRemote implements RemoteCalendar {
   }
 
   Future<String> _tz(String realId) async => _tzCache[realId] ??=
-      (await _guard(() => _api.calendars.get(realId))).timeZone ?? 'UTC';
+      (await _g(() => _api.calendars.get(realId))).timeZone ?? 'UTC';
 
   // ---------------------------------------------------------------- pull
 
   @override
   Future<PullResult> pull(String calendarId, String? syncToken) async {
     final real = await _cal(calendarId);
-    final tz = await _tz(real);
+    final String tz;
+    try {
+      tz = await _tz(real);
+    } on _Gone {
+      _forgetCalendar();
+      throw CalendarGoneError();
+    }
     final changes = <RemoteChange>[];
+    final skipped = <SkippedRemote>[];
     String? page;
     String? next;
     // Computed once: every page of one listing must use the same filter.
@@ -110,7 +140,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
     do {
       final g.Events res;
       try {
-        res = await _guard(
+        res = await _g(
           () => _api.events.list(
             real,
             syncToken: syncToken,
@@ -121,17 +151,29 @@ class GoogleCalendarRemote implements RemoteCalendar {
             pageToken: page,
           ),
         );
-      } on _Gone {
+      } on _Gone catch (gone) {
+        // 410 = the sync token is no longer valid (list everything again);
+        // 404 = the calendar itself is gone (look it up again next time).
+        if (gone.status == 404) {
+          _forgetCalendar();
+          throw CalendarGoneError();
+        }
         throw SyncTokenExpired();
       }
       for (final e in res.items ?? const <g.Event>[]) {
-        final c = _toChange(e, calendarId, tz);
-        if (c != null) changes.add(c);
+        // One event the adapter cannot read (unknown zone, broken EXDATE)
+        // must not stop the others from arriving.
+        try {
+          final c = _toChange(e, calendarId, tz);
+          if (c != null) changes.add(c);
+        } catch (err) {
+          skipped.add(SkippedRemote(e.id ?? '?', _short(err)));
+        }
       }
       page = res.nextPageToken;
       next = res.nextSyncToken ?? next;
     } while (page != null);
-    return PullResult(changes, next, windowStartUtc: timeMin);
+    return PullResult(changes, next, windowStartUtc: timeMin, skipped: skipped);
   }
 
   RemoteChange? _toChange(g.Event e, String calendarId, String defaultTz) {
@@ -139,14 +181,17 @@ class GoogleCalendarRemote implements RemoteCalendar {
     if (id == null) return null;
     final cancelled = e.status == 'cancelled';
     final master = e.recurringEventId;
-    RemoteEvent ref(bool cancelledFlag) => RemoteEvent(
-      calendarId: calendarId,
-      googleId: id,
-      etag: e.etag ?? '',
-      appEventId: e.extendedProperties?.private?[_appKey],
-      iCalUid: e.iCalUID,
-      cancelled: cancelledFlag,
-    );
+    RemoteEvent ref(bool cancelledFlag, [DateTime? originalStart]) =>
+        RemoteEvent(
+          calendarId: calendarId,
+          googleId: id,
+          etag: e.etag ?? '',
+          appEventId: e.extendedProperties?.private?[_appKey],
+          iCalUid: e.iCalUID,
+          cancelled: cancelledFlag,
+          isInstance: master != null,
+          originalStart: originalStart,
+        );
 
     // A cancelled single/series is a deletion; a cancelled INSTANCE of a series
     // is an exception (hides that one occurrence) and must be kept as such.
@@ -166,7 +211,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
 
     final rec = _parseRecurrence(e.recurrence, tz, allDay: allDay);
     return RemoteChange(
-      ref: ref(false),
+      ref: ref(false, original),
       masterGoogleId: master,
       event: CalEvent(
         id: 'remote-$id', // placeholder, the engine assigns the real id
@@ -189,6 +234,13 @@ class GoogleCalendarRemote implements RemoteCalendar {
         aiGenerated: e.extendedProperties?.private?[_aiKey] == '1',
       ),
     );
+  }
+
+  /// A short, harmless description of why an event could not be read (the
+  /// error type and a trimmed message; never the event's own text).
+  String _short(Object err) {
+    final t = '$err'.replaceAll(RegExp(r'\s+'), ' ');
+    return '${err.runtimeType}: ${t.length > 120 ? t.substring(0, 120) : t}';
   }
 
   DateTime _wall(g.EventDateTime d, String tz) {
@@ -215,21 +267,76 @@ class GoogleCalendarRemote implements RemoteCalendar {
     // could record its id. Look it up by our own id instead of inserting twice.
     googleId ??= await _findByAppId(real, event.id);
 
-    if (googleId == null) {
-      final created = await _guard(() => _api.events.insert(body, real));
-      return PushResult(created.id!, created.etag ?? '');
-    }
+    if (googleId == null) return _insert(real, body);
     try {
-      final api = g.CalendarApi(_IfMatch(_client, event.etag));
-      final updated = await _guard(
-        () => api.events.update(body, real, googleId!),
-      );
-      return PushResult(updated.id!, updated.etag ?? '');
+      return await _update(real, googleId, body);
     } on _Gone {
       // Deleted remotely but edited locally: local wins, recreate.
-      final created = await _guard(() => _api.events.insert(body, real));
-      return PushResult(created.id!, created.etag ?? '');
+      return _insert(real, body);
     }
+  }
+
+  Future<PushResult> _insert(String real, g.Event body) async {
+    final created = await _g(() => _api.events.insert(body, real));
+    return PushResult(created.id!, created.etag ?? '');
+  }
+
+  /// Changes OUR fields of an existing event and leaves everything else as
+  /// Google has it. A plain `update` replaces the whole event, which would
+  /// wipe what only exists on the Google side (reminders, guests, the Meet
+  /// link, availability ...) at every edit made here. So: read the current
+  /// event, put our fields on it, write it back with its own etag; if somebody
+  /// changed it in between (412), read again.
+  Future<PushResult> _update(String real, String googleId, g.Event ours) async {
+    for (var attempt = 0; ; attempt++) {
+      final current = await _g(() => _api.events.get(real, googleId));
+      if (current.status == 'cancelled') throw _Gone(410);
+      final merged = _overlay(current, ours);
+      try {
+        final api = g.CalendarApi(_IfMatch(_client, current.etag));
+        final updated = await _g(
+          () => api.events.update(merged, real, googleId),
+        );
+        return PushResult(updated.id!, updated.etag ?? '');
+      } on ConflictException {
+        if (attempt >= 2) rethrow;
+      }
+    }
+  }
+
+  /// [ours] laid over [current]: the fields the app owns come from [ours],
+  /// all others (and unknown recurrence lines / private keys) stay.
+  g.Event _overlay(g.Event current, g.Event ours) {
+    final merged = current
+      ..summary = ours.summary
+      ..description = ours.description
+      ..location = ours.location
+      ..colorId = ours.colorId
+      ..start = ours.start
+      ..end = ours.end;
+    if (ours.status == 'cancelled') merged.status = 'cancelled';
+
+    final theirLines = current.recurrence ?? const <String>[];
+    merged.recurrence = ours.recurrence == null
+        ? null
+        : [
+            ...ours.recurrence!,
+            // lines the app cannot edit (RDATE, EXRULE) are kept as they are
+            for (final l in theirLines)
+              if (l.startsWith('RDATE') || l.startsWith('EXRULE')) l,
+          ];
+
+    final priv = <String, String>{
+      ...?current.extendedProperties?.private,
+      ...?ours.extendedProperties?.private,
+    };
+    if (ours.extendedProperties?.private?.containsKey(_aiKey) != true) {
+      priv.remove(_aiKey);
+    }
+    merged.extendedProperties =
+        (current.extendedProperties ?? g.EventExtendedProperties())
+          ..private = priv;
+    return merged;
   }
 
   /// Changes ONE occurrence of a series (an "exception").
@@ -251,7 +358,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
         from = at.subtract(const Duration(minutes: 1));
         to = at.add(const Duration(minutes: 1));
       }
-      final res = await _guard(
+      final res = await _g(
         () => _api.events.instances(
           real,
           masterGoogleId,
@@ -275,9 +382,7 @@ class GoogleCalendarRemote implements RemoteCalendar {
       instanceId = hit!.id;
     }
     final body = _toGoogle(e, instance: true);
-    final patched = await _guard(
-      () => _api.events.patch(body, real, instanceId!),
-    );
+    final patched = await _g(() => _api.events.patch(body, real, instanceId!));
     return PushResult(patched.id!, patched.etag ?? '');
   }
 
@@ -287,14 +392,14 @@ class GoogleCalendarRemote implements RemoteCalendar {
     final id = event.googleId ?? await _findByAppId(real, event.id);
     if (id == null) return;
     try {
-      await _guard(() => _api.events.delete(real, id));
+      await _g(() => _api.events.delete(real, id));
     } on _Gone {
       // already gone
     }
   }
 
   Future<String?> _findByAppId(String real, String appId) async {
-    final res = await _guard(
+    final res = await _g(
       () => _api.events.list(
         real,
         privateExtendedProperty: ['$_appKey=$appId'],
@@ -404,24 +509,53 @@ ParsedRecurrence _parseRecurrence(
 
 // ------------------------------------------------------------ plumbing
 
-class _Gone implements Exception {}
+class _Gone implements Exception {
+  _Gone(this.status);
+  final int status;
+}
 
-/// Maps API/network failures to the engine's error vocabulary.
-Future<T> _guard<T>(Future<T> Function() call) async {
+/// Maps API/network failures to the engine's error vocabulary (see
+/// [classifyApiError]). [retryAfter] supplies the server's `Retry-After`.
+Future<T> _guard<T>(
+  Future<T> Function() call, {
+  Duration? Function()? retryAfter,
+}) async {
   try {
     return await call();
   } on g.DetailedApiRequestError catch (e) {
-    final s = e.status ?? 0;
-    final reason = e.errors.firstOrNull?.reason ?? '';
-    if (s == 404 || s == 410) throw _Gone();
-    if (s == 412) throw ConflictException();
-    if (s == 401) throw TransientSyncError('auth');
-    if (s == 429 ||
-        s >= 500 ||
-        (s == 403 && reason.toLowerCase().contains('ratelimit'))) {
-      throw TransientSyncError('http $s $reason');
+    final status = e.status ?? 0;
+    final detail = e.errors.firstOrNull;
+    final kind = classifyApiError(
+      status: status,
+      reason: detail?.reason,
+      domain: detail?.domain,
+      message: e.message,
+      location: detail?.location,
+    );
+    final wait = retryAfter?.call();
+    final what = 'http $status ${detail?.reason ?? ''}'.trim();
+    switch (kind) {
+      case ApiFailure.gone:
+        throw _Gone(status);
+      case ApiFailure.conflict:
+        throw ConflictException();
+      case ApiFailure.tokenInvalid:
+        throw SyncTokenExpired();
+      case ApiFailure.auth:
+        throw TransientSyncError('auth', wait);
+      case ApiFailure.throttled:
+        throw TransientSyncError.throttled(what, retryAfter: wait);
+      case ApiFailure.dailyLimit:
+        throw TransientSyncError.throttled(
+          what,
+          retryAfter: wait,
+          dailyLimit: true,
+        );
+      case ApiFailure.server:
+        throw TransientSyncError(what, wait);
+      case ApiFailure.itemRejected:
+        throw ItemRejectedError(status, detail?.reason, e.message);
     }
-    rethrow;
   } on SocketException catch (e) {
     throw TransientSyncError(e.message);
   } on http.ClientException catch (e) {

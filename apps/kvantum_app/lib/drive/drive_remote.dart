@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../sync/api_errors.dart' show RetryHint;
+
 /// A record file as stored in Drive's hidden app folder.
 class DriveRecordFile {
   const DriveRecordFile({
@@ -25,6 +27,7 @@ class DrivePull {
     required this.removedIds,
     required this.nextToken,
     this.full = false,
+    this.finChanged = true,
   });
 
   /// Changed (or, on a full pull, all) record files with their content.
@@ -34,6 +37,11 @@ class DrivePull {
   /// Token to continue from next time.
   final String nextToken;
   final bool full;
+
+  /// Whether files of the finance mailbox (`fin-…`) were touched since the
+  /// last pull (always true for a full listing): when not, the mailbox has no
+  /// news and need not be listed again.
+  final bool finChanged;
 }
 
 /// Abstraction over Google Drive's appDataFolder, so the sync logic is
@@ -66,9 +74,26 @@ abstract class DriveRemote {
 class DriveTokenExpired implements Exception {}
 
 /// Network down, rate limit, 5xx: stop, keep everything queued, retry later.
-class DriveTransientError implements Exception {
-  DriveTransientError([this.message = '']);
+class DriveTransientError implements Exception, RetryHint {
+  DriveTransientError([this.message = '', this.retryAfter])
+    : throttled = false,
+      dailyLimit = false;
+
+  /// A usage limit: back off, honouring [retryAfter].
+  DriveTransientError.throttled(
+    this.message, {
+    this.retryAfter,
+    this.dailyLimit = false,
+  }) : throttled = true;
+
   final String message;
+  @override
+  final Duration? retryAfter;
+  @override
+  final bool throttled;
+  @override
+  final bool dailyLimit;
+
   @override
   String toString() => 'DriveTransientError($message)';
 }
@@ -83,6 +108,8 @@ class DriveReport {
     this.failed = 0,
     this.full = false,
     this.stoppedEarly = false,
+    this.finChanged = true,
+    this.hint,
   });
   final int pulled;
   final int pushed;
@@ -91,6 +118,12 @@ class DriveReport {
   final int failed;
   final bool full;
   final bool stoppedEarly;
+
+  /// See [DrivePull.finChanged].
+  final bool finChanged;
+
+  /// Why the run stopped early (when it did).
+  final RetryHint? hint;
 
   @override
   String toString() =>

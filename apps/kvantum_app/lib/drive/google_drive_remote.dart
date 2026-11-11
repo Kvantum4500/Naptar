@@ -6,6 +6,8 @@ import 'package:googleapis/drive/v3.dart' as d;
 import 'package:http/http.dart' as http;
 import 'package:kvantum_core/kvantum_core.dart' show safeRecordFileNamePattern;
 
+import '../sync/api_errors.dart';
+import '../sync/retry_after_client.dart';
 import 'drive_remote.dart';
 
 const _space = 'appDataFolder';
@@ -19,6 +21,11 @@ class GoogleDriveRemote implements DriveRemote {
   final http.Client _client;
   d.DriveApi get _api => d.DriveApi(_client);
 
+  /// Runs an API call and maps its failures to the sync vocabulary, with the
+  /// server's `Retry-After` when the client in use records it.
+  Future<T> _g<T>(Future<T> Function() call) =>
+      _guard(call, retryAfter: () => retryAfterOf(_client));
+
   // ---------------------------------------------------------------- pull
 
   @override
@@ -28,10 +35,11 @@ class GoogleDriveRemote implements DriveRemote {
     final removed = <String>[];
     var token = pageToken;
     String? next;
+    var finTouched = false;
     do {
       final d.ChangeList res;
       try {
-        res = await _guard(
+        res = await _g(
           () => _api.changes.list(
             token,
             spaces: _space,
@@ -49,6 +57,7 @@ class GoogleDriveRemote implements DriveRemote {
           if (c.fileId != null) removed.add(c.fileId!);
           continue;
         }
+        if (f.name != null && f.name!.startsWith('fin-')) finTouched = true;
         if (f.id == null || f.name == null || !_recordName.hasMatch(f.name!)) {
           continue;
         }
@@ -67,19 +76,21 @@ class GoogleDriveRemote implements DriveRemote {
       files: files,
       removedIds: removed,
       nextToken: next ?? token,
+      // a removed file may be a letter somebody collected: look at the mail
+      finChanged: finTouched || removed.isNotEmpty,
     );
   }
 
   Future<DrivePull> _full() async {
     // The start token is taken BEFORE listing so changes made during the
     // listing are not missed.
-    final start = await _guard(
+    final start = await _g(
       () => _api.changes.getStartPageToken($fields: 'startPageToken'),
     );
     final files = <DriveRecordFile>[];
     String? page;
     do {
-      final res = await _guard(
+      final res = await _g(
         () => _api.files.list(
           spaces: _space,
           q: 'trashed = false',
@@ -114,7 +125,7 @@ class GoogleDriveRemote implements DriveRemote {
   @override
   Future<String?> read(String fileId) async {
     try {
-      final media = await _guard(
+      final media = await _g(
         () => _api.files.get(
           fileId,
           downloadOptions: d.DownloadOptions.fullMedia,
@@ -129,7 +140,7 @@ class GoogleDriveRemote implements DriveRemote {
   @override
   Future<List<String>> findByName(String name) async {
     final safe = name.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
-    final res = await _guard(
+    final res = await _g(
       () => _api.files.list(
         spaces: _space,
         q: "name = '$safe' and trashed = false",
@@ -146,7 +157,7 @@ class GoogleDriveRemote implements DriveRemote {
     final out = <DriveName>[];
     String? page;
     do {
-      final res = await _guard(
+      final res = await _g(
         () => _api.files.list(
           spaces: _space,
           q: 'trashed = false',
@@ -179,7 +190,7 @@ class GoogleDriveRemote implements DriveRemote {
       contentType: 'application/json',
     );
     if (fileId == null) {
-      final created = await _guard(
+      final created = await _g(
         () => _api.files.create(
           d.File(name: name, parents: [_space], mimeType: 'application/json'),
           uploadMedia: media(),
@@ -189,7 +200,7 @@ class GoogleDriveRemote implements DriveRemote {
       return created.id!;
     }
     try {
-      final updated = await _guard(
+      final updated = await _g(
         () => _api.files.update(
           d.File(),
           fileId,
@@ -207,7 +218,7 @@ class GoogleDriveRemote implements DriveRemote {
   @override
   Future<void> delete(String fileId) async {
     try {
-      await _guard(() => _api.files.delete(fileId));
+      await _g(() => _api.files.delete(fileId));
     } on _Gone {
       // already gone
     }
@@ -218,25 +229,50 @@ class _Gone implements Exception {}
 
 class _BadToken implements Exception {}
 
-/// Maps API/network failures to the engine's error vocabulary.
-Future<T> _guard<T>(Future<T> Function() call) async {
+/// Maps API/network failures to the engine's error vocabulary (see
+/// [classifyApiError]). [retryAfter] supplies the server's `Retry-After`.
+Future<T> _guard<T>(
+  Future<T> Function() call, {
+  Duration? Function()? retryAfter,
+}) async {
   try {
     return await call();
   } on d.DetailedApiRequestError catch (e) {
-    final s = e.status ?? 0;
-    final reason = e.errors.firstOrNull?.reason ?? '';
-    if (s == 404) throw _Gone();
-    if (s == 400 && (e.message ?? '').toLowerCase().contains('page')) {
-      throw _BadToken();
+    final status = e.status ?? 0;
+    final detail = e.errors.firstOrNull;
+    final kind = classifyApiError(
+      status: status,
+      reason: detail?.reason,
+      domain: detail?.domain,
+      message: e.message,
+      location: detail?.location,
+    );
+    final wait = retryAfter?.call();
+    final what = 'http $status ${detail?.reason ?? ''}'.trim();
+    switch (kind) {
+      case ApiFailure.gone:
+        // a gone change token is "start over"; a gone file is just gone
+        if (status == 410) throw _BadToken();
+        throw _Gone();
+      case ApiFailure.tokenInvalid:
+        throw _BadToken();
+      case ApiFailure.conflict:
+        throw DriveTransientError(what, wait);
+      case ApiFailure.auth:
+        throw DriveTransientError('auth', wait);
+      case ApiFailure.throttled:
+        throw DriveTransientError.throttled(what, retryAfter: wait);
+      case ApiFailure.dailyLimit:
+        throw DriveTransientError.throttled(
+          what,
+          retryAfter: wait,
+          dailyLimit: true,
+        );
+      case ApiFailure.server:
+        throw DriveTransientError(what, wait);
+      case ApiFailure.itemRejected:
+        throw ItemRejectedError(status, detail?.reason, e.message);
     }
-    if (s == 410) throw _BadToken();
-    if (s == 401) throw DriveTransientError('auth');
-    if (s == 429 ||
-        s >= 500 ||
-        (s == 403 && reason.toLowerCase().contains('ratelimit'))) {
-      throw DriveTransientError('http $s $reason');
-    }
-    rethrow;
   } on SocketException catch (e) {
     throw DriveTransientError(e.message);
   } on http.ClientException catch (e) {
