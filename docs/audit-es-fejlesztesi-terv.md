@@ -437,3 +437,15 @@ Tesztek: mag 335 (volt 226), app 627 (volt 588), az elemzők és a formázás ti
 | AI-23 | kész | kikapcsolt forrásnál a program rögtön magyarázza, mit kapcsolj be (pénzügyi kérdés kikapcsolt pénzügynél; törlés / áthelyezés kikapcsolt eseményeknél) |
 | helyi válaszok | kész | költségkeret és napirend modell nélkül, teljes mondatra horgonyzott mintákkal; jelölt kártya + „További kérdés”; a helyi válasz szövege csak engedélyezett forrásnál kíséri a további kérdést |
 | AI-16 | nincs a 2d-ben | az újra-validálás + visszavonás a jóváhagyott 2d tervnek nem része; a 3. fázisban (UX-2 visszavonás) jön |
+
+### 2e (edzés utáni visszajelzés és tanulás) – kész, a build után kipróbálandó
+
+Tesztek: mag 417 (volt 335), app 693 (volt 627), az elemzők és a formázás tiszták. 31 szándékos elrontás (a címek ékezettel olvasódnak, nincs sportkulcs, a szigorítás küszöbe vagy a mintaszám rossz, a sáv széle rossz, jóváhagyás nélkül lazít, az új nehéz visszajelzés nem veszi vissza az igent, a „nem” nem jegyződik meg, az energia-sor újra `>` jelet használ, a kihagyott alkalom is tanít, a tanult határ nem számít a javaslatnál / a naptárban lévő edzésnél / a promptban, az új rekordfajta nem szinkronizálódik, a műszak / a régi / a megválaszolt edzésre is rákérdez, a „Később” nem hat, az „igen” nem írja a szokást, az üres űrlap mentődik, az időzítő nem áll le, visszatéréskor nem néz újra, a skála-feliratok kilógnak …) mindegyikét elkapják a tesztek.
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| edzés-visszajelzés (a felhasználó kérése) | kész | új szinkronizált rekordfajta `workoutlog` (nincs új helyi tábla); sáv a főoldalon + űrlap öt skálával; a Beállításokban kapcsolható; a Drive fájlnév-mintája egyetlen forrásból jön (`syncedKinds`), eddig négy helyen volt beégetve |
+| AI-5 (nehézség kódból) folytatása | kész | a határokat a felhasználó visszajelzései finomítják: szigorítás magától (45–59 perces típus, legutóbbi 3 alkalom ≥ 4/5), lazítás csak jóváhagyásra (60–89 perces típus, legutóbbi 5 alkalom ≤ 2/5 → „Tanult szokások” jelölt sor, 90 percig könnyű); az új nehéz visszajelzés visszaveszi |
+| AI-9/AI-17 kapcsolat | kész | a modell az utolsó 10 visszajelzés rövid sorait kapja (≈ +175 token); cím és megjegyzés soha; a Napi check-in kapcsolóval együtt kapcsol; a költségvetés-őr a Tanult szokások előtt hagyja el |
+| UX-8 (hozzáférhetőség) – részben | részben | a napi check-in űrlap skála-feliratai kilógtak volna nagy betűnél / keskeny képernyőn: javítva, tesztelve (a check-in sávnak és űrlapnak eddig nem volt tesztje). A nagy betű / Semantics / golden körút a 3. fázisban jön |
+| ikertelenség / eltérések | – | **Eltérés a tervtől:** a kérdés a „legutóbb véget ért” edzésre szól (nem egy listára), mert a kártya egyszerre egy kérdést tesz fel; a nem-kötelező megjegyzés nem megy a modellhez; a tanulás a *legutóbbi* 3 / 5 alkalmat nézi (nem a teljes sáv átlagát), mert különben a régi könnyű alkalmak elnyomnák az új nehezeket |

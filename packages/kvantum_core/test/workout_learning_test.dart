@@ -323,6 +323,24 @@ void main() {
       );
     });
 
+    test('a skipped one never counts, even with ratings on it', () {
+      // (an odd record from elsewhere: "did not happen" and "very hard" at once)
+      WorkoutLogView odd(int days) => WorkoutLogView(
+        SyncRecord(id: 'odd$days', kind: kindWorkoutLog).edit(
+          {
+            'sport': 'gym',
+            'minutes': 50,
+            'date': '2026-05-${(19 - days).toString().padLeft(2, '0')}',
+            'done': false,
+            'bodyLoad': 5,
+          },
+          ts: 1,
+          dev: 'A',
+        ),
+      );
+      expect(learn([odd(1), odd(2), odd(3)]).tightened, isEmpty);
+    });
+
     test('a record of an unknown sport is ignored', () {
       final l = learn(many('curling', 50, [5, 5, 5]));
       expect(l.isEmpty, isTrue);

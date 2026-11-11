@@ -2,6 +2,31 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 2e. fázis – edzés utáni visszajelzés, és a program tanul belőle
+
+**Mit kérdez**
+- Egy edzés után (a **címéből** ismeri fel: Gym, Calisthenics, Street Workout, kajak, mászás, kerékpár, futás, úszás, CrossFit, „edzés” …; műszakot és egész napos eseményt nem) a főoldalon, a napi check-in alatt megjelenik: **„Hogy ment: Gym (18:00–19:00)?”** – *Később* / *Kitöltöm*. A kérdés a **legutóbb véget ért** edzésre szól (az elmúlt 36 órából), és csak akkor, ha még nincs rá visszajelzés.
+- Az űrlap öt gyors skála (mind nem kötelező, legalább egyet meg kell adni): **fizikailag** és **mentálisan** mennyire volt nehéz (1 könnyű … 5 nagyon nehéz), **mennyi energiával kezdted** és **fejezted be** (1 kimerült … 5 tele), **milyen élmény volt** (1 rossz … 5 kiváló) + megjegyzés. A *Kihagytam* azt rögzíti, hogy az edzés nem volt meg; a *Később* az adott indításra elrejti.
+- Az app visszatérésekor és 5 percenként újra ránéz, hogy az épp befejezett edzés is előkerüljön (háttér-értesítés nincs). **Beállítások → Edzés utáni visszajelzés kérése** (alapból BE) kikapcsolja.
+- A visszajelzés új, szinkronizált rekordfajta (`workoutlog`, a Drive `appDataFolder`-ben, mint a check-in): mezőnkénti összefésüléssel, több eszközön; ugyanarra az edzésre (esemény + az előfordulás kezdete) egy visszajelzés van, egy ismétlődő edzésnek naponta egy.
+
+**Mit tanul belőle (a határokat a kód méri, nem a modell szava)**
+- **Szigorít magától:** ha egy 45–59 perces típus (pl. Gym) **legutóbbi 3 alkalma** átlagosan **≥ 4/5** nehéz volt, a program 45 perctől nehéznek veszi (energia-, műszak- és 48 órás kapu, heti plafon rá is érvényes). Az óvatosság nem kér engedélyt.
+- **Lazít, de csak a jóváhagyásoddal:** ha egy 60–89 perces típus (pl. Calisthenics) **legutóbbi 5 alkalma** átlagosan **≤ 2/5** nehéz volt, a főoldalon kártya kérdezi: **„Megtanultam: a Calisthenics (60–89 perc) számodra könnyű … Annak vegyem?”** *Igen* → egy jelölt sor kerül a **Tanult szokások**-ba (`[könnyű: calisthenics] …`; a Kézikönyvben látod, szerkesztheted, törölheted = visszavonod, és a modell is látja), és a típus innentől **90 percnél** számít nehéznek. *Nem* → ezen az eszközön megjegyzi, és csak **+5 új alkalom** után kérdez újra.
+- Az **új, nehéz visszajelzések azonnal visszaveszik** a megadott engedélyt (ha a 60–89 perces típus legutóbbi 3 alkalma ≥ 4/5), és a szigorítás mindig erősebb a lazításnál. A modell `hard` jelzése és a „nehéz / intenzív / HIIT” cím a lazítást felülírja, a „könnyű / nyújtás / mobilitás” cím mindig könnyű marad.
+- A tanult határ a **javaslat besorolásába, a naptárban már lévő edzések besorolásába és az ellenőrző kapukba** is bekerül; a javaslat-kártya „nehéz” jelzése azt mutatja, amit a szabályok mértek (a modell szava helyett).
+
+**Mi megy a modellnek**
+- Tervezésnél és vegyes (törlés + tervezés) kérésnél, ha van visszajelzés és a **Napi check-in** kapcsoló be van kapcsolva: egy `edzes_naplo` blokk, **legfeljebb 10 sor, 60 napon belül**, soronként pl. `05-17 gym 60p nf4 nm2 e3/2 k4` (nap, sport, perc, nehézség fizikai / mentális, energia az elején / végén, élmény) vagy `05-15 gym 60p kihagyta`. **A cím és a megjegyzés soha nem megy ki**, csak az általános sportkulcs; a megjegyzés a Drive-on kívül sehova.
+- A rendszerprompt új sorai: a jelmagyarázat, a használat („a nagyon nehéz vagy sok energiát elvevő edzéshez hasonlót rövidebben vagy könnyebben tervezz”) és – ha vannak – az egyedi nehéz-küszöbök. A törlés- és a pénzügyi kérés változatlan.
+- Méret: tíz sor + a prompt-sorok ≈ **+175 token** (a mintanaptáron a „Tervezz edzést a jövő hétre” így is 3 300 alatt marad; visszajelzés nélkül nincs többlet). A költségvetés-őr az „edzésnapló”-t a Tanult szokások előtt hagyja el. Kikapcsolt check-in mellett a modell nem kap semmit, a kódban a tanult határok viszont érvényesek.
+
+**Közben talált és javított:** a szöveg-tisztítás kiveszi a `>` jelet, ezért az energia-sor elválasztója `/`; a napi check-in és az új űrlap skála-feliratai nagy rendszerbetűnél vagy keskeny képernyőn kilógtak volna (most egyenlő részt kapnak, és törnek); a check-in sávnak és űrlapnak eddig nem volt tesztje.
+
+Tesztek: mag 417 (volt 335), app 693 (volt 627); 31 szándékos elrontást mind elkapnak a tesztek.
+
+**Nem ellenőrizhető itt:** a modellek viselkedése az `edzes_naplo` blokkal; hogy a küszöbök (3 alkalom / ≥ 4; 5 alkalom / ≤ 2; 45 és 90 perc) a te edzéseidre jól vannak-e beállítva (ha nem, egy sor átírni); hogy a kártya mikor jön fel a valódi használatban (nincs háttér-időzítő: megnyitáskor, visszatéréskor, 5 percenként); a cím-alapú felismerés a valódi naptáradon (egy „Edzői értekezlet” edzésnek számítana – a kérdést ilyenkor a *Később* vagy a *Kihagytam* lezárja); a Drive-szinkron két valódi eszköz között; az új sáv, űrlap és kártya kinézete valódi eszközön.
+
 ## 2d. fázis – szabálymotor, pontosabb hatókör, helyi válaszok
 
 **A szabályokat a kód méri, nem a modell szava**
