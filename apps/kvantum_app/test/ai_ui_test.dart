@@ -677,6 +677,33 @@ void main() {
       },
     );
 
+    testWidgets('the question after a workout can be switched off', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      final sw = find.widgetWithText(
+        SwitchListTile,
+        'Edzés utáni visszajelzés kérése',
+      );
+      await tester.scrollUntilVisible(
+        sw,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(sw);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(sw).value, isTrue); // on by default
+      expect(find.textContaining('Egy edzés után'), findsOneWidget);
+      await tester.tap(sw);
+      await tester.pumpAndSettle();
+      final s = (await tester.runAsync(
+        () => ref0(tester).read(aiSettingsStoreProvider).load(),
+      ))!;
+      expect(s.workoutFeedback, isFalse);
+      expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+      await shutdown(tester, db);
+    });
+
     testWidgets('the handbook switch is among the sharing switches', (
       tester,
     ) async {

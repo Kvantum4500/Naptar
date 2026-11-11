@@ -227,7 +227,12 @@ void main() {
         find.textContaining('Az értesítések le vannak tiltva'),
         findsOneWidget,
       );
-      final s = tester.widget<SwitchListTile>(find.byType(SwitchListTile).last);
+      final s = tester.widget<SwitchListTile>(
+        find.widgetWithText(
+          SwitchListTile,
+          'Napi check-in emlékeztető (20:00)',
+        ),
+      );
       expect(s.value, isFalse);
       await shutdown(tester, db);
     });
@@ -244,7 +249,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(sw);
       await tester.pumpAndSettle();
-      final s = tester.widget<SwitchListTile>(find.byType(SwitchListTile).last);
+      final s = tester.widget<SwitchListTile>(
+        find.widgetWithText(
+          SwitchListTile,
+          'Napi check-in emlékeztető (20:00)',
+        ),
+      );
       expect(s.value, isTrue);
       await shutdown(tester, db);
     });

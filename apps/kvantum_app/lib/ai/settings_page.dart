@@ -530,6 +530,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Napi check-in (energia, hangulat, alvás)'),
+                  subtitle: const Text(
+                    'Ide tartozik az edzés utáni visszajelzés összegzése is (a megjegyzések nem mennek el).',
+                  ),
                   value: settings.checkins,
                   onChanged: (v) =>
                       notifier.change(settings.copyWith(checkins: v)),
@@ -650,6 +653,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         _setReminders(reminders.copyWith(checkIn: v)),
                   ),
                 ],
+              ]),
+              section('Edzés utáni visszajelzés', [
+                const Text(
+                  'Egy edzés után (a címéből ismeri fel: Gym, Calisthenics, futás, kajak …) a főoldalon rákérdez, milyen nehéz volt, mennyi energiával kezdted és fejezted be, és milyen élmény volt. Pár koppintás, és nem kötelező. Ebből tanul: ha egy edzés-típus a visszajelzéseid szerint nehezebb, mint amit a program feltételez, magától szigorít; ha könnyebb, csak a jóváhagyásoddal lazít (a jóváhagyás a Kézikönyv „Tanult szokások” fájljába kerül, ott törölheted).',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Edzés utáni visszajelzés kérése'),
+                  subtitle: const Text(
+                    'Kikapcsolva nem kérdez, és nem tanul újat; a már megadott válaszok megmaradnak.',
+                  ),
+                  value: settings.workoutFeedback,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(workoutFeedback: v)),
+                ),
               ]),
               section('Mentés és visszaállítás', [
                 const Text(
@@ -858,7 +876,7 @@ class _ConsentDialogState extends State<ConsentDialog> {
                 'Napi check-in',
                 _s.checkins,
                 (v) => _s.copyWith(checkins: v),
-                subtitle: 'energia, hangulat, alvás; a megjegyzés nem megy el',
+                subtitle: 'energia, hangulat, alvás és az edzés utáni visszajelzések összegzése; a megjegyzés nem megy el',
               ),
               _switch(
                 'Pénzügyek',

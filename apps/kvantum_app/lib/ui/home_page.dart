@@ -8,6 +8,7 @@ import '../update/update_dialog.dart';
 import '../ai/assistant_page.dart';
 import '../ai/settings_page.dart';
 import 'checkin.dart';
+import 'workout_feedback.dart';
 import 'event_editor.dart';
 import 'tasks_page.dart';
 import 'format.dart';
@@ -244,6 +245,7 @@ class HomePage extends ConsumerWidget {
       body: Column(
         children: [
           const CheckInBanner(),
+          const WorkoutFeedbackBanner(),
           const UnreadableEventsBanner(),
           Expanded(child: body),
         ],
