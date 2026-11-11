@@ -26,9 +26,20 @@ class AssistantPage extends ConsumerStatefulWidget {
 
 class _AssistantPageState extends ConsumerState<AssistantPage> {
   final _input = TextEditingController();
+  late final AssistantController _ctl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctl = ref.read(assistantControllerProvider.notifier);
+  }
 
   @override
   void dispose() {
+    // Leaving the page ends the running request (nobody is waiting for it, and
+    // it would only spend tokens). Later, because the tree is locked now.
+    final ctl = _ctl;
+    Future.microtask(ctl.cancel);
     _input.dispose();
     super.dispose();
   }
@@ -102,7 +113,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 ],
               ),
               const SizedBox(height: 16),
-              if (st.busy) _Working(status: st.status),
+              if (st.busy) _Working(status: st.status, onCancel: ctl.cancel),
               if (st.error != null)
                 Card(
                   color: scheme.errorContainer,
@@ -492,8 +503,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
 }
 
 class _Working extends StatelessWidget {
-  const _Working({this.status});
+  const _Working({this.status, required this.onCancel});
   final String? status;
+  final VoidCallback onCancel;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -511,6 +523,7 @@ class _Working extends StatelessWidget {
                 'Az asszisztens dolgozik: tervez, és ellenőrzi a szabályokat…',
           ),
         ),
+        TextButton(onPressed: onCancel, child: const Text('Mégse')),
       ],
     ),
   );

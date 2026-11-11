@@ -149,6 +149,26 @@ class AskScope {
   final bool checkins;
   final bool slots;
 
+  /// The same kind of request with the least data: at most [narrowDays] days,
+  /// events only (no tasks, check-ins, free slots, weather). It is the one more
+  /// try when the provider says the request is too big or the model cannot
+  /// build its tool call.
+  static const narrowDays = 4;
+  AskScope narrowed() => AskScope(
+    edit: edit,
+    days: days > narrowDays ? narrowDays : days,
+    tasks: false,
+    checkins: false,
+    slots: false,
+    events: events,
+    finance: finance,
+  );
+
+  /// Whether [narrowed] would send less than this does (a pure money request
+  /// carries no calendar data, so there is nothing to take away).
+  bool get canNarrow =>
+      events && (days > narrowDays || tasks || checkins || slots);
+
   /// How much of the instructions the request needs ([buildSystemPrompt]).
   PromptKind get kind => edit
       ? PromptKind.edit

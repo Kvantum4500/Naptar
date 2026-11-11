@@ -15,6 +15,10 @@ class ProviderInfo {
     this.baseUrl,
     this.keyOptional = false,
     this.modelPrefs = const [],
+    this.temperature = 0.2,
+    this.maxOutput = 4096,
+    this.reasoningEffort,
+    this.reasoningModels,
   });
 
   final String id;
@@ -30,6 +34,18 @@ class ProviderInfo {
 
   /// Patterns for the default model, best first.
   final List<RegExp> modelPrefs;
+
+  /// Sampling temperature for planning (low: the same request should give
+  /// nearly the same plan). null = not sent, the service's own default.
+  final double? temperature;
+
+  /// Upper bound for one reply, thinking included. Groq counts it against the
+  /// per-minute token limit (8 000 on the free tier), so it is lower there.
+  final int maxOutput;
+
+  /// `reasoning_effort` sent to the models matching [reasoningModels].
+  final String? reasoningEffort;
+  final RegExp? reasoningModels;
 }
 
 final kProviders = <ProviderInfo>[
@@ -51,6 +67,10 @@ final kProviders = <ProviderInfo>[
       RegExp(r'gpt-oss'),
       RegExp(r'llama'),
     ],
+    maxOutput: 2048,
+    // gpt-oss thinks a lot by default; "low" keeps the budget for the plan
+    reasoningEffort: 'low',
+    reasoningModels: RegExp(r'gpt-oss'),
   ),
   ProviderInfo(
     id: 'mistral',
@@ -107,7 +127,15 @@ class LlmConfig {
 }
 
 LLMProvider buildProvider(LlmConfig c, http.Client client) {
-  if (c.provider == 'gemini') return GeminiProvider(client, apiKey: c.apiKey);
+  final info = providerById(c.provider);
+  if (c.provider == 'gemini') {
+    return GeminiProvider(
+      client,
+      apiKey: c.apiKey,
+      maxOutputTokens: info.maxOutput,
+      defaultTemperature: info.temperature,
+    );
+  }
   // Only the "custom" provider has an address chosen by the user. A leftover
   // custom address must never redirect the key and the data of Groq, Mistral…
   final String? base;
@@ -119,12 +147,20 @@ LLMProvider buildProvider(LlmConfig c, http.Client client) {
     }
     base = text;
   } else {
-    base = providerById(c.provider).baseUrl;
+    base = info.baseUrl;
   }
   if (base == null || base.trim().isEmpty) {
     throw const LlmBadResponse('Add meg a szolgáltató címét a Beállításokban.');
   }
-  return OpenAiProvider(client, apiKey: c.apiKey, baseUrl: base.trim());
+  return OpenAiProvider(
+    client,
+    apiKey: c.apiKey,
+    baseUrl: base.trim(),
+    maxOutputTokens: info.maxOutput,
+    defaultTemperature: info.temperature,
+    reasoningEffort: info.reasoningEffort,
+    reasoningModels: info.reasoningModels,
+  );
 }
 
 /// The default model from the list a provider returned.

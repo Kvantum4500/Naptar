@@ -70,21 +70,33 @@ void main() {
     );
 
     test('Groq gpt-oss thinks briefly; other models are left alone', () async {
-      final groq = await bodyFor(
-        'https://api.groq.com/openai/v1',
-        'openai/gpt-oss-20b',
-      );
-      expect(groq['reasoning_effort'], 'low');
+      // the preset lives in the catalog, the provider just applies it
+      Future<Map<String, Object?>> viaCatalog(String id, String model) async {
+        late Map<String, Object?> body;
+        await buildProvider(
+          LlmConfig(provider: id, apiKey: secret),
+          MockClient((r) async {
+            body = jsonDecode(r.body) as Map<String, Object?>;
+            return _json(okText('ok'));
+          }),
+        ).generate(model, request());
+        return body;
+      }
+
       expect(
-        (await bodyFor(
-          'https://api.groq.com/openai/v1',
+        (await viaCatalog('groq', 'openai/gpt-oss-20b'))['reasoning_effort'],
+        'low',
+      );
+      expect(
+        (await viaCatalog(
+          'groq',
           'llama-3.3-70b',
         )).containsKey('reasoning_effort'),
         isFalse,
       );
       expect(
-        (await bodyFor(
-          'https://api.example.com/v1',
+        (await viaCatalog(
+          'mistral',
           'openai/gpt-oss-20b',
         )).containsKey('reasoning_effort'),
         isFalse,

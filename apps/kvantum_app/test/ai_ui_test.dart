@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
@@ -45,6 +46,35 @@ class FakeGemini extends FakeLlm {
   Future<List<LlmModel>> listModels() async {
     if (listError != null) throw listError!;
     return available;
+  }
+}
+
+/// A model that answers only when the test lets it.
+class GatedGemini extends FakeGemini {
+  GatedGemini() : super([]);
+  final gate = Completer<LlmReply>();
+  @override
+  Future<LlmReply> generate(String model, LlmRequest request) {
+    requests.add(request);
+    return gate.future;
+  }
+}
+
+/// The list of models is slow; closing the connection (the app's "Mégse")
+/// makes the pending call fail, as a real client does.
+class SlowModelsGemini extends FakeGemini {
+  SlowModelsGemini() : super([]);
+  final _models = Completer<List<LlmModel>>();
+  @override
+  Future<List<LlmModel>> listModels() => _models.future;
+  @override
+  void close() {
+    super.close();
+    if (!_models.isCompleted) {
+      _models.completeError(
+        const LlmNetwork('Nincs kapcsolat: Client is already closed'),
+      );
+    }
   }
 }
 
@@ -732,15 +762,18 @@ void main() {
       return occurrenceRef(occ.firstWhere((o) => o.title == title));
     }
 
+    // The same answer again for the repair rounds: a reference the model
+    // cannot make right goes back to it (twice at most) before the user is told.
     FakeGemini deleteScript(List<String> refs) => FakeGemini([
-      (_) => calls([
-        tool('propose_events', {
-          'summary': 'Törlés',
-          'deletions': [
-            for (final r in refs) {'ref': r, 'reason': 'kérted'},
-          ],
-        }),
-      ]),
+      for (var i = 0; i < 3; i++)
+        (_) => calls([
+          tool('propose_events', {
+            'summary': 'Törlés',
+            'deletions': [
+              for (final r in refs) {'ref': r, 'reason': 'kérted'},
+            ],
+          }),
+        ]),
     ]);
 
     Future<void> ask(WidgetTester tester) async {
@@ -899,15 +932,16 @@ void main() {
     // ---- moves need an explicit "Engedélyezem" too
     FakeGemini moveScript(List<String> refs, String start, String end) =>
         FakeGemini([
-          (_) => calls([
-            tool('propose_events', {
-              'summary': 'Áthelyezés',
-              'moves': [
-                for (final r in refs)
-                  {'ref': r, 'start': start, 'end': end, 'reason': 'kérted'},
-              ],
-            }),
-          ]),
+          for (var i = 0; i < 3; i++)
+            (_) => calls([
+              tool('propose_events', {
+                'summary': 'Áthelyezés',
+                'moves': [
+                  for (final r in refs)
+                    {'ref': r, 'start': start, 'end': end, 'reason': 'kérted'},
+                ],
+              }),
+            ]),
         ]);
 
     testWidgets('a move waits for "Engedélyezem", then changes the time', (
@@ -1335,6 +1369,174 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    // ---- "Mégse", leaving the page, closing the connection
+    Future<void> pumpBriefly(WidgetTester tester) async {
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    testWidgets('"Mégse" stops the request; the late answer is thrown away', (
+      tester,
+    ) async {
+      final llm = GatedGemini();
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'Tervezz edzést');
+      await tester.tap(find.byTooltip('Küldés'));
+      await pumpBriefly(tester);
+      expect(llm.requests.length, 1);
+      expect(ref0(tester).read(assistantControllerProvider).busy, isTrue);
+      expect(find.text('Mégse'), findsOneWidget);
+
+      await tester.tap(find.text('Mégse'));
+      await pumpBriefly(tester);
+      expect(ref0(tester).read(assistantControllerProvider).busy, isFalse);
+      expect(find.text('Mégse'), findsNothing);
+      expect(
+        llm.closed,
+        greaterThanOrEqualTo(1),
+      ); // the call in flight is aborted
+
+      // the model answers anyway, much later: nothing appears
+      llm.gate.complete(
+        plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      );
+      await pumpBriefly(tester);
+      final st = ref0(tester).read(assistantControllerProvider);
+      expect(st.busy, isFalse);
+      expect(st.outcome, isNull);
+      expect(st.error, isNull);
+      expect(find.text('Elfogadom a kijelölteket'), findsNothing);
+
+      // and the page can be used again
+      expect(tester.widget<TextField>(find.byType(TextField)).enabled, isTrue);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('leaving the page cancels the request that nobody waits for', (
+      tester,
+    ) async {
+      final llm = GatedGemini();
+      await boot(
+        tester,
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const AssistantPage()),
+              ),
+              child: const Text('Megnyit'),
+            ),
+          ),
+        ),
+        llm: llm,
+        key: 'k',
+      );
+      await tester.tap(find.text('Megnyit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Tervezz edzést');
+      await tester.tap(find.byTooltip('Küldés'));
+      await pumpBriefly(tester);
+      expect(ref0(tester).read(assistantControllerProvider).busy, isTrue);
+
+      await tester.binding.handlePopRoute(); // the system "back"
+      // the page leaves with its closing animation; the cancel runs after it
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byType(AssistantPage), findsNothing);
+      expect(ref0(tester).read(assistantControllerProvider).busy, isFalse);
+      expect(llm.closed, greaterThanOrEqualTo(1));
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      '"Mégse" while the models are listed: no bogus error, nothing is sent',
+      (tester) async {
+        final llm = SlowModelsGemini();
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.enterText(find.byType(TextField), 'Tervezz edzést');
+        await tester.tap(find.byTooltip('Küldés'));
+        await pumpBriefly(tester);
+        expect(ref0(tester).read(assistantControllerProvider).busy, isTrue);
+
+        await tester.tap(find.text('Mégse'));
+        await pumpBriefly(tester);
+        final st = ref0(tester).read(assistantControllerProvider);
+        expect(st.busy, isFalse);
+        // the aborted call failed with a network error: the user must not see it
+        expect(st.error, isNull);
+        expect(find.textContaining('Nincs kapcsolat'), findsNothing);
+        expect(llm.requests, isEmpty);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('"Mégse" right after sending: not a single request goes out', (
+      tester,
+    ) async {
+      final llm = GatedGemini();
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      final ctl = ref0(tester).read(assistantControllerProvider.notifier);
+      unawaited(ctl.ask('Tervezz edzést'));
+      ctl.cancel(); // before the settings and the key are even read
+      await pumpBriefly(tester);
+      expect(ref0(tester).read(assistantControllerProvider).busy, isFalse);
+      expect(llm.requests, isEmpty);
+      expect(llm.closed, greaterThanOrEqualTo(1));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('every request closes its connection when it is over', (
+      tester,
+    ) async {
+      final llm = FakeGemini([(_) => say('Rendben.')]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(find.byType(TextField), 'Mikor edzek?');
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      expect(find.text('Rendben.'), findsOneWidget);
+      expect(llm.closed, 1);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a second request while one runs starts nothing', (
+      tester,
+    ) async {
+      final llm = GatedGemini();
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      final ctl = ref0(tester).read(assistantControllerProvider.notifier);
+      unawaited(ctl.ask('Tervezz edzést'));
+      await pumpBriefly(tester);
+      unawaited(ctl.ask('Tervezz mást'));
+      await pumpBriefly(tester);
+      expect(llm.requests.length, 1);
+      llm.gate.complete(say('kész'));
+      await pumpBriefly(tester);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the notice of a smaller second try is shown with the answer', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) => const LlmTooLarge('túl nagy', limit: 8000, requested: 12000),
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(
+        find.byType(TextField),
+        'Tervezz edzést a jövő hétre',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      expect(llm.requests.length, 2);
+      expect(find.textContaining('túl nagynak bizonyult'), findsOneWidget);
+      expect(find.textContaining('Futás'), findsWidgets);
+      await shutdown(tester, db);
+    });
 
     testWidgets('a quick-prompt chip sends its text', (tester) async {
       final llm = FakeGemini([(_) => say('Rendben, mikor?')]);

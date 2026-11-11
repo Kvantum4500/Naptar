@@ -93,11 +93,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
     setState(() => _busy = true);
     try {
-      final models = await ref
-          .read(llmFactoryProvider)(
-            LlmConfig(provider: info.id, apiKey: key ?? '', baseUrl: base),
-          )
-          .listModels();
+      final checker = ref.read(llmFactoryProvider)(
+        LlmConfig(provider: info.id, apiKey: key ?? '', baseUrl: base),
+      );
+      final List<LlmModel> models;
+      try {
+        models = await checker.listModels();
+      } finally {
+        checker.close(); // one connection per check, closed when it is over
+      }
       if (models.isEmpty) {
         _say(
           'A kulcs érvényes, de nem találtam használható modellt.',

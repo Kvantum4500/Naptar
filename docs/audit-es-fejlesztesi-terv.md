@@ -393,3 +393,17 @@ Tesztek: mag 216 (volt 194), app 469 (volt 441), az elemzők és a formázás ti
 | AI-21, AI-25 | részben | a tömör alak mindenhol; a „cím csak műszak/AI/egész napos esetén” és a tanult szokások korlátja a 2c/2d-ben |
 | token-cél | teljesült, becsléssel | terv ≈ 3,0 k (cél ≤ 3,2 k), törlés ≈ 1,4 k (cél ≤ 2,2 k), állandó rész ≈ 2,0 k (cél ≤ 2,3 k), pénz ≈ 0,5 k. A „pénz helyi válasz = 0” a 2d-ben jön. |
 | **Eltérés a tervtől** | | A rendszerprompt a kérés fajtája szerint három változatú (terv / törlés-áthelyezés / pénz); a terv azt írta, hogy minden kérésnél bájtra azonos. Azonos fajtájú kérések között az (cache-barát), a különböző fajták között nem; a törlés és a pénzügyi kérdés így lényegesen kisebb. |
+
+### 2b (robusztusság) – kész, a build után kipróbálandó
+
+Tesztek: mag 220 (volt 216), app 540 (volt 469), az elemzők és a formázás tiszták. 29 szándékos elrontás (nincs újrapróbálás, nincs határidő, a megszakítás nem hat, a csonka válasz javítókörbe megy, a hivatkozás-hiba nem megy vissza, nincs paraméter-tartalék, nincs 413-felismerés, a kliens nem zár, a kulcs nem redaktálódik, a Mégse után is elmegy a kérés …) mindegyikét elkapják a tesztek; két hiányt ez a próba hozott felszínre és javítottam (a modell-felderítés alatti Mégse hamis hibaüzenetet adott volna; a feldolgozás közbeni Mégse után egy kérés még elindulhatott).
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| AI-4 | kész | csonka tool-hívás → érthető üzenet, nincs vak javítókör; Gemini `maxOutputTokens` (4096; a terv 2048-at írt, a „gondolkodás” is beleszámít, az túl szűk lett volna). A csonka JSON töredékének mentése (a teljes tételeké) **nem készült el**: a hibátlan tételek csak akkor maradnak meg, ha a hívás ép JSON volt; félbeszakadt JSON-nál üzenet jön. |
+| AI-3 | kész | a visszajelzés a törlés/áthelyezés parse-hibáit is tartalmazza; javítható hivatkozás-hibánál (érvénytelen, nem található, ütközés) a hátralévő javítókörökig visszamegy a modellhez, elutasításnál nem |
+| AI-10 | kész | 413 / „request too large” / context length → `LlmTooLarge`, egyszeri szűkített újrapróbálás (≤ 4 nap, csak események); `tool_use_failed` / `MALFORMED_FUNCTION_CALL` ugyanígy; paramétert nevező 400 → egyszeri (legfeljebb kétszeri) újrapróbálás a paraméter nélkül, modellenként megjegyezve |
+| AI-11 | kész, eltéréssel | 2 újrapróbálás 1,5 s és 4 s múlva; **teljes határidő 90 s**; Mégse gomb, az oldal elhagyása is megszakít. **Eltérés:** a 500 és 529 is újrapróbálandó (a terv 502/503/504-et írt), a „nincs kapcsolat” nem |
+| AI-13 | kész | a katalógus presetjei: hőmérséklet 0,2, válaszkorlát (Groq 2048, a többi 4096), `reasoning_effort` a Groq gpt-oss-hoz; a `tokenBudget` a 2c-ben jön, ahol használjuk |
+| AI-24 | részben | közös HTTP-réteg (`llm_http.dart`: redakció, hibatérkép, JSON-kezelés), kérésenként egy kapcsolat, bezárva. A modell-tartalék lista (más szolgáltatókra) nem készült el. |
+

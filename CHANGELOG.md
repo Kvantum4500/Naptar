@@ -2,6 +2,25 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 2b. fázis – az asszisztens kitartóbb, ha valami elromlik
+
+**Mi történik most, ha valami elromlik**
+- **Levágódott válasz** (a modell a hosszkeret miatt félbehagyta): nincs több vak javítókör (ez eddig akár 13 000 tokent is elégethetett, hogy az újabb próba megint levágódjon). Érthető üzenetet kapsz („kérj kevesebb napot vagy tételt”); ha a félbehagyott válaszban voltak hibátlan javaslatok, azok megmaradnak, és megjegyzés mondja, hogy a válasz levágódott.
+- **Szerverhiba, időtúllépés** (500, 502, 503, 504, 529 vagy nincs válasz): a program kétszer újra próbálja, 1,5 és 4 másodperc múlva, az állapotsor jelzi. Kapcsolat nélkül, hibás kulcsnál, elfogyott keretnél nem vár feleslegesen.
+- **90 másodperces teljes határidő:** a várakozások és az újrapróbálások együtt sem tarthatnak tovább; utána érthető üzenet jön, a kérés nem lóg a végtelenségig.
+- **Mégse gomb** a munka-sorban. Az oldal elhagyása is megszakítja a kérést (nincs, aki várja, és csak tokent költene). A megszakítás azonnal hat: a kapcsolat lezárul, a későn érkező választ eldobja, és a Mégse után egyetlen kérés sem indul el.
+- **Túl nagy kérés** (413, „request too large”, „context length”) **és hibás eszközhívás** (Groq `tool_use_failed`, Gemini `MALFORMED_FUNCTION_CALL`): a program egyszer újra próbálja kisebb adattal (a következő 4 nap eseményei, feladat / check-in / szabad idősáv / időjárás nélkül), és ezt jelzi a válasz mellett. Ha így sem megy, számokkal és teendővel magyarázza el (rövidebb Kézikönyv, kevesebb nap, másik modell).
+- **A modell nem fogad el egy paramétert** (pl. `temperature`, `reasoning_effort`, `max_tokens`): egyszer újra próbálja nélküle (`max_tokens` helyett `max_completion_tokens`-szel is), és megjegyzi az adott modellhez, így a következő kérés rögtön helyesen megy.
+- **Elrontott hivatkozás törlésnél / áthelyezésnél** (kitalált vagy összekevert esemény, illetve ütköző új időpont): a hiba okát visszaküldi a modellnek (legfeljebb kétszer), nem üres választ ad. Elutasítás (műszak, egész napos esemény, „csak kézzel felvett”, kikapcsolt eseménymegosztás) esetén nem kérdez vissza. A modellnek visszaküldött szöveg megtisztított.
+- Egy kérés egy hálózati kapcsolatot használ, és a végén bezárja (eddig minden kérés újat nyitott, és sosem zárta).
+
+**Szolgáltatónkénti alapbeállítások egy helyen (a katalógusban)**
+- Tervezéshez alacsonyabb hőmérséklet (0,2; eddig mindenhol 0,4), hogy ugyanarra a kérésre közel ugyanaz a terv jöjjön.
+- Válaszkorlát: Groq 2048 (a 8 000 tokenes percenkénti keret miatt), a többi 4096 (a gondolkodás is belefér); a Gemini eddig korlát nélkül ment, most 4096.
+- Hibaüzenetekben a kulcs sosem jelenik meg: a használt kulcsot szó szerint kiszedi, a kulcsszerű mintákat és a hosszú azonosítókat is (a Gemini 4xx-üzenetei eddig nem voltak szűrve).
+
+**Nem ellenőrizhető itt:** a valódi szolgáltatói hibaüzenetek pontos szövege (a felismerés a dokumentált alakra és a hibamezőkre épül, fixture-ökkel tesztelve); hogy a Groq 2048-as és a többiek 4096-os plafonja elég-e egy 20 tételes tervhez; a szolgáltató elszámolja-e a megszakított kérés már futó generálását.
+
 ## 2a. fázis – kisebb asszisztens-kérés (tokentakarékosság)
 
 A modellnek küldött kérés mérete, **becsléssel** (3 karakter = 1 token, szándékosan óvatos), ugyanazzal a mintanaptárral (14 esemény, 6 feladat, 5 check-in, hely, előrejelzés) és a mellékelt kézikönyvvel, a régi és az új kódon mérve:

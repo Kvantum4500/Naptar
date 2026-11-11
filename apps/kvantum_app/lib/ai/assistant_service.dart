@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../data/event_repository.dart';
@@ -173,10 +175,27 @@ class AssistantOutcome {
     this.deletions = const [],
     this.moves = const [],
     this.calls = 0,
+    this.notice,
   });
 
   /// Existing events proposed for moving (need explicit confirmation).
   final List<MoveProposal> moves;
+
+  /// Something worth telling about how this answer came about (e.g. it was
+  /// made from less data after the first try failed).
+  final String? notice;
+
+  AssistantOutcome withNotice(String n) => AssistantOutcome(
+    text: text,
+    summary: summary,
+    items: items,
+    dropped: dropped,
+    questions: questions,
+    deletions: deletions,
+    moves: moves,
+    calls: calls,
+    notice: notice == null ? n : '$notice $n',
+  );
 
   AssistantOutcome withoutMoves() => AssistantOutcome(
     text: text,
@@ -186,6 +205,7 @@ class AssistantOutcome {
     questions: questions,
     deletions: deletions,
     calls: calls,
+    notice: notice,
   );
 
   /// Existing events proposed for deletion (need explicit confirmation).
@@ -199,6 +219,7 @@ class AssistantOutcome {
     questions: questions,
     moves: moves,
     calls: calls,
+    notice: notice,
   );
 
   /// Plain answer (e.g. a question) when no plan was proposed.
@@ -236,8 +257,11 @@ class AssistantService {
     this.maxRepairs = 2,
     this.weather,
     this.finance,
+    this.deadline = const Duration(seconds: 90),
+    Duration Function()? sinceStart,
   }) : _now = now ?? DateTime.now,
-       _delay = delay ?? Future.delayed;
+       _delay = delay ?? Future.delayed,
+       _sinceOverride = sinceStart;
 
   final LLMProvider provider;
   final EventRepository events;
@@ -253,8 +277,33 @@ class AssistantService {
   final FinanceRepository? finance;
   final int maxCalls;
   final int maxRepairs;
+
+  /// The whole request (waits and retries included) gets this long; then it
+  /// ends with a clear message instead of hanging.
+  final Duration deadline;
   final DateTime Function() _now;
   final Future<void> Function(Duration) _delay;
+  final Duration Function()? _sinceOverride;
+
+  /// Time since the request started (tests replace it).
+  Duration Function() _since = () => Duration.zero;
+
+  bool _cancelled = false;
+  final _cancelSignal = Completer<void>();
+
+  /// Stops the running [ask] (it ends with [LlmCancelled]): at once if a model
+  /// call is in flight (whether or not the provider manages to abort it), else
+  /// at the next step. A service serves ONE request of the user (the retries
+  /// and the other-model tries of that request included): once cancelled, it
+  /// stays cancelled, so a later step of the same request cannot restart it.
+  void cancel() {
+    _cancelled = true;
+    if (!_cancelSignal.isCompleted) _cancelSignal.complete();
+  }
+
+  void _live() {
+    if (_cancelled) throw const LlmCancelled();
+  }
 
   String get _tz => rules.tzid;
   DateTime get _nowUtc => _now().toUtc();
@@ -269,17 +318,47 @@ class AssistantService {
     required AiSettings settings,
     void Function(String status)? onStatus,
   }) async {
+    final clock = Stopwatch()..start();
+    _since = _sinceOverride ?? (() => clock.elapsed);
     _onStatus = onStatus;
-    _aliasToRef.clear();
-    _refToAlias.clear();
-    _taskAliasToId.clear();
-    _taskIdToAlias.clear();
     _prompt = prompt.toLowerCase();
     _settings = settings;
     // What the request is about is decided ONCE, from its wording. It drives
     // the data in the first message, the tools offered and whether deleting /
     // moving is allowed at all.
     final scope = scopeFor(prompt, _today);
+    try {
+      return await _run(prompt, model, settings, scope);
+    } on LlmException catch (e) {
+      // "Too big" or "could not write the call": one more try with the least
+      // data. Anything else (or nothing left to take away) is the answer.
+      if (!(e is LlmTooLarge || e is LlmToolFailed) || !scope.canNarrow) {
+        rethrow;
+      }
+      _live();
+      _onStatus?.call('Kisebb adattal próbálom újra…');
+      final out = await _run(prompt, model, settings, scope.narrowed());
+      return out.withNotice(
+        e is LlmTooLarge
+            ? 'A kérés túl nagynak bizonyult, ezért csak a következő ${AskScope.narrowDays} nap eseményeivel dolgoztam. Ha többre van szükséged, kérdezz kevesebb napra egyszerre, vagy válassz másik modellt.'
+            : 'A modell elsőre nem tudta összeállítani a tervet, ezért kisebb adattal (a következő ${AskScope.narrowDays} nap eseményeivel) próbáltam újra.',
+      );
+    }
+  }
+
+  static const _cutNote =
+      'A válasz a hosszkeret miatt levágódott, ezért lehet, hogy nem minden javaslat érkezett meg. Kérj kevesebb napot vagy kevesebb tételt.';
+
+  Future<AssistantOutcome> _run(
+    String prompt,
+    String model,
+    AiSettings settings,
+    AskScope scope,
+  ) async {
+    _aliasToRef.clear();
+    _refToAlias.clear();
+    _taskAliasToId.clear();
+    _taskIdToAlias.clear();
     _editIntent = scope.edit;
     _forecast = null;
     _forecastTried = false;
@@ -300,6 +379,7 @@ class AssistantService {
     ];
     var repairs = 0;
     for (var call = 1; call <= maxCalls; call++) {
+      _live();
       final reply = await _generate(
         model,
         LlmRequest(
@@ -308,24 +388,46 @@ class AssistantService {
           tools: tools,
         ),
       );
+      _live();
       turns.add(LlmTurn('model', reply.parts));
       final calls = reply.toolCalls;
-      if (calls.isEmpty) return AssistantOutcome(text: reply.text, calls: call);
+      // A reply cut off by the length cap is never sent back for repair (the
+      // second try would be cut off again, at the price of the whole talk).
+      final repairsLeft = reply.truncated ? 0 : maxRepairs - repairs;
+      if (calls.isEmpty) {
+        return AssistantOutcome(
+          text: reply.truncated ? '${reply.text}\n\n$_cutNote' : reply.text,
+          calls: call,
+        );
+      }
 
       final results = <LlmPart>[];
       for (final c in calls) {
+        _live();
         if (c.name == 'propose_events') {
           final args = _expandRefs(c.args);
-          final r = await _propose(args, repairsLeft: maxRepairs - repairs);
+          final r = await _propose(args, repairsLeft: repairsLeft);
           if (r.outcome != null) {
             final o = r.outcome!;
             final del = await _resolveDeletions(args, settings);
             final mv = await _resolveMoves(args, settings);
+            _live();
+            final again = _refFeedback(o, del, mv, repairsLeft: repairsLeft);
+            if (again != null) {
+              repairs++;
+              results.add(LlmToolResult('propose_events', again, id: c.id));
+              continue;
+            }
             return AssistantOutcome(
               text: reply.text,
               summary: o.summary,
               items: o.items,
-              dropped: [...o.dropped, ...del.notes, ...mv.notes],
+              dropped: [
+                ...o.dropped,
+                ...del.notes,
+                ...mv.notes,
+                if (reply.truncated) _cutNote,
+              ],
               questions: o.questions,
               deletions: del.items,
               moves: mv.items,
@@ -432,24 +534,66 @@ class AssistantService {
     return {...args, 'deletions': ?d, 'moves': ?m};
   }
 
-  /// Short per-minute limits are waited out (twice at most); a missing or used
-  /// up quota is not, waiting would not help there.
+  static const _netBackoff = [
+    Duration(milliseconds: 1500),
+    Duration(seconds: 4),
+  ];
+
+  /// Whether a wait of [d] still fits into the request's deadline.
+  bool _fits(Duration d) => deadline - _since() > d;
+
+  /// One model call with what can be waited out:
+  /// - a short per-minute limit is waited out (twice at most); a missing or
+  ///   used up quota is not, waiting would not help there;
+  /// - a transient server-side failure (timeout, 502/503/504 ...) is tried
+  ///   again twice, after 1.5 s and 4 s;
+  /// - nothing may run past the request's [deadline] or after [cancel].
   Future<LlmReply> _generate(String model, LlmRequest req) async {
-    for (var attempt = 0; ; attempt++) {
+    var rateWaits = 0;
+    var netRetries = 0;
+    final deadlineMsg =
+        'Az asszisztens nem készült el időben (${deadline.inSeconds} másodperc). Próbáld újra, vagy kérj kevesebbet (pl. kevesebb napot).';
+    for (;;) {
+      _live();
+      final left = deadline - _since();
+      if (left <= Duration.zero) throw LlmTimeout(deadlineMsg);
       await settingsStore.bumpUsage();
       try {
-        return await provider.generate(model, req);
+        // The call races the user's "Mégse": a provider that is slow to give
+        // up (or cannot) must not keep the request alive.
+        return await Future.any<LlmReply>([
+          provider.generate(model, req),
+          _cancelSignal.future.then<LlmReply>(
+            (_) => throw const LlmCancelled(),
+          ),
+        ]).timeout(left, onTimeout: () => throw LlmTimeout(deadlineMsg));
       } on LlmRateLimit catch (e) {
         final wait = e.retryAfter;
-        if (attempt < 2 &&
+        if (rateWaits < 2 &&
             e.transient &&
             wait != null &&
-            wait <= const Duration(seconds: 60)) {
+            wait <= const Duration(seconds: 60) &&
+            _fits(wait + const Duration(seconds: 1))) {
+          rateWaits++;
           _onStatus?.call(
             'Limit miatt várok ${wait.inSeconds + 1} másodpercet…',
           );
           await _delay(wait + const Duration(seconds: 1));
+          _live();
           _onStatus?.call('Újra próbálom…');
+          continue;
+        }
+        rethrow;
+      } on LlmNetwork catch (e) {
+        // closing the connection to cancel fails the call: not a reason to retry
+        _live();
+        if (e.retryable &&
+            netRetries < _netBackoff.length &&
+            _fits(_netBackoff[netRetries])) {
+          final wait = _netBackoff[netRetries++];
+          _onStatus?.call('A szolgáltatás nem válaszolt, újra próbálom…');
+          await _delay(wait);
+          _live();
           continue;
         }
         rethrow;
@@ -683,12 +827,19 @@ class AssistantService {
         : _asked(args, 'deletions') || _asked(args, 'moves');
     if (parsed.items.isEmpty) {
       if (repairsLeft > 0 && parsed.questions.isEmpty && !wantsDeletes) {
+        // everything that was wrong goes back, the deletion / move problems
+        // (a garbled or made-up reference) included
+        final problems = [
+          ...dropped,
+          if (_editIntent) ...parseDeletions(args).problems,
+          if (_editIntent) ...parseMoves(args, defaultTz: _tz).problems,
+        ];
         return (
           outcome: null,
           feedback: {
-            'hibak': dropped.isEmpty
+            'hibak': problems.isEmpty
                 ? ['Nem érkezett egyetlen használható javaslat sem.']
-                : dropped,
+                : [for (final p in problems) sanitizeText(p, max: 200)],
             'feladat': 'Javítsd, és hívd újra a propose_events eszközt.',
           },
         );
@@ -802,10 +953,15 @@ class AssistantService {
   /// Turns the model's `ref`s into real occurrences. Anything that does not
   /// exist (made up, already gone) is dropped with a note; sharing events off
   /// means no deletions at all.
-  Future<({List<DeletionProposal> items, List<String> notes})>
+  Future<
+    ({List<DeletionProposal> items, List<String> notes, List<String> fixable})
+  >
   _resolveDeletions(Map<String, Object?> args, AiSettings settings) async {
     final parsed = parseDeletions(args);
     final notes = [...parsed.problems];
+    // the notes a better answer of the model could clear (a garbled or made-up
+    // reference); the others are refusals
+    final fixable = [...parsed.problems];
     final out = <DeletionProposal>[];
     if (_asked(args, 'deletions') && !_editIntent) {
       return (
@@ -813,6 +969,7 @@ class AssistantService {
         notes: const [
           'Törlést csak akkor javaslok, ha kifejezetten kéred (pl. „töröld a holnapi edzést”).',
         ],
+        fixable: const <String>[],
       );
     }
     if (parsed.items.isNotEmpty && !settings.events) {
@@ -822,6 +979,7 @@ class AssistantService {
           ...notes,
           'Törlés nem javasolható, mert az események megosztása ki van kapcsolva.',
         ],
+        fixable: const <String>[],
       );
     }
     for (final d in parsed.items) {
@@ -832,9 +990,10 @@ class AssistantService {
       );
       final hit = around.where((o) => occurrenceRef(o) == d.ref).firstOrNull;
       if (hit == null) {
-        notes.add(
-          'A törlésre javasolt esemény nem található (talán már törölve van).',
-        );
+        const gone =
+            'A törlésre javasolt esemény nem található (talán már törölve van).';
+        notes.add(gone);
+        fixable.add(gone);
       } else if (hit.isShift) {
         // generated shifts are managed on the Beosztás page, never here
         notes.add(
@@ -848,7 +1007,7 @@ class AssistantService {
         out.add(DeletionProposal(hit, d.reason));
       }
     }
-    return (items: out, notes: notes);
+    return (items: out, notes: notes, fixable: fixable);
   }
 
   /// Fills in the real task details (deadline, estimate, energy) for blocks
@@ -893,12 +1052,11 @@ class AssistantService {
   /// Turns the model's move requests into real occurrences with a conflict
   /// check. Shifts and all-day events are never moved; a move that would
   /// overlap another event is dropped with a note.
-  Future<({List<MoveProposal> items, List<String> notes})> _resolveMoves(
-    Map<String, Object?> args,
-    AiSettings settings,
-  ) async {
+  Future<({List<MoveProposal> items, List<String> notes, List<String> fixable})>
+  _resolveMoves(Map<String, Object?> args, AiSettings settings) async {
     final parsed = parseMoves(args, defaultTz: _tz);
     final notes = [...parsed.problems];
+    final fixable = [...parsed.problems];
     final out = <MoveProposal>[];
     if (_asked(args, 'moves') && !_editIntent) {
       return (
@@ -906,6 +1064,7 @@ class AssistantService {
         notes: const [
           'Áthelyezést csak akkor javaslok, ha kifejezetten kéred (pl. „told át az edzést 19 órára”).',
         ],
+        fixable: const <String>[],
       );
     }
     if (parsed.items.isNotEmpty && !settings.events) {
@@ -915,6 +1074,7 @@ class AssistantService {
           ...notes,
           'Áthelyezés nem javasolható, mert az események megosztása ki van kapcsolva.',
         ],
+        fixable: const <String>[],
       );
     }
     final doomed = {for (final d in parseDeletions(args).items) d.ref};
@@ -926,9 +1086,10 @@ class AssistantService {
       );
       final hit = around.where((o) => occurrenceRef(o) == m.ref).firstOrNull;
       if (hit == null) {
-        notes.add(
-          'Az áthelyezésre javasolt esemény nem található (talán már törölve van).',
-        );
+        const gone =
+            'Az áthelyezésre javasolt esemény nem található (talán már törölve van).';
+        notes.add(gone);
+        fixable.add(gone);
         continue;
       }
       if (hit.isShift) {
@@ -960,12 +1121,39 @@ class AssistantService {
         rules: rules,
       ).where((v) => v.code == 'conflict' || v.code == 'bad_range').toList();
       if (bad.isNotEmpty) {
-        notes.add(bad.map((v) => v.message).join('; '));
+        // a clash is the model's to fix: it can pick another time
+        final clash = bad.map((v) => v.message).join('; ');
+        notes.add(clash);
+        fixable.add(clash);
         continue;
       }
       out.add(MoveProposal(hit, m.startWall, m.endWall, m.reason));
     }
-    return (items: out, notes: notes);
+    return (items: out, notes: notes, fixable: fixable);
+  }
+
+  /// Deleting / moving where nothing usable came out and every reason is one
+  /// the model can fix (a made-up or garbled reference, a clash): the reasons
+  /// go back to it instead of an empty answer. Nothing goes back when any
+  /// reason is a refusal (shift, all-day event, "manual only"), when it asked a
+  /// question, or when the events are not shared.
+  Map<String, Object?>? _refFeedback(
+    AssistantOutcome o,
+    ({List<DeletionProposal> items, List<String> notes, List<String> fixable})
+    del,
+    ({List<MoveProposal> items, List<String> notes, List<String> fixable}) mv, {
+    required int repairsLeft,
+  }) {
+    if (repairsLeft <= 0 || !_editIntent || !_settings.events) return null;
+    if (o.items.isNotEmpty || o.questions.isNotEmpty) return null;
+    if (del.items.isNotEmpty || mv.items.isNotEmpty) return null;
+    final fixable = [...del.fixable, ...mv.fixable];
+    final all = [...del.notes, ...mv.notes];
+    if (fixable.isEmpty || all.length != fixable.length) return null;
+    return {
+      'hibak': [for (final f in fixable) sanitizeText(f, max: 200)],
+      'feladat': 'Javítsd a hivatkozásokat (az r érték a kapott eseményadatból való), és hívd újra a propose_events eszközt.',
+    };
   }
 
   /// Proposals must lie ahead of "now" and within 60 days: a wrong year or a

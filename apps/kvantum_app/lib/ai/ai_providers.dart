@@ -169,25 +169,51 @@ class AssistantController extends Notifier<AssistantState> {
   @override
   AssistantState build() => const AssistantState();
 
+  // The running request. A new number per request: a result that arrives for an
+  // older number (the user pressed "Mégse" meanwhile) is thrown away.
+  int _run = 0;
+  AssistantService? _service;
+  LLMProvider? _provider;
+
+  /// "Mégse" (also when the page is left): stops the running request. The
+  /// connection is closed, so the call in flight is aborted, and the late
+  /// answer, if any, is dropped.
+  void cancel() {
+    // (a page that is left after the whole app is gone has nothing to cancel)
+    if (!ref.mounted || !state.busy) return;
+    _run++;
+    _service?.cancel();
+    _provider?.close();
+    state = AssistantState(prompt: state.prompt);
+  }
+
   Future<void> ask(String prompt) async {
     final text = prompt.trim();
     if (text.isEmpty || state.busy) return;
+    final run = ++_run;
+    bool live() => run == _run;
     state = AssistantState(busy: true, prompt: text);
-    void status(String s) => state = state.copyWith(status: s);
+    void status(String s) {
+      if (live()) state = state.copyWith(status: s);
+    }
+
+    LLMProvider? provider;
     try {
       var settings = await ref.read(aiSettingsProvider.future);
       final info = providerById(settings.provider);
       final key = await ref.read(apiKeyStoreProvider).read(provider: info.id);
       if (key == null && !info.keyOptional) {
-        state = AssistantState(
-          prompt: text,
-          error:
-              'Még nincs API-kulcs megadva ehhez: ${info.label}. Add meg a Beállításokban.',
-          errorNeedsSettings: true,
-        );
+        if (live()) {
+          state = AssistantState(
+            prompt: text,
+            error:
+                'Még nincs API-kulcs megadva ehhez: ${info.label}. Add meg a Beállításokban.',
+            errorNeedsSettings: true,
+          );
+        }
         return;
       }
-      final provider = ref.read(llmFactoryProvider)(
+      provider = ref.read(llmFactoryProvider)(
         LlmConfig(
           provider: info.id,
           apiKey: key ?? '',
@@ -195,6 +221,7 @@ class AssistantController extends Notifier<AssistantState> {
           baseUrl: info.id == 'custom' ? settings.customBaseUrl : null,
         ),
       );
+      _provider = provider;
       final settingsNotifier = ref.read(aiSettingsProvider.notifier);
       var model = settings.model;
       if (model == null || model.trim().isEmpty) {
@@ -207,6 +234,8 @@ class AssistantController extends Notifier<AssistantState> {
         settings = settings.copyWith(model: model);
         await settingsNotifier.change(settings);
       }
+      // "Mégse" during the preparations: nothing is sent at all
+      if (!live()) return;
       final service = AssistantService(
         now: ref.read(aiClockProvider),
         provider: provider,
@@ -221,13 +250,14 @@ class AssistantController extends Notifier<AssistantState> {
           sleepEndHour: settings.sleepEndHour,
         ),
       );
-      Future<AssistantOutcome> run(String m) =>
+      _service = service;
+      Future<AssistantOutcome> go(String m) =>
           service.ask(text, model: m, settings: settings, onStatus: status);
 
       AssistantOutcome outcome;
       String? notice;
       try {
-        outcome = await run(model);
+        outcome = await go(model);
       } on LlmRateLimit catch (first) {
         // Switching models only makes sense where one provider has several free
         // ones (Gemini); billing problems affect every model alike.
@@ -238,7 +268,7 @@ class AssistantController extends Notifier<AssistantState> {
         for (final cand in fallbackModels(await provider.listModels(), model)) {
           status('A(z) $model-hez nincs szabad keret, próbálom ezt: $cand…');
           try {
-            alt = await run(cand);
+            alt = await go(cand);
             used = cand;
             break;
           } on LlmRateLimit {
@@ -252,18 +282,24 @@ class AssistantController extends Notifier<AssistantState> {
         notice =
             'Átváltottam a(z) $used modellre, mert a(z) $model-hez nincs szabad ingyenes keret. A Beállításokban átállíthatod.';
       }
+      if (!live()) return;
+      final notes = [?notice, ?outcome.notice];
       state = AssistantState(
         prompt: text,
         outcome: outcome,
         selected: {for (var i = 0; i < outcome.items.length; i++) i},
-        notice: notice,
+        notice: notes.isEmpty ? null : notes.join(' '),
       );
+    } on LlmCancelled {
+      // cancel() has already put the page back
     } on LlmAuth catch (e) {
-      state = AssistantState(
-        prompt: text,
-        error: e.message,
-        errorNeedsSettings: true,
-      );
+      if (live()) {
+        state = AssistantState(
+          prompt: text,
+          error: e.message,
+          errorNeedsSettings: true,
+        );
+      }
     } on LlmRateLimit catch (e) {
       final advice = e.billing
           ? ' Tölts fel egyenleget a szolgáltatónál, vagy válassz másik szolgáltatót a Beállításokban (pl. Groq vagy Mistral).'
@@ -272,17 +308,27 @@ class AssistantController extends Notifier<AssistantState> {
           : e.daily
           ? ' Holnap újra működik, vagy válassz másik modellt a Beállításokban.'
           : ' Várj egy percet, és próbáld újra.';
-      state = AssistantState(
-        prompt: text,
-        error: '${e.message}$advice',
-        errorNeedsSettings: !e.transient,
-        errorDetail: e.detail.isEmpty ? null : e.detail,
-      );
+      if (live()) {
+        state = AssistantState(
+          prompt: text,
+          error: '${e.message}$advice',
+          errorNeedsSettings: !e.transient,
+          errorDetail: e.detail.isEmpty ? null : e.detail,
+        );
+      }
     } on LlmException catch (e) {
-      state = AssistantState(prompt: text, error: e.message);
+      if (live()) state = AssistantState(prompt: text, error: e.message);
     } catch (e) {
-      state = AssistantState(prompt: text, error: 'Váratlan hiba: $e');
+      if (live()) {
+        state = AssistantState(prompt: text, error: 'Váratlan hiba: $e');
+      }
     } finally {
+      // one connection per request, closed when it is over
+      provider?.close();
+      if (identical(_provider, provider)) {
+        _provider = null;
+        _service = null;
+      }
       ref.invalidate(aiUsageProvider);
     }
   }

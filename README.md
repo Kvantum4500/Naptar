@@ -53,4 +53,6 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 
 - **„A Google-bejelentkezés lejárt”:** koppints a „Belépés szükséges” gombra (az adat megvan, a függő módosítások utána feltöltődnek). Ha hetente ismétlődik: a Google Cloud OAuth-hozzájárulási képernyő „Testing” állapotban van, állítsd „In production”-re.
 - **A naptár egyik eseménye nem látszik, sárga/piros sáv jelzi:** az ismétlődési szabálya nem olvasható; a sáv „Részletek” gombjával egyszeri eseménnyé alakítható, vagy kijavítható a Google Naptárban.
+- **Az asszisztens „levágódott” vagy „túl nagy” üzenetet ad:** kérj kevesebb napot vagy tételt, rövidítsd a Kézikönyvet (Beállítások), vagy válassz másik modellt. A program a „túl nagy” esetben egyszer magától is próbál kisebb adattal.
+- **Az asszisztens sokáig tart:** a „Mégse” gombbal megszakíthatod (az oldal elhagyása is megszakítja); 90 másodperc után magától abbahagyja, szerverhibánál kétszer újra próbálja.
 - **Az asszisztens limitet jelez:** az ingyenes szintek percenkénti/napi tokenkerete kicsi (Groq: 8 000 token/perc); várj, vagy válts szolgáltatót a Beállításokban.

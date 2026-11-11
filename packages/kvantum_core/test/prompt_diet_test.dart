@@ -141,6 +141,52 @@ void main() {
     });
   });
 
+  group('the narrowed scope (one more try after "too big")', () {
+    final today = floating(2026, 5, 4);
+
+    test('a plan shrinks to a few days of events', () {
+      final wide = scopeFor('Tervezz edzést a jövő hétre', today);
+      expect(wide.days, 14);
+      expect(wide.canNarrow, isTrue);
+      final n = wide.narrowed();
+      expect(n.days, AskScope.narrowDays);
+      expect(n.events, isTrue);
+      expect([n.tasks, n.checkins, n.slots], [false, false, false]);
+      // already as small as it gets
+      expect(n.canNarrow, isFalse);
+      expect(n.narrowed().days, n.days);
+    });
+
+    test('the kind of request stays', () {
+      for (final q in [
+        'Tervezz edzést a jövő hétre',
+        'Töröld a holnapi edzést',
+        'Hogy állok a költségkerettel?',
+      ]) {
+        final wide = scopeFor(q, today);
+        expect(wide.narrowed().kind, wide.kind, reason: q);
+      }
+    });
+
+    test('a short request has nothing to shrink in its window', () {
+      const s = AskScope(
+        edit: true,
+        days: 2,
+        tasks: false,
+        checkins: false,
+        slots: false,
+      );
+      expect(s.canNarrow, isFalse);
+      expect(s.narrowed().days, 2);
+    });
+
+    test('a money question has nothing to shrink', () {
+      final money = scopeFor('Hogy állok a költségkerettel?', today);
+      expect(money.kind, PromptKind.money);
+      expect(money.canNarrow, isFalse);
+    });
+  });
+
   group('the system prompt by kind of request', () {
     String prompt(PromptKind k, {String hb = 'H'}) =>
         buildSystemPrompt(handbook: hb, rules: const PlanRules(), kind: k);
