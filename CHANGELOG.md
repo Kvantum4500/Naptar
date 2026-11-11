@@ -2,6 +2,38 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 2d. fázis – szabálymotor, pontosabb hatókör, helyi válaszok
+
+**A szabályokat a kód méri, nem a modell szava**
+- **Nehéz edzés = 60 perctől** (vagy ha a cím annak mondja: „nehéz”, „intenzív”, „HIIT” …; vagy a modell is annak jelzi). A „könnyű”, „nyújtás”, „mobilitás”, „séta” … című tétel mindig könnyű. Eddig a modell `hard` jelzése döntött, és egy „mindent könnyűnek” mondó modell kikapcsolta az energia-, a műszak- és a 48 órás szabályt.
+- **A műszak-puffer (8 óra)** minden 45 perces vagy hosszabb edzésre érvényes, nem csak a nehézre.
+- **A naptárban már lévő edzések** (gépelt vagy korábbi terv: „Gym”, „Calisthenics”, „Street Workout”, kajak, mászás, kerékpár, futás, úszás, „edzés” …) beleszámítanak a **heti plafonba** és a **48 órás szabályba**; a szabályellenőrzés a javaslat ISO-heteit és ±2 napját is megnézi. Az „other” fajta + egyértelmű edzéscím nem kerüli meg a plafont.
+- **Check-in nélküli nap = 3/5 feltételezés** (`PlanRules.assumedEnergy`): check-in csak mára és a múltra van, így a „check-in nélkül csak könnyű” szabály – a 60 perces nehézséggel együtt – minden jövő napot kizárt volna. A minimum emelésével (pl. 4) a szigorú viselkedés visszajön. *Ez szándékos változás: a hosszú edzés is javasolható check-in nélküli napra.*
+- **Alvás-ellenőrzés intervallum-átfedéssel:** a 22:00–08:00-s blokk (kezdése és vége ébren, közben végig alvás) eddig átcsúszott.
+- A szabálysértés visszajelzésében a modell által sosem látott, gépelt rövid esemény címe is „foglalt”.
+
+**Pontosabb hatókör (mit kap a modell a kérésből)**
+- Ékezet nélkül is érti („torold a holnapi edzest”); a tagadott ige nem kérés („ne töröld a fogorvost”); a hasonló szavak nem tévesztik meg (költözés, fizetésnap, törölköző, „mozgás”, keretrendszer).
+- A megnevezett nap szűkíti az ablakot: ma 1, holnap 2, holnapután 3 nap, hétvége a vasárnapig hátralévő; törlésnél / áthelyezésnél legalább 3 nap (14 helyett, ha csak napot nevez meg).
+- Ami nem tervezés és nem pénz („Mikor van a műszakom?”, „Szia”), csak az eseményeket kapja; szabad idősávot csak akkor, ha időpontot keres.
+- **Vegyes kérés** („töröld a holnapi edzést és tervezz újat”): az események hivatkozásokkal, mellé a feladatok, a check-in és a szabad idősávok; a rendszerprompt a tervezés jelmagyarázatát és a kemény szabályokat is megkapja, a Kézikönyv a tervezési fájlokat is.
+
+**Időjárás:** az előrejelzést 3 órára megjegyzi (ugyanarra a helyre, hosszra és helyi napra; két egyidejű kérés egy hálózati kérés; hiba nem marad meg), és az események, feladatok, szabad idősávok olvasásával egy időben kéri (eddig utánuk, sorban). A `get_weather` eszközt szándékosan nem építettem be: a szabadtéri tételeket a kód úgyis ellenőrzi az előrejelzés ellen, az eszköz minden tervkérésnél további tokeneket költene.
+
+**Helyi válaszok – nem kell hozzá kulcs, modell és token**
+- „Hogy állok a költségkerettel?” (és társai: „Mennyit költöttem?”, „Mennyi pénzem maradt?”, „Költségkeret” …): a hónap kiadása / bevétele / egyenlege, minden keret állapota a legrosszabbal kezdve, a keret nélküli kategóriák, a következő 14 nap esedékes tételei, a célok. A számok a modellnek menő pénzügyi blokk számai, így a kettő nem térhet el.
+- „Mi lesz holnap?” (ma / holnap / holnapután / a héten, „a mai napirendem”, „mit csinálok holnap” …): az nap eseményei időrendben (egész napos elöl, az előző napról átnyúló műszak jelölve), a határidős és a késésben lévő feladatok, az időjárás-sor.
+- Csak **ismert alakú, teljes mondat** számít helyinek (ékezet nélkül és köszönéssel is); bármi, ami többet kér, a modellhez megy. Az adat az eszközön van, ezért a megosztási kapcsolóktól függetlenül működik.
+- A kártya **„Helyi válasz, modell nélkül”** jelölést kap; alatta **„További kérdés” + „Kérdezd a modellt is”**: a kérdés a modellhez megy, a helyi válasz szövege adatblokként kíséri – de csak ha az érintett adat megosztása be van kapcsolva (költségkeret: pénzügy; napirend: események és feladatok), a gépelt rövid események címe ilyenkor is „foglalt”, a szöveg tisztítva és korlátozva megy.
+- Kikapcsolt forrásnál (pénzügyi kérdés kikapcsolt pénzügynél; törlés / áthelyezés kikapcsolt eseményeknél) nem megy el egy kérés csak azért, hogy a modell elmondja, nem engedett: a program rögtön magyarázza, mit kapcsolj be.
+- Új gyorsgomb: „Mi lesz holnap?”.
+
+Becsült kérésméretek (mintanaptár, 3 karakter = 1 token): tervezés a jövő hétre ≈ 2 970, tervezés holnapra ≈ 2 470, „Töröld a kézzel felvett programokat holnapra” ≈ 1 180 (volt ≈ 1 430), pénzügyi kérdés ≈ 460, vegyes kérés ≈ 3 250; a költségkeret kérdése 0 (helyi válasz).
+
+Tesztek: mag 335 (volt 226), app 627 (volt 588); a 33 szándékos elrontást mind elkapják.
+
+**Nem ellenőrizhető itt:** a modellek viselkedése a módosított szabályszöveggel (3/5 feltételezés, 60 perc, a vegyes kérés); a helyi válaszok mondat-lefedettsége a te megfogalmazásaiddal (ami nem ismert alak, az a modellhez megy, ez biztonságos irány); az új kártya kinézete valódi eszközön.
+
 ## 2c. fázis – átláthatóság: mit küld ki az asszisztens, és mennyibe kerül
 
 **Látod, mit küldünk, és mennyi az**

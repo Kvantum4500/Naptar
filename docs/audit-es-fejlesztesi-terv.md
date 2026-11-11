@@ -422,3 +422,18 @@ Tesztek: mag 226 (volt 220), app 588 (volt 540), az elemzők és a formázás ti
 | AI-22 | kész | a kérés ≤ 500 karakter (mező + szolgáltatás), a kérés szövege tisztítva megy |
 | AI-23 | 2d | a kikapcsolt forrás helyi válasza a 2d-ben |
 
+
+### 2d (szabálymotor, hatókör, helyi válaszok) – kész, a build után kipróbálandó
+
+Tesztek: mag 335 (volt 226), app 627 (volt 588), az elemzők és a formázás tiszták. 33 szándékos elrontás (a 60 perc nem nehéz, a könnyű cím nem könnyű, a műszak-puffer csak a nehézre, a check-in nélküli nap 0 energia, az alvás csak a kezdetet nézi, a heti plafon és a 48 óra nem számolja a naptárban lévőt, a tagadott ige is kérés, az ékezet nélküli kérés nem érthető, a költözés pénz, nincs vegyes kérés, a helyi felismerés túl tág, rossz összeg a költségkeretben, nincs időjárás-gyorsítótár, nem párhuzamos az előrejelzés, a helyi válasz a kapcsoló nélkül is a modellhez megy …) mindegyikét elkapják a tesztek.
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| AI-5 | kész, **döntéssel** | a nehézség kódból: 60 perctől (a „könnyű / nyújtás / mobilitás / séta” cím mindig könnyű; a modell `hard` jelzése egy szavazat); a műszak-puffer minden ≥ 45 perces edzésre. **Döntés:** check-in nélküli nap = 3/5 feltételezés (`PlanRules.assumedEnergy`) – a régi „check-in nélkül csak könnyű” a 60 perces nehézséggel minden jövő napot kizárt volna; a minimum emelésével visszajön |
+| AI-6 | kész | a naptárban lévő edzések (cím-alapú felismerés, a `kind` megkerülése ellen is) beleszámítanak a heti plafonba és a 48 órába; a lekérdezési ablak az ISO-hetekre és ±2 napra bővült |
+| AI-19 | részben | az alvás intervallum-átfedéssel; a műszakból levezetett alvás (éjszakás műszak után) nem készült el |
+| AI-14 | kész | `scopeFor` v2: ékezet nélkül, tagadás, hamis találatok (költözés, fizetésnap, törölköző, „mozgás”), megnevezett nap szűkíti az ablakot, a kérdés csak az eseményeket kapja, vegyes kérés (`AskScope.plan`). 60 mondatos táblázatos teszt |
+| AI-18 | kész, eltéréssel | előrejelzés-gyorsítótár (3 óra) + az adatbetöltéssel párhuzamos lekérés; **eltérés:** a `get_weather` eszköz nem készült el (a validátor kóddal úgyis ellenőrzi a szabadtéri tételeket, az eszköz minden tervkérésnél további tokeneket költene) |
+| AI-23 | kész | kikapcsolt forrásnál a program rögtön magyarázza, mit kapcsolj be (pénzügyi kérdés kikapcsolt pénzügynél; törlés / áthelyezés kikapcsolt eseményeknél) |
+| helyi válaszok | kész | költségkeret és napirend modell nélkül, teljes mondatra horgonyzott mintákkal; jelölt kártya + „További kérdés”; a helyi válasz szövege csak engedélyezett forrásnál kíséri a további kérdést |
+| AI-16 | nincs a 2d-ben | az újra-validálás + visszavonás a jóváhagyott 2d tervnek nem része; a 3. fázisban (UX-2 visszavonás) jön |
