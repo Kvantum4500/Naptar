@@ -2,6 +2,39 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 3a. fázis – kezelhetőség: alsó sáv, tiszta fejléc, hónap-pöttyök, billentyűparancsok, az ablak mérete
+
+**Navigáció (UX-1)**
+- **Öt cél az alsó sávban** (telefon) vagy az **oldalsínen** (760 px-től széles ablak): **Naptár · Feladatok · Asszisztens · Pénzügyek · Több**. A „Több” alulról felcsúszó lapot nyit a **Beosztás** és a **Beállítások** oldallal. Eddig a Feladatok, az Asszisztens, a Beosztás és a Beállítások a naptár fejlécében lévő ikonok voltak, keskeny képernyőn egy „Menü” mögött; a sáv csak a Naptárt és a Pénzügyeket tartalmazta.
+- **A négy fő oldal életben marad váltáskor:** a naptár nézete, hónapja és görgetési helye megmarad; az oldalak az első megnyitáskor épülnek (nem indításkor). Amelyik nem látszik, az nem kap billentyűfókuszt, és nem futtat animációt.
+- **Vissza** (Android vissza-gomb vagy -gesztus): bármely oldalról a Naptárra visz, onnan lép ki az alkalmazásból.
+- **Az Asszisztens fülről való váltás megszakítja a futó kérést** (eddig ezt az oldal elhagyása tette: senki nem várja a választ, a kérés csak tokent fogyasztana). Ha az éppen látszó fület választod újra, nem szakad meg.
+- A naptár fejléce kitisztult: nézetváltó, előző, Ma, következő, szinkron-gomb.
+
+**Fejléc és hónapnézet** (a saját telefonos képernyőképeid alapján)
+- **A hónap címe nem vágódik le többé** („202…”): 400 px alatt rövid alak áll („2026. nov.”), és ha a gombok mellett az sem fér, **kisebbre skálázódik**; sosem lóg rá a gombokra.
+- **A szinkron-gomb koppintási célja legalább 48 × 48 px** (eddig kb. 34 px magas volt).
+- **Keskeny hónap-cellában színes pöttyök** a levágott szöveges sávok helyett („18:0…”, „+2 tov…”): naponta legfeljebb 4 pötty (ha több esemény van: 3 pötty + „+N”); a kiválasztott nap eseményeit a rács alatti napi lista nevesíti. 64 px-nél szélesebb cellában szöveges sáv áll, az idő a cím előtt csak 92 px-es cellától látszik. Ha egy cella a tartalmához túl alacsony (kis ablak, nagy betű), a tartalom **levágódik, nem lóg ki**, és nincs túlcsordulási hiba.
+
+**Billentyűparancsok (UX-4)** – Windows, billentyűzetes táblagép
+- A naptár oldalon: **N** új esemény · **T** ugrás a mai napra · **← →** előző / következő hónap, hét vagy nap (a nézet szerint) · **1 2 3** hónap / hét / nap nézet · **F5** szinkron most · **F1** vagy **?** súgó. A szerkesztőben a **Ctrl+S** (mentés) és az **Esc** (bezárás) változatlan.
+- **Gépelés közben egyik sem indul el** (egy „n” betű a címben nem nyit új szerkesztőt), és megnyitott párbeszéd mögött sem. Átváltáskor a naptár visszakapja a billentyűfókuszt, így kattintás nélkül működnek.
+- A súgó (a parancsok listája) a **Beállítások → A program → Billentyűparancsok** gombbal is elérhető. (A keresés billentyűje, a Ctrl+F és a „4” a Napirend nézethez a 3c-ben jön.)
+
+**Egységes töréspontok (CMP-7)**
+- Eddig három fájlban szétszórt számok (760 / 820 / 900 / 1000 px) döntöttek az elrendezésről; most egy helyen vannak (`ui/breakpoints.dart`): sín 760, teljes vezérlők 820, oldalpanel 900, rövid cím 400, pöttyös cella 64. Az eseményszerkesztő párbeszéd/oldal küszöbe ugyanaz a 760. Az 1000 px-es „Menü”-küszöb a menüvel együtt megszűnt.
+
+**Windows ablak (UX-10)**
+- **Legkisebb méret 480 × 640** logikai pixel (a képernyő DPI-jéhez skálázva, de sosem nagyobb, mint amennyi a képernyőből látszik). Eddig tetszőlegesen kicsire lehetett húzni.
+- **Az ablak mérete, helye és „maximalizált” állapota megmarad** a következő indításra (`HKEY_CURRENT_USER\Software\KvantumNaptar`, `WindowState`). Ha a mentett hely már nem fér rá a képernyőre (lecsatlakoztatott monitor, másik felbontás), a legközelebbi képernyő munkaterületére igazodik. Első indításkor a szokásos 1280 × 720.
+- **Csak fordításig ellenőrizhető:** a C++ kódot itt nem futtattam (a mingw-fordító szintaxis- és figyelmeztetés-ellenőrzése tiszta; az éles fordítás a Windows-build).
+
+Tesztek: app 1172 (volt 1121), mag 459, az elemzők és a formázás tiszták; a Flutter 3.50.0-n is zöld. 53 szándékos elrontást (rossz töréspont-érték, a „Több” rossz helye, hiányzó `PopScope`, fókuszt vagy animációt tartó rejtett oldal, a megszakítás elmaradása fülváltáskor, gépelés közben induló parancs, felcserélt nyilak és számok, hiányzó F5/F1/?, a súgó hiányos listája, a cím rövidítése és skálázása, a pöttyök küszöbe és darabszáma, a levágás helyett kilógó tartalom, a 48 px-es koppintási cél, a szerkesztő párbeszéd-küszöbe, az oldalpanel küszöbe) mind elkapnak a tesztek; a próba három hiányt hozott felszínre (az oldalpanel küszöbe, a pöttyök színe, a cellák levágása), ezekhez új teszt készült.
+
+**Szándékos eltérések a tervtől:** a „Több” mindkét elrendezésben lap (nem külön felugró menü a sínen); a pöttyök legfeljebb 4 (nem 3); a visszavonás üzenetsávja (3b) a közös üzenetkezelőn jelenik meg a gomb fölött, nem fülenként; a húzással áthelyezés, amelyet kértél kihagyni, nincs.
+
+**Nem ellenőrizhető itt:** az érintés- és húzásérzet, a sáv / sín és a pöttyök tényleges kinézete valódi eszközön (a tesztek az Ahem betűtípussal futnak, amelyben minden betű négyzet, tehát a szélességek pesszimisták); a billentyűparancsok valódi Windowson; a Windows ablak minimális mérete és megjegyzett helye több monitoron, eltérő DPI-n és felső / bal oldali tálcával; a képernyőolvasók (Narrator, TalkBack) – ezek a 3d-ben jönnek.
+
 ## 1c. fázis – látni, mi romlott el: hibanapló, Diagnosztika oldal, magyar hibaüzenetek
 
 **Hibanapló (REL-22)**
