@@ -10,6 +10,8 @@ import 'day_utils.dart';
 import 'event_editor.dart' show openEditor;
 import 'format.dart';
 import 'shift_ops.dart';
+import '../diag/diag_log.dart';
+import '../sync/error_catalog.dart';
 
 enum ShiftType { night, day, off }
 
@@ -168,8 +170,11 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
         () => _msg =
             '$created műszak létrehozva${removed > 0 ? ', $removed korábbi generált műszak cseréjével' : ''}.',
       );
-    } catch (e) {
-      if (mounted) setState(() => _msg = 'Nem sikerült: $e');
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'shift.generate_failed', e, st);
+      if (mounted) {
+        setState(() => _msg = 'Nem sikerült: ${errorInfoFor(e).text}');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

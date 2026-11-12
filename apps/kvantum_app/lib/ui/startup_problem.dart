@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../data/db_open.dart';
+import '../sync/error_catalog.dart';
 
 /// Shown instead of the app when the database must not be opened: an
 /// explanation instead of a blank screen, and nothing is touched.
@@ -14,7 +15,7 @@ class StartupProblemApp extends StatelessWidget {
   String get _message => switch (problem) {
     NewerDatabaseError e => e.message,
     UnreadableDatabaseError e => e.message,
-    _ => 'Az adatbázist nem sikerült megnyitni: $problem',
+    _ => 'Az adatbázist nem sikerült megnyitni. ${errorInfoFor(problem).text}',
   };
 
   @override

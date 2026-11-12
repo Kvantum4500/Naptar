@@ -30,7 +30,10 @@ final googleConfiguredProvider = Provider<bool>(
   (_) => GoogleConfig.isConfigured,
 );
 final authGatewayProvider = Provider<AuthGateway>(
-  (_) => GoogleAuthService(SecureCredentialStore()),
+  (ref) => GoogleAuthService(
+    SecureCredentialStore(),
+    log: ref.read(diagLogProvider),
+  ),
 );
 final driveFactoryProvider = Provider<DriveRemote Function(http.Client)>(
   (_) =>

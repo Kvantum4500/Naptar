@@ -6,7 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// File access for the backup, behind an interface so tests need no dialogs.
 abstract class BackupIo {
   /// Lets the user choose where to save [text]. Returns false when cancelled.
-  Future<bool> save(String fileName, String text);
+  /// [mimeType] and [dialogTitle] say what kind of file it is: a calendar
+  /// (.ics) by default, plain text for a diagnostics report.
+  Future<bool> save(
+    String fileName,
+    String text, {
+    String mimeType = 'text/calendar',
+    String dialogTitle = 'Naptár mentése',
+  });
 
   /// Lets the user choose a file; null when cancelled.
   Future<String?> pick();
@@ -16,12 +23,17 @@ class FilePickerBackupIo implements BackupIo {
   const FilePickerBackupIo();
 
   @override
-  Future<bool> save(String fileName, String text) async {
+  Future<bool> save(
+    String fileName,
+    String text, {
+    String mimeType = 'text/calendar',
+    String dialogTitle = 'Naptár mentése',
+  }) async {
     final uri = await FilePicker.saveFile(
       fileName: fileName,
       bytes: utf8.encode(text),
-      mimeType: 'text/calendar',
-      dialogTitle: 'Naptár mentése',
+      mimeType: mimeType,
+      dialogTitle: dialogTitle,
     );
     return uri != null;
   }

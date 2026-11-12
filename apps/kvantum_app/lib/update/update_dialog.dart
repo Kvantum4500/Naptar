@@ -11,6 +11,8 @@ import 'package:path_provider/path_provider.dart';
 import '../providers.dart' show repoProvider;
 import 'update_config.dart';
 import 'update_service.dart';
+import '../diag/diag_log.dart';
+import '../sync/error_catalog.dart';
 
 /// Build number of the running app (the CI passes --build-number).
 final currentBuildProvider = FutureProvider<int>((ref) async {
@@ -92,7 +94,8 @@ class PlatformUpdateInstaller implements UpdateInstaller {
         await launchNewApp(File(p.join(installDir.path, exeName)));
       } catch (e) {
         logUpdate('launch failed: $e');
-        return 'A frissítés telepítve, de az új verzió nem indult el ($e). Indítsd el kézzel a programot.';
+        return 'A frissítés telepítve, de az új verzió nem indult el. Indítsd '
+            'el kézzel a programot. Napló: $updateLogPath';
       }
       exit(0);
     }
@@ -198,13 +201,23 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       if (mounted) setState(() => _message = msg);
     } on HttpException catch (e) {
       if (mounted) setState(() => _message = e.message);
-    } on FormatException catch (e) {
+    } on FormatException catch (e, st) {
+      logUpdate('package unusable: ${e.message}');
+      ref.read(diagLogProvider).error('update', 'package.unusable', e, st);
       if (mounted) {
-        setState(() => _message = 'A csomag nem használható: ${e.message}');
+        setState(
+          () => _message =
+              'A letöltött csomag nem használható (hibás vagy sérült). '
+              'Próbáld újra.',
+        );
       }
-    } catch (e) {
+    } catch (e, st) {
+      logUpdate('update failed: $e');
+      ref.read(diagLogProvider).error('update', 'install.failed', e, st);
       if (mounted) {
-        setState(() => _message = 'A frissítés nem sikerült: $e');
+        setState(
+          () => _message = 'A frissítés nem sikerült: ${errorInfoFor(e).title}',
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../sync/timeout_client.dart';
+import '../diag/diag_log.dart';
 
 /// OAuth client values come from `--dart-define-from-file=secrets.json`
 /// (git-ignored). They never live in the repository.
@@ -92,8 +93,9 @@ class SignInException implements Exception {
 }
 
 class GoogleAuthService implements AuthGateway {
-  GoogleAuthService(this._store);
+  GoogleAuthService(this._store, {this._log});
   final CredentialStore _store;
+  final DiagLog? _log;
   AutoRefreshingAuthClient? _client;
   http.Client? _base;
   StreamSubscription<AccessCredentials>? _sub;
@@ -106,8 +108,12 @@ class GoogleAuthService implements AuthGateway {
 
   @override
   Future<http.Client?> restore() async {
-    final creds = decodeCredentials(await _store.read());
-    if (creds == null || creds.refreshToken == null) return null;
+    final saved = await _store.read();
+    final creds = decodeCredentials(saved);
+    if (creds == null || creds.refreshToken == null) {
+      if (saved != null) _log?.info('auth', 'credentials.unreadable');
+      return null;
+    }
     final base = TimeoutClient(http.Client());
     return _adopt(autoRefreshingClient(_id, creds, base), base);
   }
@@ -157,7 +163,12 @@ class GoogleAuthService implements AuthGateway {
     _client = c;
     // Persist refreshed access tokens so a restart does not need a new login.
     _sub = c.credentialUpdates.listen(
-      (u) => _store.write(encodeCredentials(u)),
+      (u) => _store
+          .write(encodeCredentials(u))
+          .catchError(
+            (Object e, StackTrace st) =>
+                _log?.error('auth', 'credentials.save_failed', e, st),
+          ),
     );
     return c;
   }

@@ -494,7 +494,11 @@ void main() {
     testWidgets('no token explains what is missing', (tester) async {
       await tester.pumpWidget(host(service((_) async => _json({}), token: '')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('UPDATE_TOKEN'), findsOneWidget);
+      expect(
+        find.textContaining('nincs beállítva a frissítés'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('UPDATE_TOKEN'), findsNothing);
     });
 
     testWidgets('expired token has its own message', (tester) async {

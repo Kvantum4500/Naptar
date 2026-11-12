@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:kvantum_app/diag/diag_snapshot.dart';
 import 'package:kvantum_app/sync/remote.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
+import 'package:kvantum_app/ui/diagnostics_page.dart';
 import 'package:kvantum_app/ui/sync_status.dart';
 import 'package:kvantum_app/update/update_dialog.dart'
     show currentBuildProvider;
@@ -51,7 +54,12 @@ SyncState _state({
   error: error,
 );
 
-Future<_Ctl> _pump(WidgetTester tester, SyncState s, {int events = 7}) async {
+Future<_Ctl> _pump(
+  WidgetTester tester,
+  SyncState s, {
+  int events = 7,
+  List<Override> extra = const [],
+}) async {
   final ctl = _Ctl(s, events: events);
   tester.view.physicalSize = const Size(900, 900);
   tester.view.devicePixelRatio = 1;
@@ -61,6 +69,7 @@ Future<_Ctl> _pump(WidgetTester tester, SyncState s, {int events = 7}) async {
       overrides: [
         syncControllerProvider.overrideWith(() => ctl),
         currentBuildProvider.overrideWith((ref) async => 54),
+        ...extra,
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -83,10 +92,57 @@ Future<void> _openMenu(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+DiagSnapshot _snapshot() => DiagSnapshot(
+  at: DateTime(2026, 11, 12, 14, 30),
+  build: 54,
+  platform: 'windows',
+  schema: 4,
+  dbBytes: null,
+  counts: const {},
+  signedIn: true,
+  pending: 0,
+  parked: 0,
+  nextAttempt: null,
+  needsDecision: false,
+  channels: const {},
+  failed: const [],
+  requests: const {},
+  warnings: const [],
+  log: const [],
+);
+
 void main() {
   setUpAll(() => initializeDateFormatting('hu'));
 
   group('the menu', () {
+    testWidgets('"Diagnosztika" opens the diagnostics page', (tester) async {
+      await _pump(
+        tester,
+        _state(),
+        extra: [diagSnapshotProvider.overrideWith((ref) async => _snapshot())],
+      );
+      await _openMenu(tester);
+      await tester.tap(find.text('Diagnosztika'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DiagnosticsPage), findsOneWidget);
+      expect(find.text('Verzió: build 54'), findsOneWidget);
+    });
+
+    testWidgets('without Google the help speaks plainly, not in file names', (
+      tester,
+    ) async {
+      await _pump(tester, const SyncState());
+      await tester.tap(find.text('Nincs Google'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nincs Google-hozzáférés'), findsOneWidget);
+      expect(
+        find.textContaining('nincs beállítva a Google-bejelentkezés'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('secrets.json'), findsNothing);
+      expect(find.textContaining('flutter run'), findsNothing);
+    });
+
     testWidgets('"Szinkron most" is a manual sync', (tester) async {
       final ctl = await _pump(tester, _state());
       await _openMenu(tester);

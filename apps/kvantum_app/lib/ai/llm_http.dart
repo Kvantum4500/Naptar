@@ -21,12 +21,12 @@ Future<http.Response> sendGuarded(
     return await call().timeout(timeout);
   } on TimeoutException {
     throw const LlmNetwork('A modell nem válaszolt időben.', timeout: true);
-  } on SocketException catch (e) {
-    throw LlmNetwork('Nincs kapcsolat: ${e.message}');
-  } on http.ClientException catch (e) {
-    throw LlmNetwork('Nincs kapcsolat: ${e.message}');
-  } on IOException catch (e) {
-    throw LlmNetwork('Nincs kapcsolat: $e');
+  } on SocketException {
+    throw const LlmNetwork('Nincs kapcsolat a szolgáltatással.');
+  } on http.ClientException {
+    throw const LlmNetwork('Nincs kapcsolat a szolgáltatással.');
+  } on IOException {
+    throw const LlmNetwork('Nincs kapcsolat a szolgáltatással.');
   }
 }
 

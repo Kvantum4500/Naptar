@@ -6,6 +6,7 @@ import '../sync/sync_controller.dart';
 
 import 'finance/finance_page.dart';
 import 'home_page.dart';
+import '../diag/diag_log.dart';
 
 /// The two top-level tabs: the calendar and the money pages. Both stay alive
 /// while switching, so the calendar keeps its view and scroll position.
@@ -52,8 +53,9 @@ class _RootShellState extends ConsumerState<RootShell>
       if (report != null && report.requeued > 0 && mounted) {
         ref.read(syncControllerProvider.notifier).requestSync();
       }
-    } catch (_) {
+    } catch (e, st) {
       // upkeep is a convenience; never let it disturb the app
+      ref.read(diagLogProvider).error('app', 'housekeeping.failed', e, st);
     }
   }
 
@@ -61,8 +63,9 @@ class _RootShellState extends ConsumerState<RootShell>
   Future<void> _collectWallet() async {
     try {
       await ref.read(walletIngestProvider).run();
-    } catch (_) {
+    } catch (e, st) {
       // never let a notification problem disturb the app
+      ref.read(diagLogProvider).error('app', 'wallet.ingest_failed', e, st);
     }
   }
 

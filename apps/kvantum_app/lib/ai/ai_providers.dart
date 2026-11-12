@@ -17,6 +17,8 @@ import 'handbook_store.dart';
 import 'llm_provider.dart';
 import 'location_service.dart';
 import 'weather_service.dart';
+import '../diag/diag_log.dart';
+import '../sync/error_catalog.dart';
 
 final apiKeyStoreProvider = Provider<ApiKeyStore>((_) => SecureApiKeyStore());
 
@@ -383,9 +385,10 @@ class AssistantController extends Notifier<AssistantState> {
       }
     } on LlmException catch (e) {
       if (live()) state = AssistantState(prompt: text, error: e.message);
-    } catch (e) {
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ai', 'ask.failed', e, st);
       if (live()) {
-        state = AssistantState(prompt: text, error: 'Váratlan hiba: $e');
+        state = AssistantState(prompt: text, error: errorInfoFor(e).text);
       }
     } finally {
       // one connection per request, closed when it is over

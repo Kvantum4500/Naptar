@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../diag/diag_log.dart';
+
 /// One notification captured from the Wallet app.
 class WalletNotification {
   const WalletNotification({
@@ -41,8 +43,10 @@ abstract class WalletBridge {
 }
 
 class ChannelWalletBridge implements WalletBridge {
-  ChannelWalletBridge() : _ch = const MethodChannel('kvantum/wallet');
+  ChannelWalletBridge({this._log})
+    : _ch = const MethodChannel('kvantum/wallet');
   final MethodChannel _ch;
+  final DiagLog? _log;
 
   @override
   bool get supported => Platform.isAndroid;
@@ -51,7 +55,8 @@ class ChannelWalletBridge implements WalletBridge {
     if (!supported) return null;
     try {
       return await _ch.invokeMethod<T>(method);
-    } on PlatformException {
+    } on PlatformException catch (e, st) {
+      _log?.error('wallet', 'channel.$method', e, st);
       return null;
     } on MissingPluginException {
       return null;
@@ -77,8 +82,9 @@ class ChannelWalletBridge implements WalletBridge {
               timeMs: (o['time'] as num).toInt(),
             ),
       ];
-    } on FormatException {
+    } on FormatException catch (e, st) {
       // an unreadable queue would come back forever: drop it
+      _log?.error('wallet', 'queue.dropped', e, st);
       await ack();
       return const [];
     }

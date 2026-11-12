@@ -48,6 +48,10 @@ class SyncReport {
 /// with.
 const syncBindingKey = 'sync.binding';
 
+/// How many times Google may refuse one upload before it is given up on (it
+/// then waits for a manual retry or an edit).
+const maxUploadAttempts = 5;
+
 /// Pull -> apply -> push. Local pending edits win over remote edits of the
 /// same event (their etag is adopted so the push does not conflict); this is
 /// reported in [SyncReport.localWonConflicts].
@@ -62,7 +66,7 @@ class SyncEngine {
     this.repo,
     this.remote, {
     Uuid? uuid,
-    this.maxAttempts = 5,
+    this.maxAttempts = maxUploadAttempts,
     this.maxPushPerRun = 150,
     this.pace = Duration.zero,
     this._log,

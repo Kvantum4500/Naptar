@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../providers.dart';
 import '../ui/day_utils.dart';
+import '../diag/diag_log.dart';
 
 /// What the user wants to be reminded of. Everything is off by default.
 class ReminderSettings {
@@ -391,8 +392,9 @@ final reminderSyncProvider = Provider<void>((ref) {
               checkedInDays: done,
             ),
           );
-        } catch (_) {
+        } catch (e, st) {
           // reminders are a convenience; never break the app because of them
+          ref.read(diagLogProvider).error('app', 'reminders.failed', e, st);
         }
       });
     },

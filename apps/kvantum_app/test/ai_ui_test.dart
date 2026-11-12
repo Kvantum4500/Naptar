@@ -23,6 +23,7 @@ import 'package:kvantum_app/data/backup_ops.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/ui/backup_io.dart';
+import 'package:kvantum_app/ui/diagnostics_page.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -571,6 +572,24 @@ void main() {
   });
 
   group('settings page', () {
+    testWidgets('the program section opens the Diagnostics page', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      final open = find.byKey(const Key('open-diagnostics'));
+      await tester.scrollUntilVisible(
+        open,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(open);
+      await tester.pumpAndSettle();
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+      expect(find.byType(DiagnosticsPage), findsOneWidget);
+      expect(find.text('Figyelmeztetések'), findsOneWidget);
+    });
+
     testWidgets(
       'a good key is checked against the model list, saved, and a default model is chosen',
       (tester) async {
@@ -2261,7 +2280,12 @@ class _MemoryIo implements BackupIo {
   String? toPick;
 
   @override
-  Future<bool> save(String fileName, String text) async {
+  Future<bool> save(
+    String fileName,
+    String text, {
+    String mimeType = 'text/calendar',
+    String dialogTitle = 'Naptár mentése',
+  }) async {
     saved = text;
     return true;
   }

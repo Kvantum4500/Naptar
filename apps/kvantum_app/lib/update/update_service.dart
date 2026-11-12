@@ -8,6 +8,8 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../sync/error_catalog.dart';
+
 /// One downloadable file of a GitHub release.
 class ReleaseAsset {
   const ReleaseAsset(this.name, this.apiUrl, this.size);
@@ -112,7 +114,8 @@ class UpdateService {
     if (token.isEmpty) {
       return const UpdateFailed(
         UpdateErrorKind.notConfigured,
-        'Ebben a buildben nincs frissítési token (UPDATE_TOKEN), ezért nem lehet frissíteni.',
+        'Ebben a buildben nincs beállítva a frissítés, ezért itt nem lehet '
+        'frissíteni. Telepítsd a legújabb csomagot a kiadások oldaláról.',
       );
     }
     if (platform == UpdatePlatform.other) {
@@ -133,15 +136,15 @@ class UpdateService {
             headers: {..._auth, 'Accept': 'application/vnd.github+json'},
           )
           .timeout(const Duration(seconds: 20));
-    } on SocketException catch (e) {
-      return UpdateFailed(
+    } on SocketException {
+      return const UpdateFailed(
         UpdateErrorKind.network,
-        'Nincs kapcsolat: ${e.message}',
+        'Nincs kapcsolat a GitHubbal.',
       );
-    } on http.ClientException catch (e) {
-      return UpdateFailed(
+    } on http.ClientException {
+      return const UpdateFailed(
         UpdateErrorKind.network,
-        'Nincs kapcsolat: ${e.message}',
+        'Nincs kapcsolat a GitHubbal.',
       );
     } on TimeoutException {
       return const UpdateFailed(
@@ -152,13 +155,15 @@ class UpdateService {
     if (res.statusCode == 401 || res.statusCode == 403) {
       return const UpdateFailed(
         UpdateErrorKind.badToken,
-        'A frissítési token érvénytelen vagy lejárt. Hozz létre újat, és építs új verziót.',
+        'A frissítés hozzáférési kulcsa érvénytelen vagy lejárt. Új kulcsot '
+        'kell létrehozni a GitHubon, és új verziót építeni vele.',
       );
     }
     if (res.statusCode == 404) {
       return const UpdateFailed(
         UpdateErrorKind.noRelease,
-        'Még nincs kiadott verzió (vagy a token nem éri el a tárolót).',
+        'Még nincs kiadott verzió (vagy a hozzáférési kulcs nem éri el a '
+        'tárolót).',
       );
     }
     if (res.statusCode != 200) {
@@ -184,7 +189,8 @@ class UpdateService {
       if (best == null) {
         return const UpdateFailed(
           UpdateErrorKind.noRelease,
-          'Még nincs kiadott verzió (vagy a token nem éri el a tárolót).',
+          'Még nincs kiadott verzió (vagy a hozzáférési kulcs nem éri el a '
+          'tárolót).',
         );
       }
       json = best;
@@ -444,7 +450,7 @@ SwapResult applyUpdateFiles({
     log?.call('FAILED, rolled back: $e');
     throw UpdateSwapException(
       'A csere nem sikerült, a régi verzió érintetlen maradt: '
-      '${e is FileSystemException ? '${e.message} (${e.path})' : e}',
+      '${errorInfoFor(e).text}',
     );
   }
   return SwapResult(replaced: replaced, unchanged: unchanged);

@@ -52,7 +52,7 @@ final finDepositsProvider = StreamProvider<List<FinDeposit>>(
 );
 
 final walletBridgeProvider = Provider<WalletBridge>(
-  (_) => ChannelWalletBridge(),
+  (ref) => ChannelWalletBridge(log: ref.read(diagLogProvider)),
 );
 
 final walletIngestProvider = Provider<WalletIngest>(

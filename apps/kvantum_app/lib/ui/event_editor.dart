@@ -11,6 +11,8 @@ import 'day_utils.dart';
 import 'format.dart';
 import 'palette.dart';
 import 'repeat_editor.dart';
+import '../diag/diag_log.dart';
+import '../sync/error_catalog.dart';
 
 const calendarIdLocal = kNaptarCalendar;
 
@@ -357,8 +359,11 @@ class _EventEditorState extends ConsumerState<EventEditor> {
       }
       ref.read(syncControllerProvider.notifier).requestSync();
       if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Mentés sikertelen: $e');
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'event.save_failed', e, st);
+      if (mounted) {
+        setState(() => _error = 'Mentés sikertelen: ${errorInfoFor(e).text}');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

@@ -19,6 +19,9 @@ import 'endpoint_policy.dart';
 import 'handbook_page.dart';
 import 'llm_provider.dart';
 import 'provider_catalog.dart';
+import '../diag/diag_log.dart';
+import '../sync/error_catalog.dart';
+import '../ui/diagnostics_page.dart';
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -152,8 +155,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       );
     } on LlmException catch (e) {
       _say(e.message, error: true);
-    } catch (e) {
-      _say('Az ellenőrzés nem sikerült: $e', error: true);
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'settings.check_failed', e, st);
+      _say('Az ellenőrzés nem sikerült: ${errorInfoFor(e).text}', error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -235,8 +239,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           'naptar-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.ics';
       final ok = await ref.read(backupIoProvider).save(name, text);
       if (ok) _toast('A naptár elmentve.');
-    } catch (e) {
-      _toast('A mentés nem sikerült: $e', error: true);
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'settings.save_failed', e, st);
+      _toast('A mentés nem sikerült: ${errorInfoFor(e).text}', error: true);
     }
   }
 
@@ -248,8 +253,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           'penzugyek-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.json';
       final ok = await ref.read(backupIoProvider).save(name, text);
       if (ok) _toast('A pénzügyi adatok elmentve.');
-    } catch (e) {
-      _toast('A mentés nem sikerült: $e', error: true);
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'settings.save_failed', e, st);
+      _toast('A mentés nem sikerült: ${errorInfoFor(e).text}', error: true);
     }
   }
 
@@ -278,8 +284,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             : 'Nincs mit visszaállítani: minden adat naprakész.',
         error: !any && r.skipped > 0,
       );
-    } catch (e) {
-      _toast('A visszaállítás nem sikerült: $e', error: true);
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'settings.restore_failed', e, st);
+      _toast(
+        'A visszaállítás nem sikerült: ${errorInfoFor(e).text}',
+        error: true,
+      );
     }
   }
 
@@ -315,8 +325,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             : 'Visszaállítva: ${r.added} új, ${r.updated} frissítve, ${r.unchanged} változatlan.$kept$extra',
         error: nothing,
       );
-    } catch (e) {
-      _toast('A visszaállítás nem sikerült: $e', error: true);
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ui', 'settings.restore_failed', e, st);
+      _toast(
+        'A visszaállítás nem sikerült: ${errorInfoFor(e).text}',
+        error: true,
+      );
     }
   }
 
@@ -800,6 +814,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onPressed: () => showUpdateDialog(context, ref),
                   icon: const Icon(Icons.system_update_alt),
                   label: const Text('Frissítés keresése'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('open-diagnostics'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiagnosticsPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.monitor_heart_outlined),
+                  label: const Text('Diagnosztika'),
                 ),
               ]),
             ],

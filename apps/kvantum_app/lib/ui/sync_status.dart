@@ -6,6 +6,7 @@ import '../sync/remote.dart' show SyncBindingMismatch;
 import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart' show currentBuildProvider;
 import 'format.dart';
+import 'diagnostics_page.dart';
 
 /// Always-visible sync indicator in the app bar, with a details menu.
 class SyncStatusButton extends ConsumerWidget {
@@ -28,13 +29,14 @@ class SyncStatusButton extends ConsumerWidget {
     if (!s.configured) {
       void help() => _info(
         context,
-        'Google nincs beállítva',
-        'Add meg a GOOGLE_CLIENT_ID és GOOGLE_CLIENT_SECRET értéket a secrets.json fájlban, '
-            'és indítsd így:\nflutter run --dart-define-from-file=secrets.json',
+        'Nincs Google-hozzáférés',
+        'Ebben a buildben nincs beállítva a Google-bejelentkezés, ezért a '
+            'naptár és a Drive szinkronja nem érhető el. A kiadott csomagban '
+            'ez be van állítva: azt telepítsd.',
       );
       return compact
           ? IconButton(
-              tooltip: 'Google nincs beállítva',
+              tooltip: 'Nincs Google-hozzáférés',
               onPressed: help,
               icon: const Icon(Icons.cloud_off_outlined),
             )
@@ -110,6 +112,10 @@ class SyncStatusButton extends ConsumerWidget {
             showBindingDialog(context, ref, s.mismatch!);
           case 'reset':
             showResetDialog(context, ref);
+          case 'diag':
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const DiagnosticsPage()),
+            );
           case 'details':
             () async {
               final build = await ref.read(currentBuildProvider.future);
@@ -142,6 +148,7 @@ class SyncStatusButton extends ConsumerWidget {
           ),
         const PopupMenuItem(value: 'sync', child: Text('Szinkron most')),
         const PopupMenuItem(value: 'details', child: Text('Részletek')),
+        const PopupMenuItem(value: 'diag', child: Text('Diagnosztika')),
         const PopupMenuItem(
           value: 'reset',
           child: Text('Szinkron alaphelyzetbe…'),
