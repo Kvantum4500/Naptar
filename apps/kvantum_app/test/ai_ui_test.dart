@@ -572,6 +572,30 @@ void main() {
   });
 
   group('settings page', () {
+    testWidgets('the program section lists the keyboard shortcuts', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      final open = find.byKey(const Key('open-shortcuts'));
+      await tester.scrollUntilVisible(
+        open,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(open);
+      await tester.pumpAndSettle();
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Billentyűparancsok'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Új esemény'), findsOneWidget);
+    });
+
     testWidgets('the program section opens the Diagnostics page', (
       tester,
     ) async {

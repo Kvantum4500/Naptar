@@ -37,6 +37,139 @@ int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
 }
 
+// The smallest window the calendar can be used in (logical pixels; scaled by
+// the screen the window is on).
+constexpr int kMinWindowWidth = 480;
+constexpr int kMinWindowHeight = 640;
+
+// Where the window's place is kept between runs (current user only).
+constexpr const wchar_t kPlacementRegKey[] = L"Software\\KvantumNaptar";
+constexpr const wchar_t kPlacementRegValue[] = L"WindowState";
+
+// What is kept of the window between runs: where it is when it is not
+// maximised (screen coordinates), and whether it was maximised.
+struct SavedWindow {
+  RECT rect;
+  DWORD maximized;
+};
+
+// The part of a screen a window can use (the screen without the taskbar).
+bool WorkAreaOf(HMONITOR monitor, RECT* work) {
+  MONITORINFO info = {};
+  info.cbSize = static_cast<DWORD>(sizeof(info));
+  if (!GetMonitorInfo(monitor, &info)) {
+    return false;
+  }
+  *work = info.rcWork;
+  return true;
+}
+
+// The smallest size the calendar can be used at on [monitor]: the minimum
+// scaled to its resolution, but never more than the screen can show.
+void MinWindowSize(HMONITOR monitor, LONG* width, LONG* height) {
+  const double scale_factor = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+  *width = Scale(kMinWindowWidth, scale_factor);
+  *height = Scale(kMinWindowHeight, scale_factor);
+  RECT work = {};
+  if (WorkAreaOf(monitor, &work)) {
+    if (*width > work.right - work.left) {
+      *width = work.right - work.left;
+    }
+    if (*height > work.bottom - work.top) {
+      *height = work.bottom - work.top;
+    }
+  }
+}
+
+// Moves and trims [rect] so that it lies inside the work area of the screen
+// nearest to it, and is not smaller than the minimum: a screen may have been
+// unplugged or changed since the last run.
+void FitToScreen(RECT* rect) {
+  HMONITOR monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+  RECT work = {};
+  if (!WorkAreaOf(monitor, &work)) {
+    return;
+  }
+  LONG min_width = 0;
+  LONG min_height = 0;
+  MinWindowSize(monitor, &min_width, &min_height);
+  LONG width = rect->right - rect->left;
+  LONG height = rect->bottom - rect->top;
+  if (width < min_width) {
+    width = min_width;
+  }
+  if (height < min_height) {
+    height = min_height;
+  }
+  if (width > work.right - work.left) {
+    width = work.right - work.left;
+  }
+  if (height > work.bottom - work.top) {
+    height = work.bottom - work.top;
+  }
+  LONG left = rect->left;
+  LONG top = rect->top;
+  if (left + width > work.right) {
+    left = work.right - width;
+  }
+  if (top + height > work.bottom) {
+    top = work.bottom - height;
+  }
+  if (left < work.left) {
+    left = work.left;
+  }
+  if (top < work.top) {
+    top = work.top;
+  }
+  rect->left = left;
+  rect->top = top;
+  rect->right = left + width;
+  rect->bottom = top + height;
+}
+
+// Reads what was kept when the window was last closed. Returns false when
+// there is nothing, or it is damaged.
+bool LoadSavedWindow(SavedWindow* saved) {
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, kPlacementRegKey, 0, KEY_READ, &key) !=
+      ERROR_SUCCESS) {
+    return false;
+  }
+  SavedWindow value = {};
+  DWORD type = 0;
+  DWORD size = static_cast<DWORD>(sizeof(value));
+  const LONG result =
+      RegQueryValueExW(key, kPlacementRegValue, nullptr, &type,
+                       reinterpret_cast<LPBYTE>(&value), &size);
+  RegCloseKey(key);
+  if (result != ERROR_SUCCESS || type != REG_BINARY ||
+      size != static_cast<DWORD>(sizeof(value))) {
+    return false;
+  }
+  if (value.rect.right <= value.rect.left ||
+      value.rect.bottom <= value.rect.top) {
+    return false;
+  }
+  *saved = value;
+  return true;
+}
+
+// Keeps the window's place (and whether it is maximised) for the next run.
+void SaveWindow(const RECT& normal_rect, bool maximized) {
+  SavedWindow saved = {};
+  saved.rect = normal_rect;
+  saved.maximized = maximized ? 1 : 0;
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, kPlacementRegKey, 0, nullptr, 0,
+                      KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  RegSetValueExW(key, kPlacementRegValue, 0, REG_BINARY,
+                 reinterpret_cast<const BYTE*>(&saved),
+                 static_cast<DWORD>(sizeof(saved)));
+  RegCloseKey(key);
+}
+
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
 // This API is only needed for PerMonitor V1 awareness mode.
 void EnableFullDpiSupportIfAvailable(HWND hwnd) {
@@ -144,13 +277,28 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
+  // The place it had when it was last closed. Set here, while the window is
+  // still hidden and before the view is created, so that the first frame has
+  // the right size. A maximised window is shown maximised by Show(); the size
+  // set here is the one it returns to.
+  SavedWindow saved = {};
+  if (LoadSavedWindow(&saved)) {
+    RECT rect = saved.rect;
+    FitToScreen(&rect);
+    SetWindowPos(window, nullptr, rect.left, rect.top, rect.right - rect.left,
+                 rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    maximize_on_show_ = saved.maximized != 0;
+  }
+  GetWindowRect(window, &normal_rect_);
+
   UpdateTheme(window);
 
   return OnCreate();
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  return ShowWindow(window_handle_,
+                    maximize_on_show_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }
 
 // static
@@ -179,6 +327,31 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_GETMINMAXINFO: {
+      // No smaller than the calendar can be used at (scaled by the screen,
+      // and never more than the screen can show).
+      LONG min_width = 0;
+      LONG min_height = 0;
+      MinWindowSize(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                    &min_width, &min_height);
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = min_width;
+      info->ptMinTrackSize.y = min_height;
+      return 0;
+    }
+
+    case WM_MOVE:
+      // follow the window while it is neither maximised nor minimised
+      if (!IsZoomed(hwnd) && !IsIconic(hwnd)) {
+        GetWindowRect(hwnd, &normal_rect_);
+      }
+      break;
+
+    case WM_CLOSE:
+      // remember where the window was; the default handling closes it
+      SaveWindow(normal_rect_, IsZoomed(hwnd) != FALSE);
+      break;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -198,6 +371,9 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
     case WM_SIZE: {
+      if (!IsZoomed(hwnd) && !IsIconic(hwnd)) {
+        GetWindowRect(hwnd, &normal_rect_);
+      }
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
         // Size and position the child window.

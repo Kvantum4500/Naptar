@@ -160,26 +160,34 @@ class SyncStatusButton extends ConsumerWidget {
           child: Text('Kilépés a Google-fiókból'),
         ),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            s.syncing
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: color,
-                    ),
-                  )
-                : Icon(icon, size: 18, color: color),
-            if (!compact) ...[
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(color: color, fontSize: 13)),
-            ],
-          ],
+      // (the icon alone is 18 px: the tap target is a full 48 px)
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Center(
+            widthFactor: 1,
+            heightFactor: 1,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                s.syncing
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: color,
+                        ),
+                      )
+                    : Icon(icon, size: 18, color: color),
+                if (!compact) ...[
+                  const SizedBox(width: 6),
+                  Text(label, style: TextStyle(color: color, fontSize: 13)),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

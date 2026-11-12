@@ -92,6 +92,14 @@ class Win32Window {
 
   bool quit_on_close_ = false;
 
+  // Whether the window was maximised when it was last closed (Show() then
+  // shows it maximised).
+  bool maximize_on_show_ = false;
+
+  // Where the window is (screen coordinates) while it is neither maximised nor
+  // minimised: what is kept for the next run.
+  RECT normal_rect_ = {};
+
   // window handle for top level window.
   HWND window_handle_ = nullptr;
 

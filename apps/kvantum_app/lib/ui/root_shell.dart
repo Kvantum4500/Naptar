@@ -1,15 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../ai/assistant_page.dart';
+import '../ai/settings_page.dart';
+import '../diag/diag_log.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
-
+import 'breakpoints.dart';
 import 'finance/finance_page.dart';
 import 'home_page.dart';
-import '../diag/diag_log.dart';
+import 'shell_tab.dart';
+import 'shift_page.dart';
+import 'tasks_page.dart';
 
-/// The two top-level tabs: the calendar and the money pages. Both stay alive
-/// while switching, so the calendar keeps its view and scroll position.
+/// What "Több" offers: pages that are visited now and then.
+enum _More {
+  shifts('Beosztás', Icons.event_repeat),
+  settings('Beállítások', Icons.settings_outlined);
+
+  const _More(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
+/// The frame of the app: the four main pages stay alive while switching (the
+/// calendar keeps its view and scroll position), each is built the first time
+/// it is shown. At the bottom (phone) or at the side (wide window) are the
+/// destinations, and "Több" for the rest.
 class RootShell extends ConsumerStatefulWidget {
   const RootShell({super.key});
 
@@ -19,7 +36,8 @@ class RootShell extends ConsumerStatefulWidget {
 
 class _RootShellState extends ConsumerState<RootShell>
     with WidgetsBindingObserver {
-  var _index = 0;
+  /// The pages shown at least once (the others are not built yet).
+  final _opened = <ShellTab>{ShellTab.calendar};
 
   @override
   void initState() {
@@ -69,37 +87,94 @@ class _RootShellState extends ConsumerState<RootShell>
     }
   }
 
-  static const _destinations = [
-    (Icons.calendar_month_outlined, Icons.calendar_month, 'Naptár'),
-    (
-      Icons.account_balance_wallet_outlined,
-      Icons.account_balance_wallet,
-      'Pénzügyek',
-    ),
-  ];
+  static Widget _page(ShellTab tab) => switch (tab) {
+    ShellTab.calendar => const HomePage(),
+    ShellTab.tasks => const TasksPage(),
+    ShellTab.assistant => const AssistantPage(),
+    ShellTab.finance => const FinancePage(),
+  };
+
+  /// The index of "Több" in the bar: after the four pages.
+  static final _moreIndex = ShellTab.values.length;
+
+  void _onSelected(int i) {
+    if (i == _moreIndex) {
+      _openMore();
+    } else {
+      ref.read(shellTabProvider.notifier).select(ShellTab.values[i]);
+    }
+  }
+
+  Future<void> _openMore() async {
+    final choice = await showModalBottomSheet<_More>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final m in _More.values)
+              ListTile(
+                key: Key('more-${m.name}'),
+                leading: Icon(m.icon),
+                title: Text(m.label),
+                onTap: () => Navigator.pop(c, m),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => switch (choice) {
+          _More.shifts => const ShiftPage(),
+          _More.settings => const SettingsPage(),
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 760;
+    final tab = ref.watch(shellTabProvider);
+    _opened.add(tab);
     final body = IndexedStack(
-      index: _index,
-      children: const [HomePage(), FinancePage()],
+      index: tab.index,
+      children: [
+        for (final t in ShellTab.values)
+          if (_opened.contains(t))
+            // a page that is not showing takes no keyboard focus and runs no
+            // animations
+            ExcludeFocus(
+              excluding: t != tab,
+              child: TickerMode(enabled: t == tab, child: _page(t)),
+            )
+          else
+            const SizedBox.shrink(),
+      ],
     );
-    if (wide) {
-      return Scaffold(
+    final width = MediaQuery.sizeOf(context).width;
+    final Widget frame;
+    if (useRail(width)) {
+      frame = Scaffold(
         body: Row(
           children: [
             NavigationRail(
-              selectedIndex: _index,
+              selectedIndex: tab.index,
               labelType: NavigationRailLabelType.all,
-              onDestinationSelected: (i) => setState(() => _index = i),
+              onDestinationSelected: _onSelected,
               destinations: [
-                for (final d in _destinations)
+                for (final t in ShellTab.values)
                   NavigationRailDestination(
-                    icon: Icon(d.$1),
-                    selectedIcon: Icon(d.$2),
-                    label: Text(d.$3),
+                    icon: Icon(t.icon),
+                    selectedIcon: Icon(t.selectedIcon),
+                    label: Text(t.label),
                   ),
+                const NavigationRailDestination(
+                  icon: Icon(Icons.more_horiz),
+                  label: Text('Több'),
+                ),
               ],
             ),
             const VerticalDivider(width: 1),
@@ -107,21 +182,38 @@ class _RootShellState extends ConsumerState<RootShell>
           ],
         ),
       );
-    }
-    return Scaffold(
-      body: body,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          for (final d in _destinations)
-            NavigationDestination(
-              icon: Icon(d.$1),
-              selectedIcon: Icon(d.$2),
-              label: d.$3,
+    } else {
+      frame = Scaffold(
+        body: body,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: tab.index,
+          onDestinationSelected: _onSelected,
+          destinations: [
+            for (final t in ShellTab.values)
+              NavigationDestination(
+                key: Key('nav-${t.name}'),
+                icon: Icon(t.icon),
+                selectedIcon: Icon(t.selectedIcon),
+                label: t.label,
+              ),
+            const NavigationDestination(
+              key: Key('nav-more'),
+              icon: Icon(Icons.more_horiz),
+              label: 'Több',
             ),
-        ],
-      ),
+          ],
+        ),
+      );
+    }
+    // Back goes to the calendar first, and only from there leaves the app.
+    return PopScope(
+      canPop: tab == ShellTab.calendar,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          ref.read(shellTabProvider.notifier).select(ShellTab.calendar);
+        }
+      },
+      child: frame,
     );
   }
 }

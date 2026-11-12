@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
+import 'breakpoints.dart';
 import 'day_utils.dart';
 import 'format.dart';
 import 'palette.dart';
@@ -73,7 +74,7 @@ Future<bool?> openEditor(
     );
   }
   if (!context.mounted) return null;
-  final wide = MediaQuery.sizeOf(context).width >= 760;
+  final wide = useRail(MediaQuery.sizeOf(context).width);
   final editor = EventEditor(target: target);
   if (wide) {
     return showDialog<bool>(

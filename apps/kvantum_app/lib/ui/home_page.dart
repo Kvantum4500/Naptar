@@ -4,17 +4,16 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
+import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart';
-import '../ai/assistant_page.dart';
-import '../ai/settings_page.dart';
+import 'breakpoints.dart';
 import 'checkin.dart';
 import 'workout_feedback.dart';
 import 'event_editor.dart';
-import 'tasks_page.dart';
 import 'format.dart';
 import 'month_view.dart';
+import 'shortcuts.dart';
 import '../notify/reminders.dart';
-import 'shift_page.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
 import 'unreadable_events_banner.dart';
@@ -45,10 +44,10 @@ class HomePage extends ConsumerWidget {
     }
   }
 
-  String _title(CalView v, DateTime month, DateTime sel) {
+  String _title(CalView v, DateTime month, DateTime sel, {bool short = false}) {
     switch (v) {
       case CalView.month:
-        return DateFormat('y. MMMM', 'hu').format(month);
+        return DateFormat(short ? 'y. MMM' : 'y. MMMM', 'hu').format(month);
       case CalView.week:
         final a = startOfWeek(sel), b = a.add(const Duration(days: 6));
         final f = DateFormat('MMM d.', 'hu');
@@ -65,11 +64,10 @@ class HomePage extends ConsumerWidget {
     final month = ref.watch(visibleMonthProvider);
     final sel = ref.watch(selectedDayProvider);
     final width = MediaQuery.sizeOf(context).width;
-    final wide = width >= 900;
-    // Icon-only controls below this width; the full labels need about 800 px.
-    final compact = width < 820;
-    // Below this width the page shortcuts fold into one menu so the bar never overflows.
-    final menuMode = width < 1000;
+    final wide = useSidePanel(width);
+    // Icon-only controls on a narrow window; the full labels need about 800 px.
+    final compact = !useFullControls(width);
+    final shortTitle = useShortTitle(width);
 
     Future<void> open(Occurrence o) => openEditor(context, ref, occurrence: o);
 
@@ -127,125 +125,99 @@ class HomePage extends ConsumerWidget {
         );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 12,
-        title: Text(_title(view, month, sel), overflow: TextOverflow.ellipsis),
-        actions: [
-          if (!compact)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: SegmentedButton<CalView>(
-                showSelectedIcon: false,
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                segments: const [
-                  ButtonSegment(value: CalView.month, label: Text('Hónap')),
-                  ButtonSegment(value: CalView.week, label: Text('Hét')),
-                  ButtonSegment(value: CalView.day, label: Text('Nap')),
+    return CalendarKeys(
+      actions: {
+        NewEventIntent: PageAction<NewEventIntent>(
+          (_) => openEditor(context, ref, initialDay: sel),
+        ),
+        TodayIntent: PageAction<TodayIntent>((_) => _today(ref)),
+        StepIntent: PageAction<StepIntent>((i) => _shift(ref, i.dir)),
+        ViewIntent: PageAction<ViewIntent>(
+          (i) => ref.read(viewModeProvider.notifier).set(i.view),
+        ),
+        SyncIntent: PageAction<SyncIntent>(
+          (_) =>
+              ref.read(syncControllerProvider.notifier).syncNow(manual: true),
+        ),
+        HelpIntent: PageAction<HelpIntent>((_) => showShortcutHelp(context)),
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: 12,
+          // the title shrinks to what the buttons leave, it is never cut off
+          title: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(_title(view, month, sel, short: shortTitle)),
+          ),
+          actions: [
+            if (!compact)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: SegmentedButton<CalView>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: const [
+                    ButtonSegment(value: CalView.month, label: Text('Hónap')),
+                    ButtonSegment(value: CalView.week, label: Text('Hét')),
+                    ButtonSegment(value: CalView.day, label: Text('Nap')),
+                  ],
+                  selected: {view},
+                  onSelectionChanged: (s) =>
+                      ref.read(viewModeProvider.notifier).set(s.first),
+                ),
+              )
+            else
+              PopupMenuButton<CalView>(
+                tooltip: 'Nézet',
+                icon: const Icon(Icons.view_agenda_outlined),
+                onSelected: (v) => ref.read(viewModeProvider.notifier).set(v),
+                itemBuilder: (c) => const [
+                  PopupMenuItem(value: CalView.month, child: Text('Hónap')),
+                  PopupMenuItem(value: CalView.week, child: Text('Hét')),
+                  PopupMenuItem(value: CalView.day, child: Text('Nap')),
                 ],
-                selected: {view},
-                onSelectionChanged: (s) =>
-                    ref.read(viewModeProvider.notifier).set(s.first),
               ),
-            )
-          else
-            PopupMenuButton<CalView>(
-              tooltip: 'Nézet',
-              icon: const Icon(Icons.view_agenda_outlined),
-              onSelected: (v) => ref.read(viewModeProvider.notifier).set(v),
-              itemBuilder: (c) => const [
-                PopupMenuItem(value: CalView.month, child: Text('Hónap')),
-                PopupMenuItem(value: CalView.week, child: Text('Hét')),
-                PopupMenuItem(value: CalView.day, child: Text('Nap')),
-              ],
-            ),
-          IconButton(
-            tooltip: 'Előző',
-            icon: const Icon(Icons.chevron_left),
-            onPressed: () => _shift(ref, -1),
-          ),
-          if (compact)
             IconButton(
-              tooltip: 'Ma',
-              icon: const Icon(Icons.today),
-              onPressed: () => _today(ref),
-            )
-          else
-            TextButton(onPressed: () => _today(ref), child: const Text('Ma')),
-          IconButton(
-            tooltip: 'Következő',
-            icon: const Icon(Icons.chevron_right),
-            onPressed: () => _shift(ref, 1),
-          ),
-          if (menuMode)
-            PopupMenuButton<String>(
-              tooltip: 'Menü',
-              onSelected: (v) {
-                final page = switch (v) {
-                  'tasks' => const TasksPage(),
-                  'assistant' => const AssistantPage(),
-                  'shifts' => const ShiftPage(),
-                  _ => const SettingsPage(),
-                };
-                Navigator.of(context)
-                    .push(MaterialPageRoute<void>(builder: (_) => page));
-              },
-              itemBuilder: (c) => const [
-                PopupMenuItem(value: 'tasks', child: Text('Feladatok')),
-                PopupMenuItem(value: 'assistant', child: Text('Asszisztens')),
-                PopupMenuItem(value: 'shifts', child: Text('Beosztás')),
-                PopupMenuItem(value: 'settings', child: Text('Beállítások')),
-              ],
-            )
-          else ...[
-            IconButton(
-              tooltip: 'Feladatok',
-              icon: const Icon(Icons.checklist),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const TasksPage()),
-              ),
+              tooltip: 'Előző',
+              icon: const Icon(Icons.chevron_left),
+              onPressed: () => _shift(ref, -1),
             ),
+            if (compact)
+              IconButton(
+                tooltip: 'Ma',
+                icon: const Icon(Icons.today),
+                onPressed: () => _today(ref),
+              )
+            else
+              TextButton(onPressed: () => _today(ref), child: const Text('Ma')),
             IconButton(
-              tooltip: 'Beosztás',
-              icon: const Icon(Icons.event_repeat),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const ShiftPage()),
-              ),
+              tooltip: 'Következő',
+              icon: const Icon(Icons.chevron_right),
+              onPressed: () => _shift(ref, 1),
             ),
-            IconButton(
-              tooltip: 'Asszisztens',
-              icon: const Icon(Icons.auto_awesome),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const AssistantPage()),
-              ),
+            SyncStatusButton(
+              compact: compact,
+              onCheckUpdate: () => showUpdateDialog(context, ref),
             ),
-            IconButton(
-              tooltip: 'Beállítások',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
-              ),
-            ),
+            const SizedBox(width: 4),
           ],
-          SyncStatusButton(
-            compact: compact,
-            onCheckUpdate: () => showUpdateDialog(context, ref),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Új esemény',
-        onPressed: () => openEditor(context, ref, initialDay: sel),
-        child: const Icon(Icons.add),
-      ),
-      body: Column(
-        children: [
-          const CheckInBanner(),
-          const WorkoutFeedbackBanner(),
-          const UnreadableEventsBanner(),
-          Expanded(child: body),
-        ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          tooltip: 'Új esemény',
+          onPressed: () => openEditor(context, ref, initialDay: sel),
+          child: const Icon(Icons.add),
+        ),
+        body: Column(
+          children: [
+            const CheckInBanner(),
+            const WorkoutFeedbackBanner(),
+            const UnreadableEventsBanner(),
+            Expanded(child: body),
+          ],
+        ),
       ),
     );
   }

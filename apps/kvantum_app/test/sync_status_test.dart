@@ -58,6 +58,7 @@ Future<_Ctl> _pump(
   WidgetTester tester,
   SyncState s, {
   int events = 7,
+  bool compact = false,
   List<Override> extra = const [],
 }) async {
   final ctl = _Ctl(s, events: events);
@@ -73,7 +74,9 @@ Future<_Ctl> _pump(
       ],
       child: MaterialApp(
         home: Scaffold(
-          body: Center(child: SyncStatusButton(onCheckUpdate: () {})),
+          body: Center(
+            child: SyncStatusButton(compact: compact, onCheckUpdate: () {}),
+          ),
         ),
       ),
     ),
@@ -113,6 +116,31 @@ DiagSnapshot _snapshot() => DiagSnapshot(
 
 void main() {
   setUpAll(() => initializeDateFormatting('hu'));
+
+  group('the button', () {
+    for (final compact in [false, true]) {
+      testWidgets(
+        'is a full 48 px tap target (${compact ? 'icon only' : 'with label'})',
+        (tester) async {
+          await _pump(tester, _state(), compact: compact);
+          final size = tester.getSize(find.byType(PopupMenuButton<String>));
+          expect(size.width, greaterThanOrEqualTo(48));
+          expect(size.height, greaterThanOrEqualTo(48));
+        },
+      );
+    }
+
+    testWidgets('a tap anywhere on its 48 px box opens the menu', (
+      tester,
+    ) async {
+      await _pump(tester, _state(), compact: true);
+      final r = tester.getRect(find.byType(PopupMenuButton<String>));
+      // near the corner, far from the 18 px icon in the middle
+      await tester.tapAt(r.topLeft + const Offset(3, 3));
+      await tester.pumpAndSettle();
+      expect(find.text('Szinkron most'), findsOneWidget);
+    });
+  });
 
   group('the menu', () {
     testWidgets('"Diagnosztika" opens the diagnostics page', (tester) async {

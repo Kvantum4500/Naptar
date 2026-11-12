@@ -22,6 +22,7 @@ import 'provider_catalog.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
 import '../ui/diagnostics_page.dart';
+import '../ui/shortcuts.dart' show showShortcutHelp;
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -825,6 +826,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                   icon: const Icon(Icons.monitor_heart_outlined),
                   label: const Text('Diagnosztika'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('open-shortcuts'),
+                  onPressed: () => showShortcutHelp(context),
+                  icon: const Icon(Icons.keyboard_outlined),
+                  label: const Text('Billentyűparancsok'),
                 ),
               ]),
             ],

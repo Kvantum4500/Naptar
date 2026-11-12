@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/home_page.dart';
+import 'package:kvantum_app/ui/month_view.dart';
 import 'package:kvantum_app/ui/time_grid.dart';
 import 'package:kvantum_app/ui/palette.dart';
 import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/manual_timers.dart';
 
 Occurrence occ(DateTime s, DateTime e, {bool allDay = false}) => Occurrence(
   eventId: 'e',
@@ -268,35 +272,104 @@ void main() {
     });
   }
 
-  testWidgets(
-    'below 1000 px the page shortcuts live in the menu and open the pages',
-    (tester) async {
-      useSize(tester, size: const Size(800, 800));
-      final db = await newDb();
-      await tester.pumpWidget(app(const HomePage(), db));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Asszisztens'), findsNothing);
-      await tester.tap(find.byTooltip('Menü'));
-      await tester.pumpAndSettle();
-      for (final label in ['Feladatok', 'Asszisztens', 'Beállítások']) {
-        expect(find.text(label), findsOneWidget);
-      }
-      await tester.tap(find.text('Asszisztens'));
-      await tester.pumpAndSettle();
-      expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
-      await shutdown(tester, db);
-    },
-  );
-
-  testWidgets('wide windows show the shortcuts as icons', (tester) async {
-    useSize(tester, size: const Size(1280, 800));
+  testWidgets('the day panel sits beside the month grid from 900 px', (
+    tester,
+  ) async {
+    useSize(tester, size: const Size(900, 800));
     final db = await newDb();
     await tester.pumpWidget(app(const HomePage(), db));
     await tester.pumpAndSettle();
-    for (final t in ['Feladatok', 'Asszisztens', 'Beállítások']) {
-      expect(find.byTooltip(t), findsOneWidget);
-    }
+    final grid = tester.getRect(find.byType(MonthView));
+    final panel = tester.getRect(find.byType(TimeGrid));
+    expect(panel.left, greaterThanOrEqualTo(grid.right));
+    expect(panel.top, lessThan(grid.bottom), reason: 'side by side');
     await shutdown(tester, db);
+  });
+
+  testWidgets('under 900 px the day panel sits below the month grid', (
+    tester,
+  ) async {
+    useSize(tester, size: const Size(899, 800));
+    final db = await newDb();
+    await tester.pumpWidget(app(const HomePage(), db));
+    await tester.pumpAndSettle();
+    final grid = tester.getRect(find.byType(MonthView));
+    final panel = tester.getRect(find.byType(TimeGrid));
+    expect(panel.top, greaterThanOrEqualTo(grid.bottom));
+    await shutdown(tester, db);
+  });
+
+  testWidgets('the calendar bar holds no page shortcuts: they are in the bar', (
+    tester,
+  ) async {
+    for (final w in [800.0, 1280.0]) {
+      useSize(tester, size: Size(w, 800));
+      final db = await newDb();
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+      for (final t in ['Menü', 'Feladatok', 'Asszisztens', 'Beállítások']) {
+        expect(find.byTooltip(t), findsNothing, reason: '$t at ${w.toInt()}');
+      }
+      await shutdown(tester, db);
+    }
+  });
+
+  group('the month title', () {
+    Future<AppDatabase> pumpAt(WidgetTester tester, double w) async {
+      useSize(tester, size: Size(w, 800));
+      final db = await newDb();
+      await tester.pumpWidget(
+        app(
+          const HomePage(),
+          db,
+          extra: [
+            appClockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 12, 9),
+            ),
+            midnightTimerProvider.overrideWithValue(ManualTimers().make),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      return db;
+    }
+
+    testWidgets('is short on a narrow phone, so the buttons leave it room', (
+      tester,
+    ) async {
+      final db = await pumpAt(tester, 360);
+      expect(find.text('2026. nov.'), findsOneWidget);
+      expect(find.text('2026. november'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is the full month name from 400 px', (tester) async {
+      final db = await pumpAt(tester, 400);
+      expect(find.text('2026. november'), findsOneWidget);
+      final title = tester.getRect(find.text('2026. november'));
+      final prev = tester.getRect(find.byTooltip('Előző'));
+      expect(title.right, lessThanOrEqualTo(prev.left));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('shrinks to what is left and is never cut off', (tester) async {
+      final db = await pumpAt(tester, 320);
+      final bar = find.byType(AppBar);
+      expect(
+        find.descendant(of: bar, matching: find.byType(FittedBox)),
+        findsOneWidget,
+      );
+      final text = tester.widget<Text>(find.text('2026. nov.'));
+      expect(text.overflow, isNull, reason: 'no ellipsis: it scales instead');
+      // what is drawn ends before the first button begins
+      final title = tester.getRect(find.text('2026. nov.'));
+      final prev = tester.getRect(find.byTooltip('Előző'));
+      expect(title.right, lessThanOrEqualTo(prev.left));
+      expect(title.left, greaterThanOrEqualTo(0));
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
   });
 
   testWidgets('narrow window shows a compact view menu and no overflow', (
