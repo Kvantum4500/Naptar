@@ -2,6 +2,8 @@ import 'dart:io' show HttpDate;
 
 import 'package:http/http.dart' as http;
 
+import '../diag/request_stats.dart';
+
 /// The longest wait a server can impose on us: whatever it asks for, we look
 /// again after at most this long.
 const maxRetryAfter = Duration(hours: 1);
@@ -31,12 +33,15 @@ Duration? parseRetryAfter(String? value, {required DateTime now}) {
 /// carries only the decoded body, so the header would be lost; the adapters
 /// ask this wrapper for it right after a failure ([takeRetryAfter]). Calls run
 /// one after the other, so "the most recent failure" is the one being handled.
+///
+/// It also counts the calls and how they ended, per service ([stats]).
 class RetryAfterClient extends http.BaseClient {
-  RetryAfterClient(this._inner, {DateTime Function()? now})
+  RetryAfterClient(this._inner, {DateTime Function()? now, this._stats})
     : _now = now ?? DateTime.now;
 
   final http.Client _inner;
   final DateTime Function() _now;
+  final RequestStats? _stats;
   Duration? _last;
 
   /// The wait the server asked for with its latest failure (once).
@@ -48,7 +53,15 @@ class RetryAfterClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final res = await _inner.send(request);
+    final service = serviceOfPath(request.url.path);
+    final http.StreamedResponse res;
+    try {
+      res = await _inner.send(request);
+    } on Object {
+      _stats?.record(service, failed: true);
+      rethrow;
+    }
+    _stats?.record(service, status: res.statusCode);
     _last = res.statusCode >= 400
         ? parseRetryAfter(res.headers['retry-after'], now: _now())
         : null;

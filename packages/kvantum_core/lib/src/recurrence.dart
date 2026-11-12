@@ -52,11 +52,17 @@ RecurrenceRule parseRule(String rule) {
 /// touch the window are turned into occurrences: converting a wall-clock time
 /// to an instant needs zone lookups, and a series that started years ago has
 /// hundreds of instances before the window.
+///
+/// The walk stops after a fixed number of instances (a safety net against
+/// runaway rules). When that happens before the window's end was reached, the
+/// occurrences after that point are missing; [onCapped] tells the caller so
+/// (it is called at most once per call).
 List<Occurrence> expand(
   CalEvent master,
   DateTime from,
   DateTime to, {
   List<CalEvent> overrides = const [],
+  void Function()? onCapped,
 }) {
   if (master.cancelled) return const [];
   assert(from.isUtc && to.isUtc);
@@ -140,7 +146,11 @@ List<Occurrence> expand(
   for (final wall in parseRule(
     master.rrule!,
   ).getInstances(start: master.start)) {
-    if (wall.isAfter(limit) || ++n > _maxIterations) break;
+    if (wall.isAfter(limit)) break;
+    if (++n > _maxIterations) {
+      onCapped?.call();
+      break;
+    }
     if (exdates.contains(wall)) continue;
     final override = byOriginal[wall];
     if (override != null) {

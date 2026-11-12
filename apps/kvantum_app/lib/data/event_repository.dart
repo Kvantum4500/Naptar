@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../diag/diag_log.dart';
 import 'db.dart';
 
 String _wall(DateTime d) =>
@@ -83,8 +84,9 @@ class OutboxItem {
 }
 
 class EventRepository {
-  EventRepository(this.db);
+  EventRepository(this.db, {this._log});
   final AppDatabase db;
+  final DiagLog? _log;
 
   Future<List<CalEvent>> all() async {
     final rows = await (db.select(
@@ -415,10 +417,31 @@ class EventRepository {
     final out = <Occurrence>[];
     for (final e in events.where((e) => !e.isException)) {
       try {
-        out.addAll(expand(e, from, to, overrides: overrides[e.id] ?? const []));
-      } catch (_) {
+        out.addAll(
+          expand(
+            e,
+            from,
+            to,
+            overrides: overrides[e.id] ?? const [],
+            onCapped: () => _log?.infoOnce(
+              'expand.capped:${e.id}',
+              'events',
+              'expand.capped',
+              data: {'id': e.id},
+            ),
+          ),
+        );
+      } catch (err, stack) {
         // An unreadable rule or time zone hides THAT event only (see
         // [unreadableEvents]); it must never blank the whole calendar.
+        _log?.errorOnce(
+          'expand.failed:${e.id}',
+          'events',
+          'expand.failed',
+          err,
+          stack,
+          {'id': e.id},
+        );
       }
     }
     out.sort((a, b) => a.startUtc.compareTo(b.startUtc));

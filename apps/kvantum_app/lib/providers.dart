@@ -10,6 +10,7 @@ import 'data/housekeeping.dart';
 import 'finance/wallet_bridge.dart';
 import 'finance/wallet_ingest.dart';
 import 'data/record_repository.dart';
+import 'diag/diag_log.dart';
 import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
 
@@ -18,6 +19,10 @@ final dbProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+
+/// Where the database file is (null for an in-memory one, as in tests); the
+/// Diagnostics page shows its size.
+final dbPathProvider = Provider<String?>((_) => null);
 
 final financeRepoProvider = Provider<FinanceRepository>(
   (ref) => FinanceRepository(
@@ -58,7 +63,8 @@ final walletIngestProvider = Provider<WalletIngest>(
 );
 
 final repoProvider = Provider<EventRepository>(
-  (ref) => EventRepository(ref.watch(dbProvider)),
+  (ref) =>
+      EventRepository(ref.watch(dbProvider), log: ref.watch(diagLogProvider)),
 );
 
 /// Emits whenever any event changes; views re-query occurrences from it.
