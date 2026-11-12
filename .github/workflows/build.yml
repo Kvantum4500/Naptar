@@ -4,6 +4,13 @@ name: Build apps
 #
 # Runs: on every push to main, on version tags, manually, and on feature
 # branches only when the commit message contains "[build]" (saves minutes).
+# A branch push that changes nothing but files under .github/ (or the analysis
+# settings, which change no build output) never builds: it would publish a
+# release of unchanged app code (tag pushes are not filtered).
+#
+# The tool versions are pinned on purpose (see ci.yml for why and how to
+# upgrade): Flutter 3.50.0, and Java 21 for the Android job - the lint step of
+# the Android Gradle plugin 9.3 (the one Flutter 3.50 recommends) crashes on 17.
 #
 # Repository secrets used:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   Google sign-in
@@ -15,6 +22,7 @@ on:
   push:
     tags: ['v*']
     branches: ['main', 'claude/**']
+    paths-ignore: ['.github/**', 'apps/kvantum_app/analysis_options.yaml']
 
 permissions:
   contents: read
@@ -30,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: '3.50.0', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - name: Write local config
@@ -63,9 +71,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
+        with: { distribution: temurin, java-version: '21' }
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: '3.50.0', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - name: Signing key (only if the secrets exist)

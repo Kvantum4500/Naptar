@@ -1,4 +1,10 @@
 name: CI
+# The tool versions are pinned on purpose: with the moving "stable" channel a new
+# Flutter release (3.47 -> 3.50) changed the analysis and the Android build
+# between two runs, without any change in the repository. To upgrade, try the
+# new version locally first (flutter analyze + flutter test), then change
+# `flutter-version` here and in build.yml, and `sdk` below (the Dart that ships
+# with that Flutter).
 on:
   push:
   pull_request:
@@ -9,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
+        with: { sdk: '3.14.0' } # the Dart of Flutter 3.50.0
       - run: dart pub get
       - run: dart analyze
       - run: dart test
@@ -18,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with: { flutter-version: '3.50.0', channel: stable, cache: true }
       - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
