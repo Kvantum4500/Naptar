@@ -2,6 +2,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../data/housekeeping.dart' show tombstoneRetention;
 import '../data/record_repository.dart';
+import '../diag/diag_log.dart';
 import 'drive_remote.dart';
 
 /// Syncs tasks and check-ins with Drive's app folder: pull -> merge -> push.
@@ -10,10 +11,11 @@ import 'drive_remote.dart';
 /// concurrent edit of another field, and a failed run leaves everything
 /// queued for the next one.
 class DriveSyncEngine {
-  DriveSyncEngine(this.repo, this.remote);
+  DriveSyncEngine(this.repo, this.remote, {this._log});
 
   final RecordRepository repo;
   final DriveRemote remote;
+  final DiagLog? _log;
   Future<void>? _running;
 
   /// Names of record files a NEWER version of the app wrote (this run): they
@@ -54,6 +56,7 @@ class DriveSyncEngine {
       try {
         res = await remote.pull(token);
       } on DriveTokenExpired {
+        _log?.info('drive', 'token_expired');
         await repo.setMeta(driveTokenKey, null);
         token = null;
         res = await remote.pull(null);
@@ -79,6 +82,11 @@ class DriveSyncEngine {
               newer++;
             } else if (_looksLikeRecordFile(entry.key)) {
               corrupt++;
+              _log?.info(
+                'drive',
+                'file.corrupt',
+                data: {'kind': recordFileNamePattern.firstMatch(entry.key)![1]},
+              );
             }
             continue;
           }
@@ -134,10 +142,14 @@ class DriveSyncEngine {
           if (await _push(rec)) pushed++;
         } on DriveTransientError {
           rethrow;
-        } catch (_) {
+        } catch (e, st) {
           failed++; // keep it queued, try again next run
+          _log?.error('drive', 'push.failed', e, st, {'kind': rec.kind});
         }
       }
+      // files a newer version wrote: those met while pulling, and those met
+      // only now, when a local change wanted to overwrite them
+      if (_newerNames.length > newer) newer = _newerNames.length;
       purged = await _purgeTombstones();
     } on DriveTransientError catch (e) {
       return DriveReport(
@@ -193,8 +205,10 @@ class DriveSyncEngine {
         if (known != null) await repo.forgetFile(known);
       } on DriveTransientError {
         rethrow;
-      } catch (_) {
-        continue; // the marker stays; the next day tries again
+      } catch (e, st) {
+        // the marker stays; the next day tries again
+        _log?.error('drive', 'purge.failed', e, st, {'kind': rec.kind});
+        continue;
       }
       await repo.purge(rec.kind, rec.id);
       purged++;
@@ -282,8 +296,9 @@ class DriveSyncEngine {
       await remote.delete(id);
     } on DriveTransientError {
       rethrow;
-    } catch (_) {
+    } catch (e, st) {
       // leaving a harmless duplicate is better than failing the sync
+      _log?.error('drive', 'duplicate.delete_failed', e, st);
     }
   }
 }

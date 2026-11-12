@@ -2,7 +2,9 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
 import 'api_errors.dart';
+import 'error_catalog.dart' show uploadErrorCode;
 import 'remote.dart';
 
 class SyncReport {
@@ -63,11 +65,13 @@ class SyncEngine {
     this.maxAttempts = 5,
     this.maxPushPerRun = 150,
     this.pace = Duration.zero,
+    this._log,
   }) : _uuid = uuid ?? const Uuid();
 
   final EventRepository repo;
   final RemoteCalendar remote;
   final Uuid _uuid;
+  final DiagLog? _log;
   final int maxAttempts;
 
   /// At most this many uploads in one run; the rest waits for the next one
@@ -143,6 +147,7 @@ class SyncEngine {
     try {
       res = await remote.pull(calendarId, token);
     } on SyncTokenExpired {
+      _log?.info('sync', 'calendar.token_expired');
       await repo.setMeta(_tokenKey(calendarId), null);
       token = null;
       report.fullResync = true;
@@ -151,6 +156,14 @@ class SyncEngine {
     final isFull = token == null;
     if (isFull) report.fullResync = true;
     report.skippedRemote += res.skipped.length;
+    for (final s in res.skipped) {
+      _log?.infoOnce(
+        'skipped:${s.googleId}',
+        'sync',
+        'calendar.skipped',
+        data: {'id': s.googleId, 'why': s.reason},
+      );
+    }
 
     // Masters first so exception instances can find their series.
     final ordered = [...res.changes]
@@ -318,26 +331,43 @@ class SyncEngine {
         report.pushed++;
       } on TransientSyncError catch (e) {
         // keep the queue, stop the run; the item is fine, the moment is not
-        await repo.noteError(
-          item,
-          e.message.isEmpty ? 'átmeneti hiba' : e.message,
+        final code = uploadErrorCode(e);
+        await repo.noteError(item, code);
+        _log?.info(
+          'sync',
+          'push.transient',
+          data: {'op': item.op, 'err': code},
         );
         rethrow;
       } on ConflictException {
         // Stale etag: next pull adopts the new etag, then this retries.
         await repo.markFailed(item, 'conflict');
         report.failed++;
-        if (item.attempts + 1 >= maxAttempts) report.parked++;
-      } catch (e) {
-        await repo.markFailed(item, _describe(e));
+        final parkedNow = item.attempts + 1 >= maxAttempts;
+        if (parkedNow) report.parked++;
+        _log?.info(
+          'sync',
+          'push.conflict',
+          data: {'op': item.op, 'try': item.attempts + 1, 'parked': parkedNow},
+        );
+      } catch (e, st) {
+        final code = uploadErrorCode(e);
+        await repo.markFailed(item, code);
         report.failed++;
-        if (item.attempts + 1 >= maxAttempts) report.parked++;
+        final parkedNow = item.attempts + 1 >= maxAttempts;
+        if (parkedNow) report.parked++;
+        final data = {
+          'op': item.op,
+          'err': code,
+          'try': item.attempts + 1,
+          'parked': parkedNow,
+        };
+        if (e is ItemRejectedError) {
+          _log?.info('sync', 'push.rejected', data: data);
+        } else {
+          _log?.error('sync', 'push.unexpected', e, st, data);
+        }
       }
     }
-  }
-
-  static String _describe(Object e) {
-    final t = '$e'.replaceAll(RegExp(r'\s+'), ' ');
-    return t.length > 200 ? t.substring(0, 200) : t;
   }
 }

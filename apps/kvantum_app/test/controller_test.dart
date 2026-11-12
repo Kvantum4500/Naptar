@@ -133,7 +133,13 @@ void main() {
       await c.read(syncControllerProvider.notifier).signIn();
       final s = c.read(syncControllerProvider);
       expect(s.signedIn, isFalse);
-      expect(s.error, contains('Belépés sikertelen'));
+      expect(s.error, contains('A bejelentkezés nem sikerült'));
+      expect(
+        s.error,
+        isNot(contains('cancelled')),
+        reason: 'the text of the exception is not shown',
+      );
+      expect(s.error, isNot(contains('Exception')));
       await db.close();
     });
 

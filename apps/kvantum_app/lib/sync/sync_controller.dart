@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
+import '../diag/newer_format.dart';
+import '../diag/request_stats.dart';
 import '../drive/drive_remote.dart';
 import '../drive/drive_sync_engine.dart';
 import '../drive/finance_mailbox.dart';
@@ -13,6 +16,7 @@ import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
 import '../providers.dart';
 import 'api_errors.dart';
+import 'channel_status.dart';
 import 'error_catalog.dart';
 import 'remote.dart';
 import 'retry_after_client.dart';
@@ -68,6 +72,7 @@ class SyncState {
     this.nextAttempt,
     this.mismatch,
     this.parked = 0,
+    this.channels = const {},
   });
   final bool configured, signedIn, syncing;
 
@@ -89,6 +94,10 @@ class SyncState {
   /// edit of the event.
   final int parked;
 
+  /// What the last run found on each channel ([syncChannels]); a channel the
+  /// last run did not look at keeps what it had.
+  final Map<String, ChannelStatus> channels;
+
   SyncState copyWith({
     bool? signedIn,
     bool? syncing,
@@ -100,6 +109,7 @@ class SyncState {
     Object? nextAttempt = _unset,
     Object? mismatch = _unset,
     int? parked,
+    Map<String, ChannelStatus>? channels,
   }) => SyncState(
     configured: configured,
     signedIn: signedIn ?? this.signedIn,
@@ -115,6 +125,7 @@ class SyncState {
         ? this.mismatch
         : mismatch as SyncBindingMismatch?,
     parked: parked ?? this.parked,
+    channels: channels ?? this.channels,
   );
 }
 
@@ -166,6 +177,8 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
 
   DateTime _now() => ref.read(syncClockProvider)();
 
+  DiagLog get _log => ref.read(diagLogProvider);
+
   @override
   SyncState build() {
     final configured = ref.watch(googleConfiguredProvider);
@@ -183,8 +196,9 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     try {
       final client = await ref.read(authGatewayProvider).restore();
       if (client != null) await _start(client);
-    } catch (e) {
-      state = state.copyWith(error: 'Belépés visszaállítása sikertelen: $e');
+    } catch (e, st) {
+      _log.error('auth', 'restore.failed', e, st);
+      state = state.copyWith(error: signInFailedText(e, restore: true));
     }
   }
 
@@ -194,8 +208,9 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       state = state.copyWith(clearError: true);
       final client = await ref.read(authGatewayProvider).signIn();
       await _start(client);
-    } catch (e) {
-      state = state.copyWith(error: 'Belépés sikertelen: $e');
+    } catch (e, st) {
+      _log.error('auth', 'signin.failed', e, st);
+      state = state.copyWith(error: signInFailedText(e));
     }
   }
 
@@ -222,21 +237,27 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   }
 
   Future<void> _start(http.Client client) async {
-    // one wrapper for both services: it keeps the server's Retry-After
-    final tapped = RetryAfterClient(client);
+    // one wrapper for both services: it keeps the server's Retry-After and
+    // counts the calls
+    final tapped = RetryAfterClient(
+      client,
+      stats: ref.read(requestStatsProvider),
+    );
     final events = ref.read(repoProvider);
     final records = ref.read(recordRepoProvider);
     _engine = SyncEngine(
       events,
       ref.read(remoteFactoryProvider)(tapped),
       pace: ref.read(syncPaceProvider),
+      log: _log,
     );
     final driveRemote = ref.read(driveFactoryProvider)(tapped);
-    _drive = DriveSyncEngine(records, driveRemote);
+    _drive = DriveSyncEngine(records, driveRemote, log: _log);
     final mail = FinanceMailbox(
       ref.read(financeRepoProvider),
       driveRemote,
       deviceId: await records.deviceId(),
+      log: _log,
     );
     _mail = mail;
     _reset = SyncResetOps(
@@ -267,11 +288,12 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   /// Drops the dead session once and asks for a new sign-in. Local data and
   /// the queue of unsent changes are untouched; they upload after signing in.
   Future<void> _expireLogin() async {
+    _log.info('auth', 'expired');
     _stopEverything();
     try {
       await ref.read(authGatewayProvider).signOut();
-    } catch (_) {
-      // nothing more to clean up
+    } catch (e, st) {
+      _log.error('auth', 'signout.failed', e, st); // nothing more to clean up
     }
     state = state.copyWith(
       signedIn: false,
@@ -320,7 +342,11 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       var asked = manual;
       do {
         _again = false;
-        last = await _syncOnce(manual: asked);
+        try {
+          last = await _syncOnce(manual: asked);
+        } catch (e, st) {
+          last = await _crashed(e, st);
+        }
         asked = _manualAgain;
         _manualAgain = false;
       } while (_again && _engine != null);
@@ -328,6 +354,19 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       _running = false;
     }
     if (!last.expired && _engine != null) _scheduleAfter(last);
+  }
+
+  /// A failure outside the three channel guards (the database, a bug). It must
+  /// neither leave "syncing" on for good nor stop the beat: the run counts as
+  /// failed and the next one is planned as usual.
+  Future<_Outcome> _crashed(Object e, StackTrace st) async {
+    _log.error('sync', 'run.crashed', e, st);
+    if (isAuthExpired(e)) {
+      await _expireLogin();
+      return const _Outcome(expired: true);
+    }
+    state = state.copyWith(syncing: false, error: unexpectedText('Szinkron'));
+    return const _Outcome(failed: true);
   }
 
   /// Plans the next automatic run from what the last one found.
@@ -375,6 +414,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     final engine = _engine;
     if (engine == null) return const _Outcome();
     state = state.copyWith(syncing: true);
+    final started = _now();
     final errors = <String>[];
     var ok = true, failed = false, busy = false, more = false;
     Duration? retryAfter;
@@ -390,69 +430,165 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       if (r != null && (retryAfter == null || r > retryAfter!)) retryAfter = r;
     }
 
+    // what each channel found, for the Diagnostics page (a channel this run
+    // did not look at keeps what it had)
+    final found = <String, ChannelStatus>{};
+    void channel(
+      String name, {
+      String? code,
+      List<String> lines = const [],
+      int pulled = 0,
+      int pushed = 0,
+      int refused = 0,
+    }) {
+      found[name] = ChannelStatus(
+        lastTry: started,
+        lastOk: code == null ? started : state.channels[name]?.lastOk,
+        code: code,
+        text: lines.isEmpty ? null : lines.join(' '),
+        pulled: pulled,
+        pushed: pushed,
+        failed: refused,
+      );
+    }
+
     try {
       final r = await engine.sync(syncCalendarId, manual: manual);
+      final lines = <String>[];
+      String? code;
       if (r.mismatch != null) {
         mismatch = r.mismatch;
         ok = false;
+        code = 'mismatch';
       } else if (r.calendarGone) {
         ok = false;
         failed = true;
-        errors.add(calendarGoneText);
+        code = 'gone';
+        lines.add(calendarGoneText);
       } else if (r.stoppedEarly) {
         ok = false;
         failed = true;
         noteHint(r.hint);
-        errors.add(transientText('Naptár', r.hint));
+        code = 'transient';
+        lines.add(transientText('Naptár', r.hint));
       } else {
         parked = r.parked;
-        if (r.parked > 0) errors.add(parkedText('Naptár', r.parked));
-        final refused = r.failed - r.parked;
-        if (refused > 0) errors.add(refusedText('Naptár', refused));
-        if (r.skippedRemote > 0) {
-          errors.add(skippedText('Naptár', r.skippedRemote));
+        if (r.parked > 0) {
+          code = 'parked';
+          lines.add(parkedText('Naptár', r.parked));
         }
+        final refused = r.failed - r.parked;
+        if (refused > 0) {
+          code ??= 'refused';
+          lines.add(refusedText('Naptár', refused));
+        }
+        if (r.skippedRemote > 0) {
+          code ??= 'skipped';
+          lines.add(skippedText('Naptár', r.skippedRemote));
+        }
+      }
+      errors.addAll(lines);
+      channel(
+        channelCalendar,
+        code: code,
+        lines: lines,
+        pulled: r.pulled,
+        pushed: r.pushed,
+        refused: r.failed,
+      );
+      if (code != null) {
+        _log.info(
+          'sync',
+          'calendar.$code',
+          data: {
+            'pulled': r.pulled,
+            'pushed': r.pushed,
+            'failed': r.failed,
+            'parked': r.parked,
+            'skipped': r.skippedRemote,
+            if (r.hint?.throttled ?? false) 'limit': true,
+            if (r.hint?.dailyLimit ?? false) 'daily': true,
+          },
+        );
       }
       busy |= r.pulled > 0 || r.pushed > 0 || r.deferred > 0;
       more |= r.more;
-    } catch (e) {
+    } catch (e, st) {
       if (isAuthExpired(e)) {
         await _expireLogin();
         return const _Outcome(expired: true);
       }
       ok = false;
       failed = true;
-      errors.add(unexpectedText('Naptár'));
+      final line = unexpectedText('Naptár');
+      errors.add(line);
+      channel(channelCalendar, code: 'unexpected', lines: [line]);
+      _log.error('sync', 'calendar.unexpected', e, st);
     }
 
     DriveReport? driveReport;
+    int? driveNewer;
     final drive = _drive;
     if (drive != null) {
       try {
         final r = await drive.sync();
         driveReport = r;
+        final lines = <String>[];
+        String? code;
         if (r.stoppedEarly) {
           ok = false;
           failed = true;
           noteHint(r.hint);
-          errors.add(transientText('Drive', r.hint));
+          code = 'transient';
+          lines.add(transientText('Drive', r.hint));
         } else if (r.failed > 0) {
-          errors.add('Drive: ${r.failed} elemet nem sikerült feltölteni.');
+          code = 'push_failed';
+          lines.add('Drive: ${r.failed} elemet nem sikerült feltölteni.');
         } else if (r.skippedCorrupt > 0) {
-          errors.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
+          code = 'corrupt';
+          lines.add('Drive: ${r.skippedCorrupt} sérült fájlt kihagytam.');
         }
-        if (!r.stoppedEarly && r.newerFormat > 0) {
-          errors.add(newerFormatText('Drive', r.newerFormat));
+        if (!r.stoppedEarly) {
+          driveNewer = r.newerFormat;
+          if (r.newerFormat > 0) {
+            code ??= 'newer';
+            lines.add(newerFormatText('Drive', r.newerFormat));
+          }
+        }
+        errors.addAll(lines);
+        channel(
+          channelDrive,
+          code: code,
+          lines: lines,
+          pulled: r.pulled,
+          pushed: r.pushed,
+          refused: r.failed,
+        );
+        if (code != null) {
+          _log.info(
+            'sync',
+            'drive.$code',
+            data: {
+              'pulled': r.pulled,
+              'pushed': r.pushed,
+              'failed': r.failed,
+              'corrupt': r.skippedCorrupt,
+              'newer': r.newerFormat,
+            },
+          );
         }
         busy |= r.pulled > 0 || r.pushed > 0;
-      } catch (e) {
+      } catch (e, st) {
         if (isAuthExpired(e)) {
           await _expireLogin();
           return const _Outcome(expired: true);
         }
         ok = false;
         failed = true;
-        errors.add(unexpectedText('Drive'));
+        final line = unexpectedText('Drive');
+        errors.add(line);
+        channel(channelDrive, code: 'unexpected', lines: [line]);
+        _log.error('sync', 'drive.unexpected', e, st);
       }
     }
 
@@ -460,6 +596,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     // something to send, now and then as a safety net, and on request.
     final mail = _mail;
     String? note;
+    int? financeNewer;
     if (mail != null) {
       final tick = _ticks++;
       final dirty = await ref.read(financeRepoProvider).dirtyCount();
@@ -472,17 +609,23 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       if (look) {
         try {
           final r = await mail.sync();
+          final lines = <String>[];
+          String? code;
           if (r.stoppedEarly) {
             ok = false;
             failed = true;
             noteHint(r.hint);
-            errors.add(transientText('Pénzügy', r.hint));
+            code = 'transient';
+            lines.add(transientText('Pénzügy', r.hint));
           } else {
             if (r.corrupt > 0) {
-              errors.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
+              code = 'corrupt';
+              lines.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
             }
+            financeNewer = r.newerLetters;
             if (r.newerLetters > 0) {
-              errors.add(newerFormatText('Pénzügy', r.newerLetters));
+              code ??= 'newer';
+              lines.add(newerFormatText('Pénzügy', r.newerLetters));
             }
             if (r.sentLetters + r.receivedLetters > 0) {
               note =
@@ -491,17 +634,42 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
               busy = true;
             }
           }
-        } catch (e) {
+          errors.addAll(lines);
+          channel(
+            channelFinance,
+            code: code,
+            lines: lines,
+            pulled: r.receivedLetters,
+            pushed: r.sentLetters,
+          );
+          if (code != null) {
+            _log.info(
+              'sync',
+              'finance.$code',
+              data: {
+                'sent': r.sentLetters,
+                'received': r.receivedLetters,
+                'corrupt': r.corrupt,
+                'newer': r.newerLetters,
+              },
+            );
+          }
+        } catch (e, st) {
           if (isAuthExpired(e)) {
             await _expireLogin();
             return const _Outcome(expired: true);
           }
           ok = false;
           failed = true;
-          errors.add(unexpectedText('Pénzügy'));
+          final line = unexpectedText('Pénzügy');
+          errors.add(line);
+          channel(channelFinance, code: 'unexpected', lines: [line]);
+          _log.error('sync', 'finance.unexpected', e, st);
         }
       }
     }
+
+    await _keepDiagnostics(driveNewer: driveNewer, financeNewer: financeNewer);
 
     final pending =
         (await ref.read(repoProvider).pending()).length +
@@ -516,6 +684,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       mismatch: mismatch,
       error: errors.isEmpty ? null : errors.join(' · '),
       clearError: errors.isEmpty,
+      channels: {...state.channels, ...found},
     );
     return _Outcome(
       failed: failed,
@@ -525,6 +694,41 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       throttled: throttled,
       dailyLimit: daily,
     );
+  }
+
+  /// After a run: adds the counted requests to the stored table, and notes
+  /// whether items of a newer version of the app were seen ([updateSightings]).
+  /// Diagnostics must never break the sync, so nothing here throws.
+  Future<void> _keepDiagnostics({int? driveNewer, int? financeNewer}) async {
+    final events = ref.read(repoProvider);
+    try {
+      await ref.read(requestStatsProvider).flush(events.meta, events.setMeta);
+    } catch (e, st) {
+      _log.error('diag', 'stats.flush_failed', e, st);
+    }
+    if (driveNewer == null && financeNewer == null) return;
+    try {
+      final old = decodeNewerFormat(await events.meta(newerFormatKey));
+      final now = updateSightings(
+        old,
+        now: _now(),
+        drive: driveNewer,
+        finance: financeNewer,
+      );
+      final before = encodeNewerFormat(old), after = encodeNewerFormat(now);
+      if (before != after) {
+        await events.setMeta(newerFormatKey, now.isEmpty ? null : after);
+        if (now.isNotEmpty) {
+          _log.info(
+            'sync',
+            'newer_format',
+            data: {for (final e in now.entries) e.key: e.value.count},
+          );
+        }
+      }
+    } catch (e, st) {
+      _log.error('diag', 'newer_format.save_failed', e, st);
+    }
   }
 
   // ---------------------------------------------------------------- reset

@@ -154,7 +154,11 @@ void main() {
           0,
           reason: 'the item is fine, the moment was not',
         );
-        expect(item.lastError, contains('calendarUsageLimitsExceeded'));
+        expect(
+          item.lastError,
+          'transient:limit',
+          reason: 'a code, not the text of the Google error',
+        );
         // and it goes through as soon as the limit is over
         final r = await engine.sync(cal);
         expect(r.pushed, 1);
@@ -194,10 +198,7 @@ void main() {
           calls,
           reason: 'a parked item is not hammered',
         );
-        expect(
-          (await repo.pending()).single.lastError,
-          contains('http 400 invalid'),
-        );
+        expect((await repo.pending()).single.lastError, 'rejected:400:invalid');
       },
     );
 

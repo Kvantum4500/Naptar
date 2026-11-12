@@ -252,6 +252,34 @@ class EventRepository {
       (db.update(db.outboxRows)..where((t) => t.attempts.isBiggerThanValue(0)))
           .write(const OutboxRowsCompanion(attempts: Value(0)));
 
+  /// The queued changes that Google refused at least once, oldest first: they
+  /// wait for a retry, and once [SyncEngine.maxAttempts] is reached they are
+  /// given up on until somebody retries or edits the event.
+  Future<List<OutboxItem>> failedOutbox() async => [
+    for (final i in await pending())
+      if (i.attempts > 0) i,
+  ];
+
+  /// Gives up uploading one queued change. The queue entry goes; the event
+  /// stays on this device and can be uploaded again by editing it, or by the
+  /// "reset sync". A queued DELETION goes together with the tombstone of the
+  /// event (a tombstone without a queue entry would be queued again by the
+  /// daily housekeeping, [purgeOrphans]); the event then stays in Google.
+  /// Returns whether there was such an entry.
+  Future<bool> discardOutbox(int seq) => db.transaction(() async {
+    final row = await (db.select(
+      db.outboxRows,
+    )..where((t) => t.seq.equals(seq))).getSingleOrNull();
+    if (row == null) return false;
+    await (db.delete(db.outboxRows)..where((t) => t.seq.equals(seq))).go();
+    if (row.op == 'delete') {
+      await (db.delete(
+        db.eventRows,
+      )..where((t) => t.id.equals(row.eventId) & t.deleted.equals(true))).go();
+    }
+    return true;
+  });
+
   /// Event id -> the operation waiting for it (the newest one).
   Future<Map<String, String>> pendingOps() async {
     final rows = await (db.select(

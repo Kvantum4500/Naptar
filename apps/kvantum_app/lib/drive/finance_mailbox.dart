@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../data/finance_repository.dart';
+import '../diag/diag_log.dart';
 import '../sync/api_errors.dart' show RetryHint;
 import 'drive_remote.dart';
 
@@ -59,12 +60,14 @@ class FinanceMailbox {
     this.drive, {
     required this.deviceId,
     int Function()? clock,
+    this._log,
   }) : _clock = clock ?? (() => DateTime.now().toUtc().millisecondsSinceEpoch);
 
   final FinanceRepository repo;
   final DriveRemote drive;
   final String deviceId;
   final int Function() _clock;
+  final DiagLog? _log;
 
   static const peerPrefix = 'fin-peer-';
   static const letterPrefix = 'fin-letter-';
@@ -122,6 +125,7 @@ class FinanceMailbox {
         final letter = _letter(text);
         if (letter == null) {
           corrupt++;
+          _log?.info('mail', 'letter.corrupt');
           await drive.delete(l.id);
           continue;
         }
@@ -130,6 +134,7 @@ class FinanceMailbox {
           // version is updated and can read it.
           _leftAlone.add(l.id);
           newerLetters++;
+          _log?.infoOnce('letter.newer:${l.id}', 'mail', 'letter.newer');
           continue;
         }
         applied += await repo.applyIncomingAll([
@@ -144,6 +149,11 @@ class FinanceMailbox {
           // harmless); the letter stays for the version that knows the rest
           _leftAlone.add(l.id);
           newerLetters++;
+          _log?.infoOnce(
+            'letter.unknown:${l.id}',
+            'mail',
+            'letter.unknown_kind',
+          );
           continue;
         }
         await drive.delete(l.id); // "it has arrived"
