@@ -35,7 +35,7 @@ final aiSettingsStoreProvider = Provider<AiSettingsStore>((ref) {
 final weatherServiceProvider = Provider<WeatherService>((ref) {
   final c = http.Client();
   ref.onDispose(c.close);
-  return WeatherService(c);
+  return WeatherService(c, log: ref.read(diagLogProvider));
 });
 
 final locationProvider = Provider<LocationProvider>(

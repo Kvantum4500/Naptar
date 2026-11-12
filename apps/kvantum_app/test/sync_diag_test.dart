@@ -411,6 +411,27 @@ void main() {
       expect(e.data['err'], 'unexpected:stateerror');
     });
 
+    test('the title of an event never gets into the log', () async {
+      CalEvent titled(String id) => CalEvent(
+        id: id,
+        calendarId: 'naptar',
+        title: 'Titkos fogorvos $id',
+        tzid: 'Europe/Budapest',
+        start: floating(2026, 5, 4, 9),
+        end: floating(2026, 5, 4, 10),
+      );
+      await repo.saveLocal(titled('a'));
+      await repo.saveLocal(titled('b'));
+      remote.failUpsertAt[1] = ItemRejectedError(400, 'invalid', _secret);
+      remote.failUpsertAt[2] = StateError(_secret);
+      await engine().sync('naptar');
+      expect(
+        (await logged()).map((e) => e.code),
+        containsAll(['push.rejected', 'push.unexpected']),
+      );
+      expect(sink.lines.join('\n'), isNot(contains('Titkos')));
+    });
+
     test('events that cannot be read are logged once, by id', () async {
       remote.skipped = const [SkippedRemote('g-bad', 'unknown time zone')];
       final eng = engine();
@@ -464,6 +485,70 @@ void main() {
       now = now.add(const Duration(minutes: 5));
       await eng.sync();
       expect((await logged()).map((e) => e.code), contains('token_expired'));
+    });
+  });
+
+  group('the event store writes down what it cannot show', () {
+    late EventRepository logged0;
+    setUp(() => logged0 = EventRepository(db, log: log));
+
+    CalEvent series(String id, {String rule = 'FREQ=DAILY', int year = 1970}) =>
+        CalEvent(
+          id: id,
+          calendarId: 'naptar',
+          title: 'Titkos sorozat',
+          tzid: 'Europe/Budapest',
+          start: floating(year, 1, 1, 9),
+          end: floating(year, 1, 1, 10),
+          rrule: rule,
+        );
+
+    test('a series that runs into the 20 000 limit: once, by id', () async {
+      await logged0.saveLocal(series('cap'));
+      final from = DateTime.utc(2030, 1, 1), to = DateTime.utc(2030, 2, 1);
+      await logged0.occurrences(from, to);
+      await logged0.occurrences(from, to);
+      final capped = (await logged()).where((e) => e.code == 'expand.capped');
+      expect(capped, hasLength(1), reason: 'once per run, not per redraw');
+      expect(capped.single.data['id'], 'cap');
+      expect(sink.lines.join('\n'), isNot(contains('Titkos')));
+    });
+
+    test('an ordinary series does not trigger it', () async {
+      await logged0.saveLocal(series('ok', year: 2026));
+      await logged0.occurrences(
+        DateTime.utc(2026, 5, 1),
+        DateTime.utc(2026, 6, 1),
+      );
+      expect((await logged()).where((e) => e.code == 'expand.capped'), isEmpty);
+    });
+
+    test('the store the app itself uses (the provider) has the log', () async {
+      make();
+      final store = c!.read(repoProvider);
+      await store.saveLocal(series('bad', rule: 'FREQ=NEVER'));
+      await store.occurrences(
+        DateTime.utc(2026, 5, 1),
+        DateTime.utc(2026, 6, 1),
+      );
+      expect(
+        (await logged()).where((e) => e.code == 'expand.failed'),
+        hasLength(1),
+      );
+    });
+
+    test('a series that cannot be read: once, by id and error type', () async {
+      await logged0.saveLocal(series('bad', rule: 'FREQ=NEVER'));
+      await logged0.saveLocal(series('fine', year: 2026));
+      final from = DateTime.utc(2026, 5, 1), to = DateTime.utc(2026, 6, 1);
+      final first = await logged0.occurrences(from, to);
+      await logged0.occurrences(from, to);
+      expect(first, isNotEmpty, reason: 'the others still show');
+      final failed = (await logged()).where((e) => e.code == 'expand.failed');
+      expect(failed, hasLength(1));
+      expect(failed.single.data['id'], 'bad');
+      expect(failed.single.error, isNotNull);
+      expect(sink.lines.join('\n'), isNot(contains('Titkos')));
     });
   });
 }

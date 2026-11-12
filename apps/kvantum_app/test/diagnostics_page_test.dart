@@ -287,6 +287,30 @@ void main() {
       expect(find.textContaining('· feladva'), findsOneWidget);
     });
 
+    testWidgets('an event whose recurrence rule cannot be read', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        seed: () => events.saveLocal(
+          CalEvent(
+            id: 'bad',
+            calendarId: 'naptar',
+            title: 'Rossz szabály',
+            tzid: 'Europe/Budapest',
+            start: floating(2026, 5, 4, 9),
+            end: floating(2026, 5, 4, 10),
+            rrule: 'FREQ=NEVER',
+          ),
+        ),
+      );
+      expect(find.byKey(const Key('diag-warning-unreadable')), findsOneWidget);
+      expect(
+        find.textContaining('1 esemény ismétlődési szabályát'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('a recurrence that ran into its limit', (tester) async {
       await boot(
         tester,

@@ -12,6 +12,7 @@ Személyes naptár- és életvezetési app (Windows + Android, Flutter), **sajá
 | **Asszisztens** – Gemini / Groq / Mistral / OpenRouter / OpenAI / egyéni (OpenAI-kompatibilis) szolgáltató, szerkeszthető kézikönyv, javaslat → jóváhagyás; áthelyezés és törlés csak jóváhagyással; feladat-ütemezés; időjárás (Open-Meteo) és helyszín; a kemény szabályokat **kód** ellenőrzi, az AI csak javasol | kész, élő modellel a felhasználó próbálja |
 | **Pénzügyek** – napló, havi keretek, ismétlődő tételek, megtakarítási célok; telefon ↔ gép „postalevél” szinkron a Drive-on; Google Wallet értesítések automatikus felvétele (Android) | kész |
 | **Emlékeztetők** – műszak és napi check-in (Android) | kész (Windowson nincs) |
+| **Hibák látása** – Diagnosztika oldal (Beállítások → A program): szinkron csatornánként, elutasított módosítások (újrapróbálás / elvetés), Google-kérések naponta, figyelmeztetések (óraeltérés, újabb verzió, olvashatatlan ismétlődés), helyi hibanapló; a jelentés másolható / menthető, és **nem tartalmaz** címet, összeget, jegyzetet, e-mail-címet vagy kulcsot | kész |
 | **Önfrissítés** – Windows: csere + visszaállítás hibánál; Android: a rendszertelepítő; stabil és előzetes csatorna | kész |
 
 A részletes ellenőrzés és a fejlesztési terv: [`docs/audit-es-fejlesztesi-terv.md`](docs/audit-es-fejlesztesi-terv.md). Változások: [`CHANGELOG.md`](CHANGELOG.md).
@@ -30,7 +31,7 @@ cp secrets.example.json secrets.json
 flutter run -d windows --dart-define-from-file=secrets.json   # vagy -d <android-eszköz>
 ```
 
-A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Cloud OAuth-kliens), `UPDATE_TOKEN` (csak olvasó GitHub-token az önfrissítéshez). Ezek a buildbe kerülnek, ezért **soha** ne kerüljenek a repóba.
+A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Cloud OAuth-kliens), `UPDATE_TOKEN` (csak olvasó GitHub-token az önfrissítéshez). Ezek a buildbe kerülnek, ezért **soha** ne kerüljenek a repóba. Nélkülük a program fut, de a szinkron-gomb „Nincs Google” állapotot mutat („Nincs Google-hozzáférés”: ebben a buildben nincs beállítva a bejelentkezés); a kiadási csomagokban a kulcsok benne vannak.
 
 ## Fő tervezési döntések
 
@@ -51,6 +52,12 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 
 ## Mit tegyek, ha…
 
+- **Valami nem működik, és nem tudom, miért:** Beállítások → A program → **Diagnosztika** (a szinkron-gomb menüjében is). Felül a figyelmeztetések, alatta a szinkron csatornánként (naptár, Drive, pénzügyi levelek): mikor volt az utolsó próba és az utolsó sikeres futás, és mi a hiba magyarul. Ha segítséget kérsz, a „Másolás” gombbal a vágólapra teszed a jelentést (vagy „Mentés fájlba”). **A jelentésben számok, kódok, magyar mondatok és a hibák rövid, megtisztított első sora van; esemény-cím, összeg, jegyzet, e-mail-cím és kulcs nem kerül bele.** (A hibák első sorát a rendszer adja; sima szöveg, küldés előtt átnézheted.) Te döntöd el, kinek mutatod meg.
+- **Hol a napló, és mi van benne?** Az adatbázis mellett, a `diag` mappában (`diag.log` és a régebbi `diag.log.1`; Windowson `%LOCALAPPDATA%\KvantumNaptar\diag`, Androidon az app privát mappája), legfeljebb ≈ 0,5 MB, csak ezen az eszközön; semmi nem megy ki belőle magától. Soronként: idő, terület, rövid kód, számok, és a hiba típusa + első sora. Nincs benne eseménycím, jegyzet, összeg, e-mail-cím, kulcs. A Diagnosztika „Napló törlése…” gombja üríti; törlés után a hibakeresés nehezebb, ha valami ismétlődik.
+- **„Elutasított módosítások” a Diagnosztikán:** ezeket a Google nem fogadta el, vagy nem sikerült feltölteni. **Újrapróbálás most:** új esélyt kapnak (a „Szinkron most” is ezt teszi). **Elvetés:** a feltöltés leáll; az esemény az eszközön marad (ha újra szerkeszted, újra sorba kerül; a „Szinkron alaphelyzetbe…” is visszahozza). Elvetett *törlésnél* az esemény a Google-ban marad.
+- **Figyelmeztetés: „egy módosítás … a jövőben van bélyegezve”:** valamelyik eszköz órája több mint két nappal előrejár. Állítsd be az órát (automatikus idő). Addig a program az újabb szerkesztéseket a jövőbeli bélyeg után bélyegzi, hogy ne vesszenek el.
+- **Figyelmeztetés: egy ismétlődő esemény „több mint 20 000 előfordulást adna”:** a szabálya (pl. évtizedekre előre napi ismétlés) túl hosszú, ezért a távoli jövőjét nem mutatja a program. Rövidítsd a szabályt (vége vagy darabszám).
+- **A Google-kérések száma a Diagnosztikán:** naponta, szolgáltatásonként (naptár, Drive, egyéb) mutatja a hívásokat és azt, hány ment át, hány lett elutasítva vagy korlátozva. Ha a „korlátozva” sok, a program magától lassabban folytatja; teendőd nincs. A számok 7 napig maradnak.
 - **„A Google-bejelentkezés lejárt”:** koppints a „Belépés szükséges” gombra (az adat megvan, a függő módosítások utána feltöltődnek). Ha hetente ismétlődik: a Google Cloud OAuth-hozzájárulási képernyő „Testing” állapotban van, állítsd „In production”-re.
 - **A szinkron-gombnál „Döntés kell” áll:** másik Google-fiókba léptél be, vagy a „Naptar” naptárat törölték / újra létrehozták. A naptár-szinkron addig áll, hogy a két naptár eseményei ne keveredjenek (a feladatok és a pénzügy megy tovább). Koppints a gombra → „Másik fiók / naptár: döntés kell…”: *megtartom és feltöltöm* (a helyi események az új naptárba kerülnek, semmi nem törlődik), *üres indulás* (a helyi naptáresemények törlődnek, az új naptár eseményei jönnek), vagy *később*. Ha tévedésből léptél be másik fiókkal: Kilépés, majd belépés a régivel.
 - **A szinkron „ideiglenesen korlátozza a kéréseket” vagy „nincs kapcsolat”:** nem kell tenned semmit; az app visszalépéssel (1, 2, 4, 8, legfeljebb 15 perc) magától újra próbálja, a módosításaid megvannak. A „Szinkron most” azonnal próbál. Sok esemény feltöltésekor (pl. egy félévnyi műszak) a Google néha korlátoz; az app lassabban, darabokban tölt.

@@ -225,9 +225,10 @@ class _Body extends ConsumerWidget {
           // ---------------------------------------------------- the report
           section('Jelentés', [
             const Text(
-              'A jelentésben csak számok, kódok és magyar mondatok vannak: '
-              'esemény-cím, összeg, jegyzet, e-mail-cím nincs benne. A napló '
-              'csak ezen az eszközön van; te döntöd el, kinek mutatod meg.',
+              'A jelentésben számok, kódok, magyar mondatok és a hibák rövid, '
+              'megtisztított első sora van; esemény-cím, összeg, jegyzet, '
+              'e-mail-cím és kulcs nem kerül bele. A napló csak ezen az '
+              'eszközön van; te döntöd el, kinek mutatod meg.',
             ),
             const SizedBox(height: 8),
             Wrap(

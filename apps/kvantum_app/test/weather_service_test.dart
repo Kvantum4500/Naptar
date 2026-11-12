@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/place.dart';
 import 'package:kvantum_app/ai/weather_service.dart';
+import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 const forecastJson = {
@@ -148,6 +149,75 @@ void main() {
       expect(seen.url.queryParameters['forecast_days'], '16');
       await svc.forecast(bp, days: 0);
       expect(seen.url.queryParameters['forecast_days'], '1');
+    });
+  });
+
+  group('the log says why there was no forecast', () {
+    late MemoryDiagSink sink;
+    late DiagLog log;
+    setUp(() {
+      sink = MemoryDiagSink();
+      log = DiagLog()..attach(sink);
+    });
+
+    Future<List<DiagEntry>> entries() async {
+      await log.flush();
+      return [for (final l in sink.lines) DiagEntry.tryParse(l)!];
+    }
+
+    test('an error status: the status and the host', () async {
+      final r = await WeatherService(
+        MockClient((_) async => _json({}, 503)),
+        log: log,
+      ).forecast(bp);
+      expect(r, isNull);
+      final e = (await entries()).single;
+      expect((e.area, e.code), ('weather', 'http'));
+      expect(e.data['status'], 503);
+      expect(e.data['host'], 'api.open-meteo.com');
+    });
+
+    test('no connection: the error type, and the place stays out', () async {
+      final uri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast?latitude=47.5&longitude=19.04',
+      );
+      final r = await WeatherService(
+        MockClient((_) async => throw http.ClientException('offline', uri)),
+        log: log,
+      ).forecast(bp);
+      expect(r, isNull);
+      final e = (await entries()).single;
+      expect((e.area, e.code), ('weather', 'failed'));
+      expect(e.error, startsWith('ClientException'));
+      expect(e.data['host'], 'api.open-meteo.com', reason: 'host only');
+      expect(sink.lines.join('\n'), isNot(contains('47.5')));
+      expect(sink.lines.join('\n'), isNot(contains('19.04')));
+    });
+
+    test('an answer that is no JSON', () async {
+      await WeatherService(
+        MockClient((_) async => http.Response('nem json', 200)),
+        log: log,
+      ).forecast(bp);
+      expect((await entries()).single.code, 'bad_answer');
+    });
+
+    test('no answer in time', () async {
+      await WeatherService(
+        MockClient((_) => Completer<http.Response>().future),
+        timeout: const Duration(milliseconds: 20),
+        log: log,
+      ).forecast(bp);
+      expect((await entries()).single.code, 'timeout');
+    });
+
+    test('a good answer writes nothing', () async {
+      final r = await WeatherService(
+        MockClient((_) async => _json(forecastJson)),
+        log: log,
+      ).forecast(bp);
+      expect(r, isNotNull);
+      expect(await entries(), isEmpty);
     });
   });
 

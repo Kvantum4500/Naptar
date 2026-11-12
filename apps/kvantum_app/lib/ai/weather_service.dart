@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../diag/diag_log.dart';
 import 'place.dart';
 
 /// Forecast and place search from Open-Meteo (free, no key). Only rounded
@@ -15,10 +16,12 @@ class WeatherService {
     Duration? timeout,
     Duration? cacheFor,
     DateTime Function()? now,
+    this._log,
   }) : _timeout = timeout ?? const Duration(seconds: 8),
        _cacheFor = cacheFor ?? const Duration(hours: 3),
        _now = now ?? DateTime.now;
   final http.Client _client;
+  final DiagLog? _log;
   final Duration _timeout;
   final Duration _cacheFor;
   final DateTime Function() _now;
@@ -113,17 +116,30 @@ class WeatherService {
     return out;
   }
 
+  /// The answer as JSON, or null. Why there was none goes to the diagnostics
+  /// log (the status, never the address: it holds the coordinates).
   Future<Object?> _get(Uri uri) async {
     try {
       final res = await _client.get(uri).timeout(_timeout);
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) {
+        _log?.info(
+          'weather',
+          'http',
+          data: {'host': uri.host, 'status': res.statusCode},
+        );
+        return null;
+      }
       return jsonDecode(utf8.decode(res.bodyBytes));
     } on TimeoutException {
+      _log?.info('weather', 'timeout', data: {'host': uri.host});
       return null;
-    } on FormatException {
+    } on FormatException catch (e, st) {
+      _log?.error('weather', 'bad_answer', e, st, {'host': uri.host});
       return null;
-    } catch (_) {
-      return null; // offline, TLS, DNS ...
+    } catch (e, st) {
+      // offline, TLS, DNS ...
+      _log?.error('weather', 'failed', e, st, {'host': uri.host});
+      return null;
     }
   }
 }
