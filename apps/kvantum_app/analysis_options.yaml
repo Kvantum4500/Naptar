@@ -6,3 +6,13 @@ analyzer:
     - android/**
     - windows/**
     - linux/**
+  errors:
+    # Flutter 3.50 moved Material out of the SDK into `package:material_ui` and
+    # flags every `package:flutter/material.dart` import (and
+    # `GlobalMaterialLocalizations`) as deprecated. The old import still works,
+    # but `flutter analyze` exits with an error code even for such notes, which
+    # stops the CI before its tests. Moving over is a task of its own (a new
+    # dependency, ~40 files, a bridge for third-party widgets, a look at the
+    # theme: audit item CMP-1); until then the note is switched off. Remove this
+    # line when the move is done, so that real deprecations show again.
+    deprecated_member_use: ignore

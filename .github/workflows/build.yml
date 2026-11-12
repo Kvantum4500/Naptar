@@ -4,8 +4,9 @@ name: Build apps
 #
 # Runs: on every push to main, on version tags, manually, and on feature
 # branches only when the commit message contains "[build]" (saves minutes).
-# A branch push that changes nothing but files under .github/ never builds: it
-# would publish a release of unchanged app code (tag pushes are not filtered).
+# A branch push that changes nothing but files under .github/ (or the analysis
+# settings, which change no build output) never builds: it would publish a
+# release of unchanged app code (tag pushes are not filtered).
 #
 # The tool versions are pinned on purpose (see ci.yml for why and how to
 # upgrade): Flutter 3.50.0, and Java 21 for the Android job - the lint step of
@@ -21,7 +22,7 @@ on:
   push:
     tags: ['v*']
     branches: ['main', 'claude/**']
-    paths-ignore: ['.github/**']
+    paths-ignore: ['.github/**', 'apps/kvantum_app/analysis_options.yaml']
 
 permissions:
   contents: read
