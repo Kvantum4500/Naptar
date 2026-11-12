@@ -19,7 +19,7 @@ A részletes ellenőrzés és a fejlesztési terv: [`docs/audit-es-fejlesztesi-t
 
 ## Futtatás fejlesztéshez
 
-Flutter **3.47.9** (Dart 3.13.7) kell, ezzel futnak a tesztek (a CI-ben a verzió rögzítése a `main`-en keresztül érkezik, lásd lent).
+Flutter **3.50.0** (Dart 3.14.0) a CI-ben és a kiadási buildben rögzített verzió; helyben a tesztek a 3.47.9-en is zöldek.
 
 ```bash
 # mag (tiszta Dart)
@@ -45,7 +45,7 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 ## Kiadás és önfrissítés
 
 - A `build.yml` megépíti a Windows-zipet és az Android-APK-t, SHA-256 összeggel, és GitHub-kiadást (`build-<szám>`) készít belőle.
-- Jelenleg minden build „latest” kiadás, a `main`-é és a munkaágaké is. Az **előzetes csatorna** (a munkaági buildek pre-release-ként, a „latest” csak a `main`/`v*` buildje) és a rögzített Flutter-verzió elkészült, de külön lépésben, a `main`-en keresztül kerül be: ha a build workflow-fájljai eltérnek a `main`-étől, a GitHub 403-mal elutasítja a kiadás létrehozását (ezt a Build 34 mutatta meg). Az app erre már fel van készítve: a Frissítés ablak „Előzetes verziókat is keressen” kapcsolója (alapból be) az előzetes kiadásokat is felkínálja.
+- Jelenleg minden build „latest” kiadás, a `main`-é és a munkaágaké is. A **Flutter-verzió rögzítése** (3.50.0 / Dart 3.14.0, az Android-buildhez Java 21) már a `main`-en van (PR #4). Az **előzetes csatorna** (a munkaági buildek pre-release-ként, a „latest” csak a `main`/`v*` buildje) elkészült, de külön lépésben, a `main`-en keresztül kerül be: ha a build workflow-fájljai eltérnek a `main`-étől, a GitHub 403-mal elutasítja a kiadás létrehozását (ezt a Build 34 mutatta meg). Az app erre már fel van készítve: a Frissítés ablak „Előzetes verziókat is keressen” kapcsolója (alapból be) az előzetes kiadásokat is felkínálja.
 - Az app „Frissítés keresése” menüpontja a csak olvasó `UPDATE_TOKEN`-nel kérdezi le a kiadásokat, ellenőrzi az összeget, és (Windowson) lecseréli magát, hibánál visszaállítja a régit. Az ellenőrzés csak kézi indításra fut.
 - Az első indításnál a Windows figyelmeztet („ismeretlen kiadó”): a ZIP tulajdonságainál jelöld be a **Feloldás** (Unblock) négyzetet kicsomagolás előtt. A frissítések már nem figyelmeztetnek.
 - Titkok (GitHub → Settings → Secrets → Actions): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UPDATE_TOKEN`; Androidhoz még `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (az **Android keystore (egyszeri)** workflow előállítja; a kulcsot **őrizd meg**, elvesztése után újra kell telepíteni az appot). Aláírt kulcs nélkül az APK nem kerül a kiadásba.
@@ -53,7 +53,7 @@ A `secrets.json` kulcsai: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google Clo
 ## Mit tegyek, ha…
 
 - **Valami nem működik, és nem tudom, miért:** Beállítások → A program → **Diagnosztika** (a szinkron-gomb menüjében is). Felül a figyelmeztetések, alatta a szinkron csatornánként (naptár, Drive, pénzügyi levelek): mikor volt az utolsó próba és az utolsó sikeres futás, és mi a hiba magyarul. Ha segítséget kérsz, a „Másolás” gombbal a vágólapra teszed a jelentést (vagy „Mentés fájlba”). **A jelentésben számok, kódok, magyar mondatok és a hibák rövid, megtisztított első sora van; esemény-cím, összeg, jegyzet, e-mail-cím és kulcs nem kerül bele.** (A hibák első sorát a rendszer adja; sima szöveg, küldés előtt átnézheted.) Te döntöd el, kinek mutatod meg.
-- **Hol a napló, és mi van benne?** Az adatbázis mellett, a `diag` mappában (`diag.log` és a régebbi `diag.log.1`; Windowson `%LOCALAPPDATA%\KvantumNaptar\diag`, Androidon az app privát mappája), legfeljebb ≈ 0,5 MB, csak ezen az eszközön; semmi nem megy ki belőle magától. Soronként: idő, terület, rövid kód, számok, és a hiba típusa + első sora. Nincs benne eseménycím, jegyzet, összeg, e-mail-cím, kulcs. A Diagnosztika „Napló törlése…” gombja üríti; törlés után a hibakeresés nehezebb, ha valami ismétlődik.
+- **Hol a napló, és mi van benne?** Az adatbázis mellett, a `diag` mappában (`diag.log` és a régebbi `diag.log.1`; Windowson `%LOCALAPPDATA%\KvantumNaptar\diag`, Androidon az app privát mappája), legfeljebb ≈ 0,5 MB, csak ezen az eszközön; semmi nem megy ki belőle magától. Soronként: idő, terület, rövid kód, számok, és a hiba típusa + első sora (megtisztítva). A program nem ír bele eseménycímet, jegyzetet, összeget, e-mail-címet, kulcsot. A Diagnosztika „Napló törlése…” gombja üríti; törlés után a hibakeresés nehezebb, ha valami ismétlődik.
 - **„Elutasított módosítások” a Diagnosztikán:** ezeket a Google nem fogadta el, vagy nem sikerült feltölteni. **Újrapróbálás most:** új esélyt kapnak (a „Szinkron most” is ezt teszi). **Elvetés:** a feltöltés leáll; az esemény az eszközön marad (ha újra szerkeszted, újra sorba kerül; a „Szinkron alaphelyzetbe…” is visszahozza). Elvetett *törlésnél* az esemény a Google-ban marad.
 - **Figyelmeztetés: „egy módosítás … a jövőben van bélyegezve”:** valamelyik eszköz órája több mint két nappal előrejár. Állítsd be az órát (automatikus idő). Addig a program az újabb szerkesztéseket a jövőbeli bélyeg után bélyegzi, hogy ne vesszenek el.
 - **Figyelmeztetés: egy ismétlődő esemény „több mint 20 000 előfordulást adna”:** a szabálya (pl. évtizedekre előre napi ismétlés) túl hosszú, ezért a távoli jövőjét nem mutatja a program. Rövidítsd a szabályt (vége vagy darabszám).
