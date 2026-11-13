@@ -2,6 +2,30 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 4. fázis, 4.5/D-2 – külföldi pénznem: a tétel euróban (vagy más pénznemben) is felvehető (D csomag, második rész)
+
+**Új a tétel-szerkesztőben (Pénzügyek → Tételek → új tétel / szerkesztés): *Pénznem*.** Az alap a **forint**; a listában még az euró, az amerikai dollár, az angol font, a svájci frank, a lengyel zloty, a cseh korona, a román lej, a svéd, a norvég és a dán korona, a szerb dinár, a török líra és a japán jen; a **Másik pénznem…** három betűs kódot kér (pl. AUD; a forint kódját nem fogadja el).
+- **Más pénznemnél** az összeg a pénznemben van („Összeg (EUR)”: tizedesvesszővel vagy ponttal, két tizedesig, pl. 12,40), alatta az **Árfolyam (Ft / EUR)** (legfeljebb négy tizedes, pl. 399,5), és egy sor mutatja a **forintértéket** („= 4 954 Ft”); amíg az összeg vagy az árfolyam hiányzik: „Add meg az összeget és az árfolyamot.”
+- **Az árfolyamot te írod be** – a program nem kérdez le semmit a hálózatról, nincs árfolyam-szolgáltatás. Pénznemenként megjegyzi a **legutóbb használt árfolyamot**, és a pénznem kiválasztásakor ezt írja be (átírhatod); a megjegyzés csak ezen az eszközön él (a másik eszközre nem megy át).
+- **A forintérték marad az alap:** a tétel összege továbbra is forintban van (az összeg százada × az árfolyam, egész forintra kerekítve), így a havi összesítők, a keretek, a célok, a Trend, az előfizetés-felismerés, a helyi költségkeret-válasz és az asszisztens pénzügyi összegzése **változatlanul forintban számol**. Az eredeti összeg és az árfolyam mellé kerül, nem helyettesíti a forintot.
+- **Látszik, mit fizettél:** a tételek listájában és a keresés találatában a tétel sora az eredeti összeget és az árfolyamot is mutatja („12,40 EUR · 399,5 Ft/EUR”).
+- **Átváltás szerkesztés közben:** forintról pénznemre váltva az összeg mező kiürül (a forintban beírt szám nem euró), az árfolyam a legutóbbi; pénznemről forintra váltva a mezőbe az addig kiszámolt forintérték kerül; pénznemről pénznemre az árfolyam cserélődik. A késve megérkező „utolsó árfolyam” nem írja felül, amit közben beírtál, és nem kerül másik pénznem mezőjébe.
+- **Mit nem fogad el:** nem számot, nullát vagy negatív összeget; hiányzó vagy 100 000-nél nagyobb árfolyamot; olyan összeget, amely forintban nem érné el az 1 Ft-ot; túl nagy összeget.
+- **Mentés, szinkron, visszaállítás:** a tétel JSON-jában új `fx` kulcs (`cur`, `c` – század, `r` – árfolyam); a Drive-postaláda, a mentés-visszaállítás és az automatikus mentés viszi. A **régi appverzió** az ismeretlen kulcsot figyelmen kívül hagyja, és a forintösszeget látja; ha egy régi verzió szerkeszti és menti a tételt, az eredeti összeg elvész (a forintérték marad). Egy sérült `fx` rekord sima forint tételként olvasódik be.
+- **CSV-export:** az „Összeg (Ft)” után **három új oszlop**: *Eredeti összeg* (előjeles, a pénznemben: a kiadás negatív), *Pénznem* és *Árfolyam (Ft)*; forint tételnél üresek. A fejléc így 10 oszlopos (volt 7) – ha a saját táblázatod a korábbi export oszlopaira épült, az oszlopok eltolódnak.
+- **Ami nem változott:** az ismétlődő tételek **csak forintban** készülnek; a Wallet-értesítés külföldi pénznemű összegét a program továbbra sem veszi fel magától (a Beállítások → Wallet → Legutóbbi értesítések között marad); az árfolyam utólag nem frissül – a tétel azt őrzi, amit beírtál.
+- **Útközben javítva:** (1) az árfolyam „2,512” alakját a program ezresen tagolt számnak (2512) olvasta, és így a szerkesztő a kiírt árfolyamot is rosszul olvasta vissza (a 3 tizedesjegyű árfolyamok – pl. jen, dinár – elromlottak, a 399,123-féle pedig nem volt menthető); az árfolyamnál az egyedüli „,” vagy „.” most mindig tizedeselválasztó (az ezreseket szóköz tagolja), és a kiírt árfolyam visszaolvasása külön tesztet kapott; (2) a tétel-szerkesztő gombsora (Mégse · Törlés · Mentés) **túlcsordult**: 360 képpont széles telefonon 2×-es betűméretnél 117 képponttal, keskenyebb telefonon 1×-nél is (a D-2 új, 2×-es betűméretű tesztje hozta ki, a korábbi kódon is megvolt); a gombsor most sortörő, jobbra zárt.
+
+**Ellenőrzés:** mag 909 teszt (volt 877), app 2305 (volt 2260); az elemzők és a formázás tiszták Flutter 3.47.9-en és 3.50.0-n. 197 szándékos elrontás: az első menetben 191 bukott el, a 6 átmenő mind tesztelési hiány volt (a magban három: a magányos zárójel, a többször előforduló elválasztó, az árfolyam fél-kerekítése; az oldalon három: a nulla összeg a forintérték-sorban, a forint mentése nem jegyez meg árfolyamot, a Törlés gomb távolsága), mindre új teszt készült; a végső listán mind elbukik, egyenértékű nincs.
+
+**Nem ellenőrzött / ismert korlátok**
+- A szerkesztő kinézete a pénznem-választóval, az árfolyam-mezővel és a forintérték-sorral valódi eszközön: a kirajzolt képeket a Roboto betűtípussal néztem át (telefon, széles, 2×-es betűméret, világos és sötét téma), de a rendszerbetű Androidon és Windowson más.
+- A tizedesvessző / -pont beírása a számbillentyűzeten: az Android billentyűzeteinek egy része a „tizedes” számbillentyűzeten nem ad vesszőt vagy pontot mindkét alakban; a mező a szóközt, a pontot és a vesszőt egyaránt elfogadja, de valódi telefonon nem próbáltam.
+- Az összeg számolása: a program a tizedes- és ezres-elválasztót találgatja (az összegnél az egyedüli elválasztó három számjeggyel utána ezres: „1,234” = 1234; az árfolyamnál az egyedüli elválasztó mindig tizedes); a kiszámolt forintérték mindig látszik a mező alatt, ellenőrizd mentés előtt.
+- A kártyás elszámolás és az átváltási díj nincs benne: a tétel azt a forintot őrzi, amelyet az árfolyam megad; ha a bank más forintot terhelt, írd át az árfolyamot úgy, hogy a forintérték egyezzen.
+- A régi appverziók nem ismerik az `fx` kulcsot (lásd fent); a vegyes használat csak addig gond, amíg minden eszköz nem frissült.
+- A bank-CSV import a D-3, a keret-értesítés és a bérbecslés a D-4 része.
+
 ## 4. fázis, 4.5/D-1 – pénzügyi trend, előfizetés-felismerés, CSV-export (D csomag, első rész)
 
 **Új fül: Pénzügyek → Trend** (az Áttekintés mellett, a második). Csak a gépen lévő tételekből számol, nem küld el semmit, hálózat nélkül is működik.
@@ -20,7 +44,7 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - A CSV megnyitása valódi Excelben / LibreOffice-ban magyar területi beállítással (oszlopokra bontás, ékezetek, a dátum és a negatív szám felismerése); a tesztek a fájl tartalmát ellenőrzik, programot nem nyitnak.
 - Az előfizetés-felismerés a te tételeiden: a küszöbök (24–38 és 350–380 nap, ×1,25, 45 / 400 nap) becslések; a rendszeresen látogatott, de nem előfizetéses bolt megjelenhet, az az előfizetés, amelynek az ára sokat ugrik vagy a díjnapja nagyon csúszik, kimaradhat.
 - A Trend fül sebessége több ezer tétellel (a számítás minden újraépítéskor egyszer végigmegy a tételeken); a 24 hónapos nézet az évhatáron valódi adaton.
-- Egyetlen pénznem van (forint); a többpénznem és a bank-CSV import a D-2 része, a keret-értesítés és a bérbecslés a D-3-é.
+- Egyetlen pénznem van (forint) – a 4.5/D-2 külföldi pénznemmel bővítette; a bank-CSV import a D-3, a keret-értesítés és a bérbecslés a D-4 része.
 
 ## 4. fázis, 4.4/C – haladás: edzésnapló és trend-grafikonok (C csomag)
 
