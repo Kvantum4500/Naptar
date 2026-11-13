@@ -2,6 +2,35 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 3b-2. fázis – az asszisztens jóváhagyása védett és visszavonható; haladásjelzők (AI-16, UX-11)
+
+**Az „Engedélyezem” / „Elfogadom” egyszer, és a mostani naptár ellen történik (AI-16)**
+- **Dupla koppintás nem duplikál.** Eddig a gyors második koppintás kétszer vitte végig a jóváhagyást: az új események kétszer kerültek be, egy sorozat egy napjának áthelyezése két kivétel-sort hozott létre. Mostantól egy jóváhagyás fut egyszerre: amíg tart, a kártya gombjai, a jelölőnégyzetek, a szűkítés-választó, a gyors javaslatok és a küldés is várnak, és új kérdés nem indul.
+- **Egy tranzakció.** Az elfogadott új események egyetlen írással, a saját azonosítóikkal kerülnek be (eddig egyenként, külön tranzakcióban: egy megszakadás részleges tervet hagyhatott); a törlés- és az áthelyezés-kártya is egy egység. Ha valami hibára fut, **semmi nem változik**, rövid magyar üzenet jelenik meg, a hiba a helyi naplóba kerül, a kártyák megmaradnak.
+- **Újraellenőrzés a gombnyomáskor.** A kártya órákig várhat az oldalon, a naptár közben változhat. Minden tételt a *mostani* naptárban keres meg a program, összeveti azzal, amire a javaslat készült, és csak azt hajtja végre, ami még érvényes:
+  - **törlés / áthelyezés:** ami közben eltűnt, elmozdult, átneveződött, más időre került, egész naposra vagy ismétlődővé (vagy egyszerivé) vált, **kimarad**; a már törölt (de még fel nem töltött) esemény **nem támad fel** (az áthelyezés eddig feltámasztotta a törölt eseményt); a sorozat-hatókör a mostani előfordulásra vonatkozik;
+  - **áthelyezés:** az új idő a *mostani* naptárral is ütközésmentes (az éppen áthelyezett esemény saját régi helyével és a törlésre javasolt eseményekkel nem ütközik; egy, ugyanezen a kártyán korábban áthelyezett eseménnyel igen); az esemény saját időzónájában ellenőriz;
+  - **új események:** ami már véget ért, vagy ami közben felvett eseménnyel ütközik, kimarad.
+  - A kimaradtakat az oldal megnevezi, okuk szerint csoportosítva: „Kimaradt, mert közben eltűnt vagy elmozdult: „Fogorvos”.” (legfeljebb 4 név, utána „és még N”).
+- **A kártyák nem törlik egymást.** Az állapot a gombnyomás *végén*, az élő állapotból épül újra (eddig a gombnyomás elején rögzített képből: egy közben megnyomott „Mégse” visszaállt). Az „Elfogadom a kijelölteket” után a vele érkezett törlés-kártya megmarad (eddig elveszett, pedig az új események arra számítottak, hogy a törlendő esemény megszűnik), az „Elvetem” után is; a „Rendben” csak a saját eredmény-kártyáját zárja. Ha a lezárt kártya volt az utolsó, az oldal üres, mint eddig.
+- **A törlés-kártya a te kérésedet mutatja** („A kérésed: „töröld a fogorvost””, legfeljebb 3 sor) a modell indoklása helyett (az gyakran angol volt, és nem te mondtad). Az áthelyezésnél az indoklás marad.
+- **Minden jóváhagyás visszavonható** (10 másodperc, a 3b-1 sávja): új események („N esemény hozzáadva” – a visszavonás eltávolítja őket), törlés („N esemény törölve”), áthelyezés („N esemény áthelyezve” – a régi időre, sorozat egy napjánál a létrehozott kivétel-sor törlésével). Egy kártya = egy sáv = egy visszavonás. A feltöltés a 10 másodperc alatt tartva van, mint a 3b-1-ben; a visszavonás után az eredmény-kártya is eltűnik.
+
+**Haladásjelzők (UX-11)**
+- **Beosztás generálása:** az oldal a munka alatt zárolt (nem kapnak koppintást, billentyűfókuszt), a tetején pörgettyű: „A beosztás készül…”. A törlendő tartományt a gomb megnyomásakor érvényes kezdőnap adja (eddig a közben átállított kezdőnap más tartományt érinthetett).
+- **Fájlműveletek a Beállításokban:** a négy gomb (Mentés fájlba, Visszaállítás fájlból, Pénzügyek mentése, Pénzügyek visszaállítása) a munka alatt várakozik, és a megnyomott gombon kis pörgettyű forog. A fájlválasztás után kezdődik a „munka” (a rendszer saját párbeszédei és a felülírásról szóló kérdésed nem számítanak annak), és egy képkocka kimarad a nagy fájl feldolgozása előtt, hogy a pörgettyű látsszon.
+- **Szinkron-gomb:** feltöltés közben „**Feltöltés N/M**” (a naptár eseményeinek feltöltése; legfeljebb a futás határa, a tartott és a feladott tételek nélkül); hibánál a gomb súgója (hover / hosszú nyomás) **kimondja az okot** (eddig csak a Részletek ablakban volt); a menü első sora **„N módosítás vár feltöltésre (M elakadt)”**; hiba vagy elakadt tétel esetén a „Szinkron most” helyén **„Újrapróbálás most”** áll (ugyanaz a kézi futás: elfelejti a korábbi elutasításokat).
+
+**Egyéb**
+- `moveOccurrence` változáshalmazt ad vissza, és a törölt eseményt nem támasztja fel; új: `ai/approval.dart` (`applyNew` / `applyDeletions` / `applyMoves`, `skippedNotice`), a magban `sameOccurrence`.
+- A „Szinkron most” a Részletek ablak szövegében „Újrapróbálás most” (a feladott tételeknél).
+
+Tesztek: app 1340 (volt 1260), mag 462 (volt 459), az elemzők és a formázás tiszták; a Flutter 3.50.0-n is zöld. 63 szándékos elrontás (a jóváhagyási kör, az újraellenőrzés minden ága, a tranzakciós és az „egyszer” védelem, a kártyák egymástól függetlensége, a visszavonás-bekötés, a gombok tiltása, a pörgettyűk, a feltöltés-számláló, az „Újrapróbálás most”) – mind elbukik. A próba két tesztelési hiányt hozott felszínre – a „küldés tiltva alkalmazás közben” teszt nem vette észre, ha a vezérlő mégis elindított egy kérdést, és az áthelyezés feltöltés-tartását semmi sem ellenőrizte –, mindkettőre szigorúbb teszt készült.
+
+**Nem ellenőrizhető itt:** az asszisztens jóváhagyása valódi modellválasszal és valódi naptárral (a tesztek a hamis modellt használják); a pörgettyűk és a letiltott gombok érzete telefonon és Windowson; a „Feltöltés N/M” felirat ~90 eseményes valódi feltöltéssel (a tesztek a hamis Google-t használják); a hibaok-súgó megjelenése hosszú nyomásra Androidon.
+
+**Ismert, nem javított:** az áthelyezés a modell idejét a szolgáltatás zónájában (Budapest) értelmezi, de az esemény saját időzónájában írja le – más zónájú eseménynél a falióra-idő eltolódhat (régi rés; az ütközés-ellenőrzés most már az esemény zónájában számol). A „feladva” (régi, a Részletekben és a Diagnosztikán) és az „elakadt” (új, a menüben) ugyanazt jelenti; a szóhasználat egységesítése a 3d szöveg-körében jön.
+
 ## 3b-1. fázis – visszavonás: törlés után 10 másodpercig „Visszavonás” (események, feladatok, pénzügy, Beosztás)
 
 **Visszavonás (UX-2)**
