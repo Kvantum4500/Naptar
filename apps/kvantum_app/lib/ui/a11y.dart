@@ -60,3 +60,8 @@ String spokenBudget(BudgetStatus b, String name, String hint) =>
 /// 20%-a" ([share] is 0…1).
 String spokenShare(String name, int amount, double share) =>
     '$name: ${formatHuf(amount)}, a kiadások ${(share * 100).round()}%-a';
+
+/// A line of the pay estimate as one sentence: "Esti pótlék (18–22), 12 óra ×
+/// 30%, 8 640 Ft" ([detail] is the line under the name).
+String spokenPayLine(String name, String detail, int amount) =>
+    '$name, $detail, ${formatHuf(amount)}';

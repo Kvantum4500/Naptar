@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
+import 'a11y.dart';
 
 /// Where the pay settings are kept: on this device only. They are not a record
 /// the sync copies, the assistant is never told of them, and the backup does
@@ -115,48 +116,28 @@ class ShiftPayCard extends ConsumerWidget {
             ] else if (estimate.shifts == 0)
               const Text('Ebben a hónapban nincs műszak, nincs mit számolni.')
             else ...[
-              for (final line in lines)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(payKindLabel(line.kind)),
-                            Text(
-                              line.kind == PayKind.base
-                                  ? payHoursLabel(line.minutes)
-                                  : '${payHoursLabel(line.minutes)} × '
-                                        '${line.percent}%',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(formatHuf(line.amount)),
-                    ],
-                  ),
-                ),
+              for (final line in lines) _PayLineRow(line),
               const Divider(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Összesen (bruttó becslés)',
+              Semantics(
+                container: true,
+                label: 'Összesen, bruttó becslés, ${formatHuf(estimate.total)}',
+                excludeSemantics: true,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Összesen (bruttó becslés)',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      key: const Key('pay-total'),
+                      formatHuf(estimate.total),
                       style: theme.textTheme.titleSmall,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    key: const Key('pay-total'),
-                    formatHuf(estimate.total),
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 8),
@@ -168,6 +149,44 @@ class ShiftPayCard extends ConsumerWidget {
               'szinkronizálódnak, és az asszisztensnek sem mennek el.',
               style: theme.textTheme.bodySmall,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One line of the estimate: the name and what it is made of on the left, the
+/// amount at the side; read aloud as one sentence.
+class _PayLineRow extends StatelessWidget {
+  const _PayLineRow(this.line);
+  final PayLine line;
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = line.kind == PayKind.base
+        ? payHoursLabel(line.minutes)
+        : '${payHoursLabel(line.minutes)} × ${line.percent}%';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Semantics(
+        container: true,
+        label: spokenPayLine(payKindLabel(line.kind), detail, line.amount),
+        excludeSemantics: true,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(payKindLabel(line.kind)),
+                  Text(detail, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(formatHuf(line.amount)),
           ],
         ),
       ),

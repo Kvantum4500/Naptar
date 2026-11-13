@@ -9,6 +9,7 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/ui/a11y.dart' show spokenPayLine;
 import 'package:kvantum_app/ui/shift_page.dart';
 import 'package:kvantum_app/ui/shift_pay_card.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -143,6 +144,46 @@ void main() {
       // it says what it is, and where the data stays
       expect(find.textContaining('nem bérszámfejtés'), findsOneWidget);
       expect(find.textContaining('nem szinkronizálódnak'), findsOneWidget);
+      expect(
+        find.textContaining('az asszisztensnek sem mennek el'),
+        findsOneWidget,
+      );
+      await done(tester);
+    });
+
+    testWidgets('a screen reader gets one sentence a line, and the total', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await mount(tester, stored: set, events: [night(2026, 11, 10)]);
+      expect(
+        find.bySemanticsLabel(spokenPayLine('Alapbér', '12 óra', 24000)),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          spokenPayLine('Esti pótlék (18–22)', '4 óra × 30%', 2400),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          spokenPayLine('Éjszakai pótlék (22–6)', '8 óra × 40%', 6400),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel('Összesen, bruttó becslés, ${formatHuf(32800)}'),
+        findsOneWidget,
+      );
+      // the pieces of a line are not stops of their own
+      expect(find.bySemanticsLabel('Alapbér'), findsNothing);
+      expect(find.bySemanticsLabel('12 óra'), findsNothing);
+      expect(
+        spokenPayLine('Esti pótlék (18–22)', '12 óra × 30%', 8640),
+        'Esti pótlék (18–22), 12 óra × 30%, ${formatHuf(8640)}',
+      );
+      handle.dispose();
       await done(tester);
     });
 

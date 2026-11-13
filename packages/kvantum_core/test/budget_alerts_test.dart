@@ -295,11 +295,18 @@ void main() {
     });
 
     test('a manual id that merely looks similar is not a rule', () {
+      // (the same amount, as a rule's, would be expected: a rule's rent alone
+      // at the limit is no news, but this is)
       final p = plan(
-        [spend('xrec-1', 'home', 150000), spend('Rec-2', 'home', 1000)],
+        [spend('xrec-1', 'home', 150000)],
         [budget('home', 150000)],
       );
-      expect(p.alerts.single.level, BudgetLevel.over);
+      expect(p.alerts.single.level, BudgetLevel.warn);
+      final q = plan(
+        [spend('Rec-2', 'home', 150000)],
+        [budget('home', 150000)],
+      );
+      expect(q.alerts.single.level, BudgetLevel.warn);
     });
 
     test('the prefix is what recurringTxId makes', () {

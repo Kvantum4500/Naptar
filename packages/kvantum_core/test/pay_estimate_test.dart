@@ -204,6 +204,13 @@ void main() {
       expect(e.total, 24000 + 2400 + 6400 + 2400 + 12000);
     });
 
+    test('the same month of another year is another month', () {
+      final e = pay([at(2025, 11, 10, 6, 12), at(2026, 11, 10, 6, 12)]);
+      expect(e.shifts, 1);
+      expect(pay([at(2025, 11, 10, 6, 12)], year: 2025).shifts, 1);
+      expect(pay([at(2025, 11, 10, 6, 12)], year: 2027).shifts, 0);
+    });
+
     test('only shifts: other events are not pay', () {
       final e = pay([
         at(2026, 11, 10, 6, 12),
