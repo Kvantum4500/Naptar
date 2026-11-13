@@ -1825,10 +1825,17 @@ void main() {
             .onChanged,
         isNull,
       );
-      // ... and a question typed meanwhile starts nothing
-      final ctl = ref0(tester).read(assistantControllerProvider.notifier);
-      await ctl.ask('Mi lesz holnap?');
-      expect(ref0(tester).read(assistantControllerProvider).busy, isFalse);
+      // ... and a question asked meanwhile goes nowhere: no request to the
+      // model, and the plan on the page is still there
+      final asked = llm.requests.length;
+      await ref0(tester)
+          .read(assistantControllerProvider.notifier)
+          .ask('Tervezz edzést a jövő hétre');
+      expect(llm.requests.length, asked);
+      expect(
+        ref0(tester).read(assistantControllerProvider).outcome?.items,
+        isNotEmpty,
+      );
 
       gated.gate.complete();
       await tester.pumpAndSettle();
@@ -2108,6 +2115,8 @@ void main() {
         floating(2026, 11, 20, 19),
       );
       expect(find.text('1 esemény áthelyezve'), findsOneWidget); // the bar
+      // while "Visszavonás" is on offer the move does not go up
+      expect(ref0(tester).read(syncHoldProvider).isHeld('p1'), isTrue);
 
       await tester.tap(find.text('Visszavonás'));
       await tester.pumpAndSettle();
