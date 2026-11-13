@@ -5,3 +5,5 @@ secrets.json
 *.keystore
 key.properties
 *.jks
+# a private key (the release signing key, see docs/alairt-frissites.md) must never be committed
+*.pem
