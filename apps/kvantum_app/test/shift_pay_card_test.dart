@@ -179,6 +179,8 @@ void main() {
       // the pieces of a line are not stops of their own
       expect(find.bySemanticsLabel('Alapbér'), findsNothing);
       expect(find.bySemanticsLabel('12 óra'), findsNothing);
+      // (nor are the two halves of the total)
+      expect(find.bySemanticsLabel('Összesen (bruttó becslés)'), findsNothing);
       expect(
         spokenPayLine('Esti pótlék (18–22)', '12 óra × 30%', 8640),
         'Esti pótlék (18–22), 12 óra × 30%, ${formatHuf(8640)}',
