@@ -10,6 +10,7 @@ import 'data/housekeeping.dart';
 import 'finance/wallet_bridge.dart';
 import 'finance/wallet_ingest.dart';
 import 'data/record_repository.dart';
+import 'data/task_ops.dart';
 import 'diag/diag_log.dart';
 import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
@@ -271,12 +272,19 @@ final recordRepoProvider = Provider<RecordRepository>(
   (ref) => RecordRepository(ref.watch(dbProvider)),
 );
 
-/// Open tasks first (overdue, then by due date, priority), done tasks last.
+final taskOpsProvider = Provider<TaskOps>(
+  (ref) => TaskOps(ref.watch(recordRepoProvider)),
+);
+
+/// The tasks that stand on their own: open ones first (overdue, then by due
+/// date, priority), done ones last. The items of a checklist are not among
+/// them (see [checklistsProvider]): every list that counts, shows or reminds
+/// of tasks wants the tasks, not their parts.
 final tasksProvider = StreamProvider<List<TaskView>>(
   (ref) => ref.watch(recordRepoProvider).watch(kindTask).map((recs) {
-    final list = [for (final r in recs) TaskView(r)]
-        .where((t) => !t.deleted)
-        .toList();
+    final list = topLevelTasks(
+      [for (final r in recs) TaskView(r)].where((t) => !t.deleted),
+    ).toList();
     list.sort((a, b) {
       if (a.done != b.done) return a.done ? 1 : -1;
       final da = a.due, db = b.due;
@@ -287,6 +295,19 @@ final tasksProvider = StreamProvider<List<TaskView>>(
     });
     return list;
   }),
+);
+
+/// The checklist of each task that has one: task id → its items, in the order
+/// they were added.
+final checklistsProvider = StreamProvider<Map<String, List<TaskView>>>(
+  (ref) => ref
+      .watch(recordRepoProvider)
+      .watch(kindTask)
+      .map(
+        (recs) => checklists(
+          [for (final r in recs) TaskView(r)].where((t) => !t.deleted),
+        ),
+      ),
 );
 
 /// Newest check-in first.

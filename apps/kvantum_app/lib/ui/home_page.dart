@@ -14,6 +14,7 @@ import 'workout_feedback.dart';
 import 'event_editor.dart';
 import 'format.dart';
 import 'month_view.dart';
+import 'quick_entry_dialog.dart';
 import 'search_page.dart';
 import 'setup_card.dart';
 import 'shortcuts.dart';
@@ -219,6 +220,9 @@ class _Calendar extends ConsumerWidget {
       actions: {
         NewEventIntent: PageAction<NewEventIntent>(
           (_) => openEditor(context, ref, initialDay: sel),
+        ),
+        QuickEntryIntent: PageAction<QuickEntryIntent>(
+          (_) => showQuickEntry(context, ref),
         ),
         TodayIntent: PageAction<TodayIntent>((_) => _today(ref)),
         StepIntent: PageAction<StepIntent>((i) => _shift(ref, i.dir)),

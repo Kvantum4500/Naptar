@@ -13,13 +13,16 @@ import '../widget/widget_sync.dart';
 import 'breakpoints.dart';
 import 'finance/finance_page.dart';
 import 'home_page.dart';
+import 'quick_entry_dialog.dart';
 import 'shell_tab.dart';
 import 'shift_page.dart';
 import 'tasks_page.dart';
 import 'text_scale.dart';
 
-/// What "Több" offers: pages that are visited now and then.
+/// What "Több" offers: the quick entry, and pages that are visited now and
+/// then.
 enum _More {
+  quick('Gyors felvitel', Icons.bolt),
   shifts('Beosztás', Icons.event_repeat),
   settings('Beállítások', Icons.settings_outlined);
 
@@ -160,11 +163,16 @@ class _RootShellState extends ConsumerState<RootShell>
       ),
     );
     if (choice == null || !mounted) return;
+    if (choice == _More.quick) {
+      await showQuickEntry(context, ref);
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => switch (choice) {
           _More.shifts => const ShiftPage(),
           _More.settings => const SettingsPage(),
+          _More.quick => const SizedBox.shrink(), // (handled above)
         },
       ),
     );

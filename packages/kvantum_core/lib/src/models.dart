@@ -1,3 +1,4 @@
+import 'recurrence.dart' show parseRule;
 import 'sync_record.dart';
 
 const kindTask = 'task';
@@ -26,6 +27,9 @@ final safeRecordFileNamePattern = RegExp(
 
 String _ymd(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// "2026-11-16", the way a floating date is stored in a record.
+String isoDay(DateTime d) => _ymd(d);
 
 DateTime? _parseYmd(Object? v) {
   if (v is! String) return null;
@@ -63,6 +67,26 @@ class TaskView {
   bool get done => record['done'] == true;
   bool get deleted => record.deleted;
 
+  /// The task this one is a checklist item of, or null (see [checklists] for
+  /// when the link counts).
+  String? get parentId {
+    final v = record['parent'];
+    return v is String && v.trim().isNotEmpty ? v.trim() : null;
+  }
+
+  /// Where a checklist item stands among the others (smaller is first).
+  int? get pos {
+    final v = record['pos'];
+    return v is num && v.isFinite ? v.toInt() : null;
+  }
+
+  /// How the task comes back once it is done: an RRULE body, anchored on
+  /// [due]. Null for a task that is done once.
+  String? get repeatRule {
+    final v = record['repeat'];
+    return v is String && v.trim().isNotEmpty ? v.trim() : null;
+  }
+
   bool isOverdue(DateTime today) =>
       !done &&
       due != null &&
@@ -78,6 +102,9 @@ Map<String, Object?> taskFields({
   int priority = 2,
   int energyNeed = 3,
   bool done = false,
+  String? parent,
+  int? pos,
+  String? repeat,
 }) {
   final t = title.trim();
   if (t.isEmpty) throw ArgumentError('A feladat címe nem lehet üres.');
@@ -88,6 +115,20 @@ Map<String, Object?> taskFields({
   if (estimateMin != null && (estimateMin < 1 || estimateMin > 24 * 60)) {
     throw ArgumentError('A becsült idő 1 perc és 24 óra között lehet.');
   }
+  final rule = repeat?.trim();
+  if (rule != null && rule.isNotEmpty) {
+    if (due == null) {
+      throw ArgumentError('Az ismétlődő feladatnak határidő kell.');
+    }
+    if (parent != null && parent.trim().isNotEmpty) {
+      throw ArgumentError('A részfeladat nem ismétlődhet.');
+    }
+    try {
+      parseRule(rule);
+    } catch (_) {
+      throw ArgumentError('Az ismétlődési szabály nem érthető.');
+    }
+  }
   return {
     'title': t,
     'notes': notes.trim(),
@@ -96,6 +137,9 @@ Map<String, Object?> taskFields({
     'priority': priority,
     'energyNeed': energyNeed,
     'done': done,
+    'parent': parent == null || parent.trim().isEmpty ? null : parent.trim(),
+    'pos': pos,
+    'repeat': rule == null || rule.isEmpty ? null : rule,
     'deleted': false,
   };
 }

@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_app/sync/sync_hold.dart';
+import 'package:kvantum_app/ui/theme.dart' show contrastRatio;
 import 'package:kvantum_app/ui/undo_service.dart';
 
 import 'support/harness.dart';
@@ -98,7 +100,12 @@ void main() {
   Future<bool> Function() undoA = () async => true;
   Future<bool> Function() undoB = () async => true;
 
-  Future<void> boot(WidgetTester tester, {Size? size}) async {
+  Future<void> boot(
+    WidgetTester tester, {
+    Size? size,
+    double? textScale,
+    ThemeData? theme,
+  }) async {
     useSize(tester, size: size ?? const Size(400, 800));
     db = await newDb();
     sync = _Sync();
@@ -109,6 +116,8 @@ void main() {
       app(
         _Host(calls, () => undoA(), () => undoB()),
         db,
+        textScale: textScale,
+        theme: theme,
         extra: [syncControllerProvider.overrideWith(() => sync)],
       ),
     );
@@ -174,6 +183,97 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('at twice the text size nothing overflows and the button is '
+        'whole', (tester) async {
+      await boot(tester, size: const Size(360, 800), textScale: 2.0);
+      await tapOffer(tester, 'offer-a');
+      expect(tester.takeException(), isNull);
+      final bar = card(tester);
+      final button = tester.getRect(
+        find.widgetWithText(TextButton, 'Visszavonás'),
+      );
+      expect(button.left, greaterThanOrEqualTo(bar.left));
+      expect(button.right, lessThanOrEqualTo(bar.right));
+      expect(bar.bottom, lessThanOrEqualTo(800 - 88));
+      // and it is still a button that works
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pump();
+      expect(calls, ['a']);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a long message at twice the size wraps, the button follows '
+        'under it', (tester) async {
+      await boot(tester, size: const Size(360, 800), textScale: 2.0);
+      final host = tester.element(find.byType(_Host));
+      ProviderScope.containerOf(host)
+          .read(undoServiceProvider)
+          .offer(
+            UndoSite.of(host),
+            message:
+                'Esemény felvéve: Fogorvos – Holnap · péntek, nov. 13. · '
+                '10:00–11:00',
+            undo: () async => true,
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+      final text = tester.getRect(find.textContaining('Esemény felvéve'));
+      final button = tester.getRect(
+        find.widgetWithText(TextButton, 'Visszavonás'),
+      );
+      expect(button.top, greaterThanOrEqualTo(text.bottom - 1));
+      expect(card(tester).bottom, lessThanOrEqualTo(800 - 88));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the text of the bar grows with the system size, up to one '
+        'and a half times', (tester) async {
+      for (final (system, shown) in [(1.0, 1.0), (1.3, 1.3), (2.0, 1.5)]) {
+        await boot(tester, size: const Size(400, 800), textScale: system);
+        await tapOffer(tester, 'offer-a');
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.text('A törölve'),
+        );
+        expect(paragraph.textScaler.scale(10), closeTo(10 * shown, 0.01));
+        await shutdown(tester, db);
+      }
+    });
+
+    for (final dark in [false, true]) {
+      testWidgets('the button is readable on the bar, 4.5 : 1 '
+          '(${dark ? 'dark' : 'light'} theme)', (tester) async {
+        await boot(
+          tester,
+          theme: dark ? ThemeData(brightness: Brightness.dark) : null,
+        );
+        await tapOffer(tester, 'offer-a');
+        final button = tester.widget<TextButton>(
+          find.widgetWithText(TextButton, 'Visszavonás'),
+        );
+        final text = button.style!.foregroundColor!.resolve({})!;
+        final bar = Theme.of(tester.element(find.byType(SnackBar)))
+            .colorScheme
+            .inverseSurface;
+        expect(contrastRatio(text, bar), greaterThanOrEqualTo(4.5));
+        await shutdown(tester, db);
+      });
+    }
+
+    testWidgets('with ordinary text the button stands beside the message', (
+      tester,
+    ) async {
+      await boot(tester, size: const Size(400, 800));
+      await tapOffer(tester, 'offer-a');
+      final text = tester.getRect(find.text('A törölve'));
+      final button = tester.getRect(
+        find.widgetWithText(TextButton, 'Visszavonás'),
+      );
+      expect(button.left, greaterThan(text.right));
+      expect((button.center.dy - text.center.dy).abs(), lessThan(8));
+      await shutdown(tester, db);
+    });
+
     testWidgets('sits well above the bottom edge, clear of a round button', (
       tester,
     ) async {
@@ -201,6 +301,16 @@ void main() {
       expect(hold().isHeld('a'), isFalse);
       expect(sync.requests, 1);
       expect(find.text('A visszavonás nem sikerült.'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the bar goes away once it is tapped', (tester) async {
+      await boot(tester);
+      await tapOffer(tester, 'offer-a');
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect(find.text('A törölve'), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
       await shutdown(tester, db);
     });
 

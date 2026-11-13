@@ -12,6 +12,11 @@ class NewEventIntent extends Intent {
   const NewEventIntent();
 }
 
+/// Opens the quick entry (one line of text -> an event or a task).
+class QuickEntryIntent extends Intent {
+  const QuickEntryIntent();
+}
+
 class TodayIntent extends Intent {
   const TodayIntent();
 }
@@ -42,6 +47,7 @@ class HelpIntent extends Intent {
 /// Key -> command.
 const calendarShortcuts = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.keyN): NewEventIntent(),
+  SingleActivator(LogicalKeyboardKey.keyQ): QuickEntryIntent(),
   SingleActivator(LogicalKeyboardKey.keyT): TodayIntent(),
   SingleActivator(LogicalKeyboardKey.arrowLeft): StepIntent(-1),
   SingleActivator(LogicalKeyboardKey.arrowRight): StepIntent(1),
@@ -75,6 +81,7 @@ class PageAction<T extends Intent> extends CallbackAction<T> {
 /// The list the help dialog shows: what to press, what it does.
 const shortcutHelp = <(String, String)>[
   ('N', 'Új esemény'),
+  ('Q', 'Gyors felvitel: egy sor szövegből esemény vagy feladat'),
   ('T', 'Ugrás a mai napra'),
   ('← →', 'Előző / következő hónap, hét, nap vagy időszak'),
   ('1  2  3  4', 'Hónap, hét, nap, napirend nézet'),

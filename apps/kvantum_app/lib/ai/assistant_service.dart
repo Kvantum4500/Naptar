@@ -664,7 +664,9 @@ class AssistantService {
           days: q.days,
           tz: _tz,
           occurrences: occ,
-          tasks: [for (final r in await records.all(kindTask)) TaskView(r)],
+          tasks: topLevelTasks([
+            for (final r in await records.all(kindTask)) TaskView(r),
+          ]),
           forecast: await _forecastFor(settings),
         );
         return AssistantOutcome(text: a.text, localAnswer: a);
@@ -1154,9 +1156,9 @@ class AssistantService {
       case 'get_finance':
         return _financeData(c.args['honap'], s);
       case 'get_tasks':
-        final tasks = [
+        final tasks = topLevelTasks([
           for (final r in await records.all(kindTask)) TaskView(r),
-        ];
+        ]);
         return tasksForTool(
           tasks,
           today: _today,

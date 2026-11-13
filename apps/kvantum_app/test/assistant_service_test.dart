@@ -156,6 +156,31 @@ void main() {
     });
   });
 
+  test('the items of a checklist are not tasks for the model', () async {
+    await records.edit(
+      kindTask,
+      't1',
+      taskFields(title: 'Költözés', estimateMin: 90),
+    );
+    await records.edit(
+      kindTask,
+      't2',
+      taskFields(title: 'Dobozok', parent: 't1', pos: 1),
+    );
+    final llm = FakeLlm([
+      (_) => calls([tool('get_tasks')]),
+      (_) => calls([
+        propose([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]),
+    ]);
+    await service(llm).ask('Tervezz edzést', model: 'm', settings: settings);
+    final data = llm.requests[1].turns.last.parts
+        .whereType<LlmToolResult>()
+        .map((r) => r.result)
+        .single;
+    expect([for (final t in data['feladatok'] as List) t['c']], ['Költözés']);
+  });
+
   test(
     'a proposal that breaks the rules goes back to the model and is repaired',
     () async {

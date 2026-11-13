@@ -235,6 +235,7 @@ void main() {
       keys,
       containsAll([
         'N',
+        'Q',
         'T',
         '← →',
         '1  2  3  4',
@@ -249,6 +250,7 @@ void main() {
     final intents = calendarShortcuts.values.map((i) => i.runtimeType).toSet();
     expect(intents, {
       NewEventIntent,
+      QuickEntryIntent,
       TodayIntent,
       StepIntent,
       ViewIntent,

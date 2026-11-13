@@ -31,6 +31,10 @@ class EditTarget {
     this.originalStart,
     this.initialStart,
     this.initialDay,
+    this.initialTitle,
+    this.initialEnd,
+    this.initialAllDay = false,
+    this.initialRrule,
   });
 
   /// The stored event being edited (a master, a single event, or an override).
@@ -47,6 +51,14 @@ class EditTarget {
   final DateTime? initialStart;
   final DateTime? initialDay;
 
+  /// For new events made from a line of text ("Szerkesztés…" of the quick
+  /// entry): what is already known. [initialEnd] is the floating end of a
+  /// timed event; an all-day event is one day long.
+  final String? initialTitle;
+  final DateTime? initialEnd;
+  final bool initialAllDay;
+  final String? initialRrule;
+
   bool get isSeriesOccurrence => master != null && originalStart != null;
 }
 
@@ -57,11 +69,19 @@ Future<bool?> openEditor(
   Occurrence? occurrence,
   DateTime? initialStart,
   DateTime? initialDay,
+  String? initialTitle,
+  DateTime? initialEnd,
+  bool initialAllDay = false,
+  String? initialRrule,
 }) async {
   final repo = ref.read(repoProvider);
   var target = EditTarget(
     initialStart: initialStart,
     initialDay: initialDay ?? ref.read(selectedDayProvider),
+    initialTitle: initialTitle,
+    initialEnd: initialEnd,
+    initialAllDay: initialAllDay,
+    initialRrule: initialRrule,
   );
   if (occurrence != null) {
     final e = await repo.byId(occurrence.eventId);
@@ -128,10 +148,10 @@ class _EventEditorState extends ConsumerState<EventEditor> {
   void initState() {
     super.initState();
     final e = _e;
-    _title = TextEditingController(text: e?.title ?? '');
+    _title = TextEditingController(text: e?.title ?? t.initialTitle ?? '');
     _notes = TextEditingController(text: e?.notes ?? '');
     _location = TextEditingController(text: e?.location ?? '');
-    _allDay = e?.allDay ?? false;
+    _allDay = e?.allDay ?? t.initialAllDay;
     _colorId = e?.colorId;
     if (e == null) {
       final s =
@@ -142,7 +162,7 @@ class _EventEditorState extends ConsumerState<EventEditor> {
             return floating(d.year, d.month, d.day, 9);
           })();
       _start = s;
-      _end = s.add(const Duration(hours: 1));
+      _end = t.initialEnd ?? s.add(const Duration(hours: 1));
     } else if (_isSeries && !e.isException) {
       // plain occurrence of a series: show THIS occurrence's date/time
       final m = _master!;
@@ -160,6 +180,9 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     if (ruleOwner != null && ruleOwner.isRecurring) {
       _spec = RecurrenceSpec.fromRrule(ruleOwner.rrule!, ruleOwner.start);
       if (_spec == null) _rawRule = ruleOwner.rrule;
+    } else if (ruleOwner == null && t.initialRrule != null) {
+      _spec = RecurrenceSpec.fromRrule(t.initialRrule!, _start);
+      if (_spec == null) _rawRule = t.initialRrule;
     }
     _initialSignature = _signature();
   }

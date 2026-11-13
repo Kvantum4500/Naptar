@@ -160,6 +160,29 @@ void main() {
       );
     });
 
+    test('the items of a checklist are no deadlines of the agenda', () async {
+      // (the app gives an item no date; another device might)
+      await records.edit(
+        kindTask,
+        'k1',
+        taskFields(title: 'Költözés', due: floating(2026, 5, 5)),
+      );
+      await records.edit(
+        kindTask,
+        'k2',
+        taskFields(
+          title: 'Dobozok',
+          due: floating(2026, 5, 5),
+          parent: 'k1',
+          pos: 1,
+        ),
+      );
+      final out = await service(FakeLlm([]))
+          .localOutcome('Mi lesz holnap?', settings: settings);
+      expect(out!.text, contains('Határidős feladat: Költözés'));
+      expect(out.text, isNot(contains('Dobozok')));
+    });
+
     test('a week runs from today up to the Sunday', () async {
       final out = await service(FakeLlm([]))
           .localOutcome('Mi lesz a héten?', settings: settings);

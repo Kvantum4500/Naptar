@@ -9,6 +9,8 @@ import 'event_editor.dart';
 import 'finance/finance_editors.dart';
 import 'format.dart';
 import 'palette.dart';
+import 'quick_entry_dialog.dart';
+import 'quick_entry_ops.dart' show quickWhen;
 import 'shell_tab.dart';
 import 'tasks_page.dart';
 import 'theme.dart';
@@ -105,6 +107,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final q = ref.watch(searchQueryProvider);
     final results = ref.watch(searchResultsProvider);
     final searching = searchTerms(q).isNotEmpty;
+    // A line that says when ("holnap 18:00 edzés") can be made right here.
+    final made = searching ? parseQuickEntry(q, now: wallNow(ref)) : null;
+    final offer = made != null && looksLikeQuickEntry(made) ? made : null;
 
     final Widget body;
     if (!searching) {
@@ -172,12 +177,48 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
-            child: body,
+            child: Column(
+              children: [
+                if (offer != null)
+                  _QuickOffer(
+                    entry: offer,
+                    today: ref.watch(todayProvider),
+                    onTap: () =>
+                        showQuickEntry(context, ref, initialText: q.trim()),
+                  ),
+                Expanded(child: body),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+/// "＋ Felvétel: …": what the typed line would make, one tap away.
+class _QuickOffer extends StatelessWidget {
+  const _QuickOffer({
+    required this.entry,
+    required this.today,
+    required this.onTap,
+  });
+  final QuickEntry entry;
+  final DateTime today;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    key: const Key('search-quick-offer'),
+    margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+    child: ListTile(
+      leading: const Icon(Icons.bolt),
+      title: Text('Felvétel: ${entry.title}'),
+      subtitle: Text(quickWhen(entry, today)),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
+    ),
+  );
 }
 
 class _Note extends StatelessWidget {

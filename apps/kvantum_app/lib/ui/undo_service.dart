@@ -39,6 +39,44 @@ class _Offer {
   bool finished = false;
 }
 
+/// The text and the "Visszavonás" button of the bar. They wrap onto two lines
+/// when they do not fit side by side, and the text is held to 1.5 times the
+/// normal size for the few seconds the bar is up: at twice the size the button
+/// alone is wider than a phone's bar.
+class _UndoContent extends StatelessWidget {
+  const _UndoContent({required this.message, required this.onUndo});
+  final String message;
+  final VoidCallback onUndo;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return MediaQuery(
+      data: media.copyWith(
+        textScaler: media.textScaler.clamp(maxScaleFactor: 1.5),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(message),
+          TextButton(
+            onPressed: onUndo,
+            style: TextButton.styleFrom(
+              // (the bar's own action colour: made for the dark bar)
+              foregroundColor:
+                  Theme.of(context).snackBarTheme.actionTextColor ??
+                  scheme.inversePrimary,
+            ),
+            child: const Text('Visszavonás'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The "… törölve  [Visszavonás]" bar, and the hold that keeps the change
 /// from being uploaded while it is on offer.
 ///
@@ -77,8 +115,21 @@ class UndoService {
       // is told not to (`persist: false`).
       final bar = site.messenger.showSnackBar(
         SnackBar(
-          content: Text(message),
+          // (the button is part of the content, not the bar's own action: at
+          // the largest system text size the bar's action row does not fit
+          // a phone; see [_UndoContent])
+          content: _UndoContent(
+            message: message,
+            onUndo: () {
+              _undo(offer, site, undo, failedMessage);
+              site.messenger.hideCurrentSnackBar(
+                reason: SnackBarClosedReason.action,
+              );
+            },
+          ),
           duration: undoWindow,
+          // (Flutter 3.50 keeps a bar with an action on screen for ever; ours
+          // goes by itself)
           persist: false,
           behavior: SnackBarBehavior.floating,
           // above the round button of the pages (their buttons are not the
@@ -89,10 +140,6 @@ class UndoService {
             0,
             _side(site.width),
             88,
-          ),
-          action: SnackBarAction(
-            label: 'Visszavonás',
-            onPressed: () => _undo(offer, site, undo, failedMessage),
           ),
         ),
       );
