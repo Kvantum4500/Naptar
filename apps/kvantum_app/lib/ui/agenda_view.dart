@@ -87,8 +87,10 @@ class AgendaView extends ConsumerWidget {
         for (final t in tasks)
           if (!t.done && t.due == d) t,
       ];
-      if (events.isEmpty && due.isEmpty) continue;
-      children.add(_DayHeader(agendaDayTitle(d, today)));
+      final special = huDayInfo(d);
+      // (a holiday is listed even when nothing else is on it)
+      if (events.isEmpty && due.isEmpty && special == null) continue;
+      children.add(_DayHeader(agendaDayTitle(d, today), special: special));
       for (final o in events) {
         children.add(_EventRow(o: o, day: d, onOpen: onOpen));
       }
@@ -127,21 +129,42 @@ class AgendaView extends ConsumerWidget {
 double _whenWidth(BuildContext context) => 52 * context.textFactor(max: 2);
 
 class _DayHeader extends StatelessWidget {
-  const _DayHeader(this.title, {this.color});
+  const _DayHeader(this.title, {this.color, this.special});
   final String title;
   final Color? color;
 
+  /// A holiday or a moved working day: told under the day.
+  final HuDay? special;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
-    child: Semantics(
-      header: true,
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final special = this.special;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
+      child: Semantics(
+        header: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(color: color),
+            ),
+            if (special != null)
+              Text(
+                special.label,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: special.isDayOff
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _EventRow extends StatelessWidget {

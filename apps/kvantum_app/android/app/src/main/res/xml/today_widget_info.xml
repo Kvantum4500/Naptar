@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widget "Kvantum Naptár": today's events and tasks and the
+     next shift. The app writes the text (lib/widget); TodayWidgetProvider only
+     draws it. The hour is the platform's safety net: the provider also asks to
+     be redrawn when the day ends or the next shift begins. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="80dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="3600000"
+    android:initialLayout="@layout/widget_today"
+    android:previewLayout="@layout/widget_today"
+    android:description="@string/widget_description"
+    android:widgetCategory="home_screen" />

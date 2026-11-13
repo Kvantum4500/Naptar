@@ -116,6 +116,14 @@ class _DayCell extends StatelessWidget {
   // (at the normal text size; they grow with the text, see build)
   static const double _head = 26;
 
+  /// The colour of the day number: red on a day off, dimmed outside the month.
+  Color _numberColor(HuDay? special) {
+    if (special != null && special.isDayOff) {
+      return inMonth ? scheme.error : scheme.error.withValues(alpha: .6);
+    }
+    return inMonth ? scheme.onSurface : scheme.onSurfaceVariant;
+  }
+
   /// A cell at least this wide has room for "18:00 " before the title.
   static const double _timeFromWidth = 92;
 
@@ -132,9 +140,10 @@ class _DayCell extends StatelessWidget {
         if (a.allDay != b.allDay) return a.allDay ? -1 : 1;
         return a.startUtc.compareTo(b.startUtc);
       });
+    final special = huDayInfo(day);
     return Semantics(
       // one stop for the screen reader: the day, what is on it, whether it is
-      // today; the events in it are stops of their own
+      // today or a holiday; the events in it are stops of their own
       container: true,
       button: true,
       selected: selected,
@@ -143,6 +152,7 @@ class _DayCell extends StatelessWidget {
         events: items.length,
         today: today,
         inMonth: inMonth,
+        special: special,
       ),
       child: InkWell(
         onTap: onTapDay,
@@ -178,6 +188,27 @@ class _DayCell extends StatelessWidget {
               final hidden = fit == 0 ? 0 : sorted.length - shown;
               // the time before the title only where it leaves room for it
               final showTime = c.maxWidth >= _timeFromWidth;
+              // (a cell wide enough for the time is never a cell of dots)
+              final showName = special != null && showTime;
+              final numberBox = Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                decoration: today
+                    ? BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      )
+                    : null,
+                child: Text(
+                  sorted.isNotEmpty && (dots ? !dotsFit : fit == 0)
+                      ? '${day.day} •'
+                      : '${day.day}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: today ? FontWeight.bold : FontWeight.normal,
+                    color: today ? scheme.onPrimary : _numberColor(special),
+                  ),
+                ),
+              );
               // A cell too short for its content clips it instead of
               // overflowing (a small window, a large text size).
               return ClipRect(
@@ -194,37 +225,37 @@ class _DayCell extends StatelessWidget {
                         SizedBox(
                           height: head,
                           child: ExcludeSemantics(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                ),
-                                decoration: today
-                                    ? BoxDecoration(
-                                        color: scheme.primary,
-                                        borderRadius: BorderRadius.circular(10),
-                                      )
-                                    : null,
-                                child: Text(
-                                  sorted.isNotEmpty &&
-                                          (dots ? !dotsFit : fit == 0)
-                                      ? '${day.day} •'
-                                      : '${day.day}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: today
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: today
-                                        ? scheme.onPrimary
-                                        : (inMonth
-                                              ? scheme.onSurface
-                                              : scheme.onSurfaceVariant),
+                            child: showName
+                                ? Row(
+                                    children: [
+                                      numberBox,
+                                      // a holiday names itself where the cell
+                                      // is wide enough (the words are in the
+                                      // label above)
+                                      Expanded(
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            left: 3,
+                                          ),
+                                          child: Text(
+                                            special.shortLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: special.isDayOff
+                                                  ? scheme.error
+                                                  : scheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: numberBox,
                                   ),
-                                ),
-                              ),
-                            ),
                           ),
                         ),
                         if (dots)

@@ -9,6 +9,7 @@ import '../backup/backup_providers.dart';
 import '../diag/diag_log.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
+import '../widget/widget_sync.dart';
 import 'breakpoints.dart';
 import 'finance/finance_page.dart';
 import 'home_page.dart';
@@ -64,6 +65,8 @@ class _RootShellState extends ConsumerState<RootShell>
       _collectWallet();
       // the midnight timer may have stood still while the device slept
       ref.read(todayProvider.notifier).refresh();
+      // a widget may have been put on the home screen meanwhile
+      ref.read(widgetKickProvider.notifier).bump();
       // an app left open for days still gets its daily backup
       unawaited(_autoBackup().then((_) => _driveBackup()));
     }

@@ -2,20 +2,27 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb, visibleForTesting;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../ai/ai_providers.dart'
+    show aiSettingsProvider, weatherServiceProvider;
 import '../providers.dart';
 import '../ui/day_utils.dart';
 import '../diag/diag_log.dart';
+import 'summary_plan.dart';
 import 'windows_reminders.dart';
 
 /// What the user wants to be reminded of. Everything is off by default.
 class ReminderSettings {
-  const ReminderSettings({this.shiftLeadMinutes = 0, this.checkIn = false});
+  const ReminderSettings({
+    this.shiftLeadMinutes = 0,
+    this.checkIn = false,
+    this.summaryMinutes = 0,
+  });
 
   /// Minutes before a shift starts (0 = no shift reminder).
   final int shiftLeadMinutes;
@@ -23,14 +30,30 @@ class ReminderSettings {
   /// A reminder in the evening to fill in the daily check-in.
   final bool checkIn;
 
-  bool get any => shiftLeadMinutes > 0 || checkIn;
+  /// The morning summary of the day, at this many minutes after midnight (one
+  /// of [summaryChoices]; 0 = none).
+  final int summaryMinutes;
 
-  ReminderSettings copyWith({int? shiftLeadMinutes, bool? checkIn}) =>
-      ReminderSettings(
-        shiftLeadMinutes: shiftLeadMinutes ?? this.shiftLeadMinutes,
-        checkIn: checkIn ?? this.checkIn,
-      );
+  bool get any => shiftLeadMinutes > 0 || checkIn || summaryMinutes > 0;
+
+  ReminderSettings copyWith({
+    int? shiftLeadMinutes,
+    bool? checkIn,
+    int? summaryMinutes,
+  }) => ReminderSettings(
+    shiftLeadMinutes: shiftLeadMinutes ?? this.shiftLeadMinutes,
+    checkIn: checkIn ?? this.checkIn,
+    summaryMinutes: summaryMinutes ?? this.summaryMinutes,
+  );
 }
+
+/// The times the morning summary can be set to: 6:00 to 9:00, every half hour
+/// (minutes after midnight).
+const summaryChoices = [360, 390, 420, 450, 480, 510, 540];
+
+/// 450 -> "7:30".
+String summaryTimeLabel(int minutes) =>
+    '${minutes ~/ 60}:${(minutes % 60).toString().padLeft(2, '0')}';
 
 class ReminderSettingsStore {
   ReminderSettingsStore({required this.read, required this.write});
@@ -39,9 +62,11 @@ class ReminderSettingsStore {
 
   Future<ReminderSettings> load() async {
     final lead = int.tryParse(await read('rem.shift') ?? '') ?? 0;
+    final summary = int.tryParse(await read('rem.summary') ?? '') ?? 0;
     return ReminderSettings(
       shiftLeadMinutes: const {0, 60, 120, 180}.contains(lead) ? lead : 0,
       checkIn: (await read('rem.checkin')) == 'on',
+      summaryMinutes: summaryChoices.contains(summary) ? summary : 0,
     );
   }
 
@@ -51,6 +76,10 @@ class ReminderSettingsStore {
       s.shiftLeadMinutes == 0 ? null : '${s.shiftLeadMinutes}',
     );
     await write('rem.checkin', s.checkIn ? 'on' : null);
+    await write(
+      'rem.summary',
+      s.summaryMinutes == 0 ? null : '${s.summaryMinutes}',
+    );
   }
 }
 
@@ -91,6 +120,7 @@ List<PlannedReminder> planReminders({
   required ReminderSettings settings,
   required List<({DateTime startUtc, String title})> shifts,
   required Set<DateTime> checkedInDays,
+  Map<DateTime, DaySummary> summaries = const {},
   String tzid = defaultTz,
   int horizonDays = 14,
   int maxCount = 60,
@@ -139,9 +169,40 @@ List<PlannedReminder> planReminders({
       );
     }
   }
+  if (settings.summaryMinutes > 0) {
+    final today = toWallClock(tzid, nowUtc);
+    final hour = settings.summaryMinutes ~/ 60;
+    final minute = settings.summaryMinutes % 60;
+    for (var i = 0; i <= summaryHorizonDays; i++) {
+      final day = floating(
+        today.year,
+        today.month,
+        today.day,
+      ).add(Duration(days: i));
+      final summary = summaries[day];
+      if (summary == null) continue;
+      final at = resolveWallClock(
+        tzid,
+        floating(day.year, day.month, day.day, hour, minute),
+      );
+      if (!at.isAfter(nowUtc)) continue;
+      out.add(
+        PlannedReminder(
+          summaryReminderIdBase + day.millisecondsSinceEpoch ~/ 86400000,
+          at,
+          summary.title,
+          summary.body,
+        ),
+      );
+    }
+  }
   out.sort((a, b) => a.atUtc.compareTo(b.atUtc));
   return out.take(maxCount).toList();
 }
+
+/// The ids of the morning summaries: this plus the number of days since 1970
+/// (above the check-ins' 1 500 000 000, below the test notification's id).
+const summaryReminderIdBase = 1600000000;
 
 /// What has to happen on the device so that it holds the planned reminders.
 class ReminderChanges {
@@ -248,8 +309,24 @@ class AndroidReminderScheduler implements ReminderScheduler {
     android: AndroidNotificationDetails(
       'reminders',
       'Emlékeztetők',
-      channelDescription: 'Műszak és napi check-in emlékeztetők',
+      channelDescription: 'Műszak, napi check-in és reggeli összefoglaló',
       importance: Importance.defaultImportance,
+    ),
+  );
+
+  /// How a reminder looks: a text of several lines (the morning summary)
+  /// opens up to all of them, a short one stays as it is.
+  @visibleForTesting
+  static NotificationDetails detailsFor(PlannedReminder r) =>
+      r.body.contains('\n') ? _bigText(r) : _details;
+
+  static NotificationDetails _bigText(PlannedReminder r) => NotificationDetails(
+    android: AndroidNotificationDetails(
+      'reminders',
+      'Emlékeztetők',
+      channelDescription: 'Műszak, napi check-in és reggeli összefoglaló',
+      importance: Importance.defaultImportance,
+      styleInformation: BigTextStyleInformation(r.body),
     ),
   );
 
@@ -300,7 +377,7 @@ class AndroidReminderScheduler implements ReminderScheduler {
         title: r.title,
         body: r.body,
         scheduledDate: tz.TZDateTime.from(r.atUtc, tz.UTC),
-        notificationDetails: _details,
+        notificationDetails: detailsFor(r),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: '${r.atUtc.millisecondsSinceEpoch}',
       );
@@ -398,6 +475,14 @@ final reminderSyncProvider = Provider<void>((ref) {
   final settings = ref.watch(reminderSettingsProvider).value;
   ref.watch(eventsTickProvider);
   ref.watch(checkInsProvider);
+  // (at midnight the days the plans reach move on)
+  ref.watch(todayProvider);
+  final summaryOn = (settings?.summaryMinutes ?? 0) > 0;
+  if (summaryOn) {
+    // the summary tells about the tasks, and its weather line needs the place
+    ref.watch(tasksProvider);
+    ref.watch(aiSettingsProvider);
+  }
   final scheduler = ref.read(reminderSchedulerProvider);
   if (settings == null || !scheduler.supported) return;
   final runs = ref.read(_reminderRunsProvider);
@@ -413,18 +498,33 @@ final reminderSyncProvider = Provider<void>((ref) {
             in ref.read(checkInsProvider).value ?? const <CheckInView>[])
           if (c.date != null) c.date!,
       };
+      final tasks = summaryOn
+          ? (ref.read(tasksProvider).value ?? const <TaskView>[])
+          : const <TaskView>[];
+      // the weather line: only with a place, and when the user lets the
+      // forecast be used (the same switch as for the assistant)
+      final ai = summaryOn ? ref.read(aiSettingsProvider).value : null;
+      final place = (ai != null && ai.weather) ? ai.place : null;
+      final weather = place == null ? null : ref.read(weatherServiceProvider);
       runs.last = runs.last.then((_) async {
         try {
+          // the whole of today counts for the summary, not only what is left
+          final occurrences = settings.shiftLeadMinutes > 0 || summaryOn
+              ? await repo.occurrences(
+                  resolveWallClock(defaultTz, todayIn(now)),
+                  now.add(const Duration(days: 16)),
+                )
+              : const <Occurrence>[];
           final shifts = settings.shiftLeadMinutes > 0
               ? [
-                  for (final o in await repo.occurrences(
-                    now,
-                    now.add(const Duration(days: 16)),
-                  ))
+                  for (final o in occurrences)
                     if (o.isShift && !o.allDay)
                       (startUtc: o.startUtc, title: o.title),
                 ]
               : <({DateTime startUtc, String title})>[];
+          final forecast = summaryOn && weather != null && place != null
+              ? await weather.forecast(place, days: summaryHorizonDays + 1)
+              : null;
           await syncReminders(
             scheduler,
             planReminders(
@@ -432,6 +532,14 @@ final reminderSyncProvider = Provider<void>((ref) {
               settings: settings,
               shifts: shifts,
               checkedInDays: done,
+              summaries: summaryOn
+                  ? summariesFor(
+                      nowUtc: now,
+                      occurrences: occurrences,
+                      tasks: tasks,
+                      forecast: forecast,
+                    )
+                  : const {},
             ),
           );
         } catch (e, st) {

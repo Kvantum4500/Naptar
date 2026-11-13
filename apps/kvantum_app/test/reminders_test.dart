@@ -1,12 +1,21 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    show BigTextStyleInformation;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:kvantum_app/ai/ai_providers.dart';
+import 'package:kvantum_app/ai/ai_settings.dart';
+import 'package:kvantum_app/ai/place.dart';
+import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_app/notify/reminders.dart';
+import 'package:kvantum_app/notify/summary_plan.dart' show summaryHorizonDays;
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -55,6 +64,23 @@ class FakeScheduler implements ReminderScheduler {
       scheduled.add(r);
       device[r.id] = r;
     }
+  }
+}
+
+/// A forecast service that answers what it is told to and remembers the asks.
+class _FakeWeather extends WeatherService {
+  _FakeWeather() : super(http.Client());
+  List<DayWeather>? answer;
+  final calls = <({Place place, int days})>[];
+
+  @override
+  Future<List<DayWeather>?> forecast(
+    Place place, {
+    int days = 7,
+    String timezone = 'Europe/Budapest',
+  }) async {
+    calls.add((place: place, days: days));
+    return answer;
   }
 }
 
@@ -150,6 +176,135 @@ void main() {
     });
   });
 
+  group('planReminders: the morning summary', () {
+    final now = at(12, 10); // 12 Nov 10:00
+    const settings = ReminderSettings(summaryMinutes: 450); // 7:30
+    DaySummary sum(String x) => DaySummary('Ma: $x', 'szöveg $x');
+    final summaries = {
+      floating(2026, 11, 12): sum('csütörtök'), // 7:30 is already over
+      floating(2026, 11, 13): sum('péntek'),
+      floating(2026, 11, 14): sum('szombat'),
+      floating(2026, 11, 19): sum('csütörtök+7'),
+      floating(2026, 11, 20): sum('túl messze'),
+    };
+
+    test('one per day with a text, at the chosen time, none in the past', () {
+      final p = planReminders(
+        nowUtc: now,
+        settings: settings,
+        shifts: const [],
+        checkedInDays: {},
+        summaries: summaries,
+      );
+      expect(p.map((r) => r.atUtc), [
+        at(13, 7, 30),
+        at(14, 7, 30),
+        at(19, 7, 30),
+      ]);
+      expect(p.first.title, 'Ma: péntek');
+      expect(p.first.body, 'szöveg péntek');
+    });
+
+    test('reaches today and seven days, no further', () {
+      final p = planReminders(
+        nowUtc: at(12, 6), // before 7:30, so today counts
+        settings: settings,
+        shifts: const [],
+        checkedInDays: {},
+        summaries: summaries,
+      );
+      expect(p.map((r) => r.title), [
+        'Ma: csütörtök',
+        'Ma: péntek',
+        'Ma: szombat',
+        'Ma: csütörtök+7',
+      ]);
+      expect(
+        p.map((r) => r.title),
+        isNot(contains('Ma: túl messze')),
+        reason: 'the day after today+7 is beyond the horizon',
+      );
+    });
+
+    test('nothing when the summary is off, whatever the texts', () {
+      expect(
+        planReminders(
+          nowUtc: now,
+          settings: const ReminderSettings(checkIn: false),
+          shifts: const [],
+          checkedInDays: {},
+          summaries: summaries,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a day without a text has no notification', () {
+      final p = planReminders(
+        nowUtc: now,
+        settings: settings,
+        shifts: const [],
+        checkedInDays: {},
+        summaries: {floating(2026, 11, 14): sum('szombat')},
+      );
+      expect(p.map((r) => r.title), ['Ma: szombat']);
+    });
+
+    test('the id is the day: stable, apart from the check-ins\' ids', () {
+      final p = planReminders(
+        nowUtc: now,
+        settings: const ReminderSettings(summaryMinutes: 450, checkIn: true),
+        shifts: const [],
+        checkedInDays: {},
+        summaries: {floating(2026, 11, 13): sum('péntek')},
+        horizonDays: 2,
+      );
+      final summary = p.singleWhere((r) => r.title == 'Ma: péntek');
+      final days = floating(2026, 11, 13).millisecondsSinceEpoch ~/ 86400000;
+      expect(summary.id, summaryReminderIdBase + days);
+      expect(summary.id, isNot(1500000000 + days));
+      expect(p.map((r) => r.id).toSet().length, p.length);
+      expect(summaryReminderIdBase, greaterThan(1500000000 + 40000));
+      expect(summaryReminderIdBase + 40000, lessThan(2000000001));
+    });
+
+    test('sorted with the others by time', () {
+      final p = planReminders(
+        nowUtc: now,
+        settings: const ReminderSettings(
+          summaryMinutes: 450,
+          checkIn: true,
+          shiftLeadMinutes: 60,
+        ),
+        shifts: [(startUtc: at(14, 8), title: 'Reggeli műszak')],
+        checkedInDays: {},
+        summaries: {floating(2026, 11, 14): sum('szombat')},
+        horizonDays: 3,
+      );
+      expect(p.map((r) => r.atUtc), [...p.map((r) => r.atUtc)]..sort());
+      // the shift reminder (07:00) comes before the summary (07:30) of the day
+      final onThe14th = p.where(
+        (r) => r.atUtc.isAfter(at(14, 0)) && r.atUtc.isBefore(at(14, 12)),
+      );
+      expect(onThe14th.map((r) => r.title), ['Reggeli műszak', 'Ma: szombat']);
+    });
+
+    test('the time of day is the zone\'s, also over a clock change', () {
+      // 25 Oct 2026: the clocks go back at 03:00 -> a 7:30 summary is at 06:30 UTC
+      final p = planReminders(
+        nowUtc: resolveWallClock(bp, floating(2026, 10, 24, 12)),
+        settings: settings,
+        shifts: const [],
+        checkedInDays: {},
+        summaries: {
+          floating(2026, 10, 24): sum('szombat'),
+          floating(2026, 10, 25): sum('vasárnap'),
+        },
+      );
+      expect(p.map((r) => r.atUtc), [DateTime.utc(2026, 10, 25, 6, 30)]);
+    });
+  });
+
   test(
     'settings are remembered, and bad stored values fall back to off',
     () async {
@@ -167,6 +322,43 @@ void main() {
       expect((await store.load()).shiftLeadMinutes, 0);
     },
   );
+
+  test(
+    'the morning summary time is remembered, and only the offered ones',
+    () async {
+      final m = <String, String?>{};
+      final store = ReminderSettingsStore(
+        read: (k) async => m[k],
+        write: (k, v) async => m[k] = v,
+      );
+      expect((await store.load()).summaryMinutes, 0, reason: 'off by default');
+      await store.save(const ReminderSettings(summaryMinutes: 450));
+      expect(m['rem.summary'], '450');
+      expect((await store.load()).summaryMinutes, 450);
+      for (final bad in ['100', '361', '-30', 'x', '', '1440']) {
+        m['rem.summary'] = bad;
+        expect((await store.load()).summaryMinutes, 0, reason: bad);
+      }
+      await store.save(const ReminderSettings());
+      expect(m['rem.summary'], isNull, reason: 'off is no entry');
+    },
+  );
+
+  test('a summary alone counts as a reminder, and survives a copy', () {
+    expect(const ReminderSettings(summaryMinutes: 420).any, isTrue);
+    expect(const ReminderSettings().any, isFalse);
+    final c = const ReminderSettings(
+      shiftLeadMinutes: 60,
+      checkIn: true,
+      summaryMinutes: 420,
+    ).copyWith(shiftLeadMinutes: 120);
+    expect((c.shiftLeadMinutes, c.checkIn, c.summaryMinutes), (120, true, 420));
+    expect(summaryChoices.first, 360);
+    expect(summaryChoices.last, 540);
+    expect(summaryTimeLabel(360), '6:00');
+    expect(summaryTimeLabel(450), '7:30');
+    expect(summaryTimeLabel(540), '9:00');
+  });
 
   group('diffReminders: only the difference reaches the device', () {
     test('a plan with time-zone times equals what the device reports', () {
@@ -316,12 +508,14 @@ void main() {
     late FakeScheduler fake;
     late ManualTimers timers;
     late ProviderContainer c;
+    late _FakeWeather weather;
 
     DateTime? fixedNow;
     setUp(() async {
       db = await newDb();
       fake = FakeScheduler();
       timers = ManualTimers();
+      weather = _FakeWeather();
       fixedNow = DateTime.utc(2026, 11, 12, 9);
       c = ProviderContainer(
         overrides: [
@@ -329,6 +523,7 @@ void main() {
           reminderSchedulerProvider.overrideWithValue(fake),
           reminderTimerProvider.overrideWithValue(timers.make),
           appClockProvider.overrideWithValue(() => fixedNow!),
+          weatherServiceProvider.overrideWithValue(weather),
         ],
       );
     });
@@ -365,9 +560,24 @@ void main() {
 
     Future<void> fireLast() async {
       final before = fake.pendingReads;
+      // (a rebuild of the provider cancels the old wait, then starts a new one)
+      await until(() => timers.live > 0);
       timers.made.lastWhere((m) => m.live()).fire();
       await until(() => fake.pendingReads > before);
       await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    /// Everything the sync watches has answered and every wait that started
+    /// meanwhile is over: only a real change can start the next one.
+    Future<void> settle() async {
+      await c.read(tasksProvider.future);
+      await c.read(eventsTickProvider.future);
+      await fireLast();
+      while (timers.live > 0) {
+        await fireLast();
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(timers.live, 0);
     }
 
     test(
@@ -421,6 +631,224 @@ void main() {
       expect(fake.pendingReads, 0);
     });
 
+    test('the morning summary is made from the events and the tasks', () async {
+      // tomorrow (Friday 13 Nov): a visit at 14:00 and a task due that day
+      await EventRepository(db).saveLocal(
+        CalEvent(
+          id: 'v1',
+          calendarId: kNaptarCalendar,
+          title: 'Fogorvos',
+          start: floating(2026, 11, 13, 14),
+          end: floating(2026, 11, 13, 15),
+          tzid: bp,
+        ),
+      );
+      await RecordRepository(db).edit(
+        kindTask,
+        't1',
+        taskFields(title: 'Számla befizetése', due: floating(2026, 11, 13)),
+      );
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      // (the tasks come in as a stream; a plan made before they are there is
+      // made again when they arrive)
+      await c.read(tasksProvider.future);
+      await until(() => timers.made.where((m) => m.live()).isNotEmpty);
+      await fireLast();
+      final r = fake.device.values.single;
+      expect(r.atUtc, at(13, 7, 30));
+      expect(r.title, 'Ma: péntek, nov. 13.');
+      expect(r.body.split('\n'), [
+        '14:00 Fogorvos',
+        'Feladat: Számla befizetése',
+      ]);
+    });
+
+    test(
+      'a changed event rewrites the text, nothing else is touched',
+      () async {
+        await EventRepository(db).saveLocal(
+          CalEvent(
+            id: 'v1',
+            calendarId: kNaptarCalendar,
+            title: 'Fogorvos',
+            start: floating(2026, 11, 13, 14),
+            end: floating(2026, 11, 13, 15),
+            tzid: bp,
+          ),
+        );
+        await turnOn(const ReminderSettings(summaryMinutes: 450));
+        await fireLast();
+        final first = fake.device.values.single;
+        expect(first.body, '14:00 Fogorvos');
+        // moved to 16:00
+        await EventRepository(db).saveLocal(
+          CalEvent(
+            id: 'v1',
+            calendarId: kNaptarCalendar,
+            title: 'Fogorvos',
+            start: floating(2026, 11, 13, 16),
+            end: floating(2026, 11, 13, 17),
+            tzid: bp,
+            version: 2,
+          ),
+        );
+        await until(() => timers.made.where((m) => m.live()).isNotEmpty);
+        await fireLast();
+        final second = fake.device.values.single;
+        expect(second.id, first.id, reason: 'same day, same notification');
+        expect(second.body, '16:00 Fogorvos');
+      },
+    );
+
+    Future<void> visitTomorrow() => EventRepository(db).saveLocal(
+      CalEvent(
+        id: 'v1',
+        calendarId: kNaptarCalendar,
+        title: 'Fogorvos',
+        start: floating(2026, 11, 13, 14),
+        end: floating(2026, 11, 13, 15),
+        tzid: bp,
+      ),
+    );
+
+    final place = Place(name: 'Szeged', lat: 46.25, lon: 20.15);
+    final rainy = DayWeather(
+      day: floating(2026, 11, 13),
+      tMin: 2,
+      tMax: 8,
+      precipProb: 70,
+      code: 61,
+    );
+
+    test(
+      'the weather line is the forecast of the place for that day',
+      () async {
+        weather.answer = [
+          DayWeather(day: floating(2026, 11, 12), tMin: 9, tMax: 12, code: 0),
+          rainy,
+        ];
+        await visitTomorrow();
+        await c.read(aiSettingsProvider.future);
+        await c
+            .read(aiSettingsProvider.notifier)
+            .change(AiSettings(place: place));
+        await turnOn(const ReminderSettings(summaryMinutes: 450));
+        await fireLast();
+        expect(weather.calls, hasLength(1));
+        expect(weather.calls.single.place, place);
+        // today and the eight days of the plan: the forecast starts today
+        expect(weather.calls.single.days, summaryHorizonDays + 1);
+        expect(fake.device.values.single.body.split('\n'), [
+          'Időjárás: ${weatherLine(rainy)}',
+          '14:00 Fogorvos',
+        ]);
+      },
+    );
+
+    test('with the switch off the forecast is not asked for', () async {
+      weather.answer = [rainy];
+      await visitTomorrow();
+      await c.read(aiSettingsProvider.future);
+      await c
+          .read(aiSettingsProvider.notifier)
+          .change(AiSettings(place: place, weather: false));
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await fireLast();
+      expect(weather.calls, isEmpty);
+      expect(fake.device.values.single.body, '14:00 Fogorvos');
+    });
+
+    test('without a place the forecast is not asked for', () async {
+      weather.answer = [rainy];
+      await visitTomorrow();
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await fireLast();
+      expect(weather.calls, isEmpty);
+      expect(fake.device.values.single.body, '14:00 Fogorvos');
+    });
+
+    test('a forecast that is not to be had leaves the line out', () async {
+      weather.answer = null;
+      await visitTomorrow();
+      await c.read(aiSettingsProvider.future);
+      await c
+          .read(aiSettingsProvider.notifier)
+          .change(AiSettings(place: place));
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await fireLast();
+      expect(weather.calls, hasLength(1));
+      expect(fake.device.values.single.body, '14:00 Fogorvos');
+    });
+
+    test('a new place makes a new plan', () async {
+      weather.answer = [rainy];
+      await visitTomorrow();
+      await c.read(aiSettingsProvider.future);
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await settle();
+      expect(fake.device.values.single.body, '14:00 Fogorvos');
+
+      await c
+          .read(aiSettingsProvider.notifier)
+          .change(AiSettings(place: place));
+      await until(() => timers.live > 0);
+      await fireLast();
+      expect(fake.device.values.single.body.split('\n'), [
+        'Időjárás: ${weatherLine(rainy)}',
+        '14:00 Fogorvos',
+      ]);
+    });
+
+    test('the new day moves the eight days on', () async {
+      // an event nine days ahead: outside the plan today, inside it tomorrow
+      await EventRepository(db).saveLocal(
+        CalEvent(
+          id: 'far',
+          calendarId: kNaptarCalendar,
+          title: 'Konferencia',
+          start: floating(2026, 11, 20, 9),
+          end: floating(2026, 11, 20, 10),
+          tzid: bp,
+        ),
+      );
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await settle();
+      expect(fake.device, isEmpty);
+
+      fixedNow = DateTime.utc(2026, 11, 13, 9);
+      c.read(todayProvider.notifier).refresh();
+      await until(() => timers.live > 0);
+      await fireLast();
+      expect(fake.device.values.single.atUtc, at(20, 7, 30));
+      expect(fake.device.values.single.body, '09:00 Konferencia');
+    });
+
+    test('the summary of today also tells what is over by then', () async {
+      // 05:00 in Budapest; the summary is for 7:30; the visit was at 3:00
+      fixedNow = DateTime.utc(2026, 11, 12, 4);
+      await EventRepository(db).saveLocal(
+        CalEvent(
+          id: 'early',
+          calendarId: kNaptarCalendar,
+          title: 'Korai vizsgálat',
+          start: floating(2026, 11, 12, 3),
+          end: floating(2026, 11, 12, 4),
+          tzid: bp,
+        ),
+      );
+      await turnOn(const ReminderSettings(summaryMinutes: 450));
+      await fireLast();
+      final r = fake.device.values.single;
+      expect(r.atUtc, at(12, 7, 30));
+      expect(r.body, '03:00 Korai vizsgálat');
+    });
+
+    test('with the summary off, no tasks or places are looked at', () async {
+      await turnOn(const ReminderSettings(shiftLeadMinutes: 60));
+      await fireLast();
+      expect(fake.device, isEmpty);
+    });
+
     test(
       'a second look with nothing new changes nothing on the device',
       () async {
@@ -436,6 +864,29 @@ void main() {
         expect(fake.cancelled, isEmpty);
       },
     );
+  });
+
+  group('how an Android reminder looks', () {
+    test('a short one is plain', () {
+      final d = AndroidReminderScheduler.detailsFor(
+        PlannedReminder(1, at(13, 7), 'Cím', 'Egy sor'),
+      );
+      expect(d.android!.channelId, 'reminders');
+      expect(d.android!.styleInformation, isNull);
+    });
+
+    test('a text of several lines opens up to all of them', () {
+      final d = AndroidReminderScheduler.detailsFor(
+        PlannedReminder(1, at(13, 7), 'Ma', '14:00 Fogorvos\nFeladat: Számla'),
+      );
+      expect(d.android!.channelId, 'reminders');
+      final style = d.android!.styleInformation;
+      expect(style, isA<BigTextStyleInformation>());
+      expect(
+        (style! as BigTextStyleInformation).bigText,
+        '14:00 Fogorvos\nFeladat: Számla',
+      );
+    });
   });
 
   group('settings page', () {
@@ -484,6 +935,80 @@ void main() {
         ),
       );
       expect(s.value, isFalse);
+      await shutdown(tester, db);
+    });
+
+    Finder summaryField() => find.widgetWithText(
+      DropdownButtonFormField<int>,
+      'Reggeli összefoglaló',
+    );
+
+    Future<void> chooseSummary(WidgetTester tester, String time) async {
+      await tester.scrollUntilVisible(
+        summaryField(),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(summaryField());
+      await tester.pumpAndSettle();
+      await tester.tap(summaryField());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(time).last);
+      await tester.pumpAndSettle();
+    }
+
+    ReminderSettings stored(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.byType(SettingsPage)))
+            .read(reminderSettingsProvider)
+            .value!;
+
+    testWidgets('the morning summary: off at first, the choice is stored', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tester.scrollUntilVisible(
+        summaryField(),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.descendant(of: summaryField(), matching: find.text('Ki')),
+        findsOneWidget,
+      );
+      expect(stored(tester).summaryMinutes, 0);
+      await chooseSummary(tester, '7:30');
+      expect(stored(tester).summaryMinutes, 450);
+      expect(
+        find.descendant(of: summaryField(), matching: find.text('7:30')),
+        findsOneWidget,
+      );
+      // the words say what it is and that the text can be seen on the lock screen
+      expect(
+        find.textContaining('zárolt képernyőn is látszhat'),
+        findsOneWidget,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a refused permission leaves the summary off, and shows it', (
+      tester,
+    ) async {
+      await boot(tester, grant: false);
+      await chooseSummary(tester, '8:00');
+      expect(
+        find.textContaining('Az értesítések le vannak tiltva'),
+        findsOneWidget,
+      );
+      expect(stored(tester).summaryMinutes, 0);
+      expect(
+        find.descendant(of: summaryField(), matching: find.text('Ki')),
+        findsOneWidget,
+        reason: 'the field shows what is in force, not what was tried',
+      );
+      expect(
+        find.descendant(of: summaryField(), matching: find.text('8:00')),
+        findsNothing,
+      );
       await shutdown(tester, db);
     });
 

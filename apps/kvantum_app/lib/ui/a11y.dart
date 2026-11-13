@@ -16,16 +16,19 @@ String spokenDay(DateTime d) =>
 /// "nincs esemény", "1 esemény", "3 esemény".
 String spokenCount(int n) => n == 0 ? 'nincs esemény' : '$n esemény';
 
-/// A day cell of the month grid: the weekday and date, how many events, and
-/// whether it is today or belongs to another month than the one on show.
+/// A day cell of the month grid: the weekday and date, how many events, a
+/// holiday or a moved working day, and whether it is today or belongs to
+/// another month than the one on show.
 String spokenCell({
   required DateTime day,
   required int events,
   required bool today,
   required bool inMonth,
+  HuDay? special,
 }) => [
   spokenDay(day),
   spokenCount(events),
+  if (special != null) special.label,
   if (today) 'ma',
   if (!inMonth) 'másik hónap',
 ].join(', ');

@@ -60,6 +60,20 @@
                 <action android:name="android.service.notification.NotificationListenerService"/>
             </intent-filter>
         </service>
+        <!-- The home-screen widget (today's events, tasks and the next shift).
+             Only the system and this app's own alarm reach it (not exported);
+             see TodayWidgetProvider and lib/widget. -->
+        <receiver
+            android:name=".TodayWidgetProvider"
+            android:exported="false"
+            android:label="Kvantum Naptár">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info"/>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

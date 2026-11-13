@@ -31,6 +31,7 @@ import '../ui/diagnostics_page.dart';
 import '../ui/setup_guide.dart';
 import '../ui/shortcuts.dart' show showShortcutHelp;
 import '../ui/theme.dart';
+import '../widget/widget_bridge.dart';
 import 'settings/account_card.dart';
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
@@ -47,6 +48,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   final _key = TextEditingController();
   final _base = TextEditingController();
   bool _hasKey = false;
+
+  /// Bumped when the system refuses the notifications: the choice a field
+  /// shows is not the one in force, so the fields are built anew.
+  int _remindersRev = 0;
   bool _busy = false;
   bool _show = false;
   String? _message;
@@ -397,6 +402,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final ok = await ref.read(reminderSchedulerProvider).ensurePermission();
       if (!ok) {
         _toast(remindersBlockedHelp(), error: true);
+        if (mounted) setState(() => _remindersRev++);
         return;
       }
     }
@@ -814,6 +820,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
+                    key: ValueKey('lead-$_remindersRev'),
                     initialValue: reminders.shiftLeadMinutes,
                     isExpanded: true,
                     decoration: const InputDecoration(
@@ -847,6 +854,35 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     onChanged: (v) =>
                         _setReminders(reminders.copyWith(checkIn: v)),
                   ),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('summary-$_remindersRev'),
+                    initialValue: reminders.summaryMinutes,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Reggeli összefoglaló',
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: 0, child: Text('Ki')),
+                      for (final m in summaryChoices)
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(summaryTimeLabel(m)),
+                        ),
+                    ],
+                    onChanged: (v) => v == null
+                        ? null
+                        : _setReminders(reminders.copyWith(summaryMinutes: v)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Egy értesítés a nap elején: a mai események, a határidős '
+                    'feladatok, az ünnepnap, és ha megadtál helyet (és az '
+                    'Időjárás be van kapcsolva), az időjárás. A szövege a '
+                    'zárolt képernyőn is látszhat. A program előre, a '
+                    'következő nyolc napra írja meg, és minden változásnál '
+                    'újraírja; ha sokáig nem nyitod meg, a régi szöveg jön.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   // (starting with Windows: only where there is such a thing)
                   if (ref.watch(autostartProvider) != null)
                     const AutostartTile(),
@@ -854,6 +890,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   const ReminderTestButton(),
                 ],
               ]),
+              // (the widget is an Android thing: only there is it mentioned)
+              if (ref.watch(widgetBridgeProvider).active)
+                section('Főképernyő-widget', [
+                  const Text(
+                    'A főképernyőre kitehető egy „Kvantum Naptár” widget: a '
+                    'mai események, a határidős feladatok, az ünnepnap és a '
+                    'következő műszak látszik rajta. Kitételhez tartsd '
+                    'nyomva a főképernyő egy üres helyét, válaszd a Widgetek '
+                    'pontot, és húzd ki a Kvantum Naptárt.',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'A tartalma akkor frissül, amikor az app fut (megnyitáskor, '
+                    'szinkron után); az új napra magától vált, és a következő '
+                    'hét napot előre tudja. Az események címe a főképernyőn '
+                    'annak is látszik, aki a telefonodra néz.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ]),
               section('Google Wallet értesítések', const [WalletSettings()]),
               SettingsGroupHeader('Adatok'),
               section('Automatikus mentés', const [BackupBody()]),

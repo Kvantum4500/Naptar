@@ -2,10 +2,12 @@ library;
 
 export 'src/assistant_context.dart';
 export 'src/assistant_models.dart';
+export 'src/daily_summary.dart';
 export 'src/event.dart';
 export 'src/finance.dart';
 export 'src/free_slots.dart';
 export 'src/handbook.dart';
+export 'src/hu_calendar.dart';
 export 'src/ics.dart';
 export 'src/local_answers.dart';
 export 'src/models.dart';

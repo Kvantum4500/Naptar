@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colours of the home-screen widget (light). The dark set is in
+     values-night; both keep the text at 4.5:1 or better against the
+     background (a test in test/android_widget_test.dart checks it). -->
+<resources>
+    <color name="widget_background">#F5F7FA</color>
+    <color name="widget_text">#1B1F27</color>
+    <color name="widget_text_dim">#4B5361</color>
+    <color name="widget_accent">#B3261E</color>
+</resources>

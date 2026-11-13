@@ -133,9 +133,11 @@ class _TimeGridState extends ConsumerState<TimeGrid> {
                           child: Semantics(
                             container: true,
                             button: widget.onDayTap != null,
-                            label: d == today
-                                ? '${spokenDay(d)}, ma'
-                                : spokenDay(d),
+                            label: [
+                              spokenDay(d),
+                              if (huDayInfo(d) != null) huDayInfo(d)!.label,
+                              if (d == today) 'ma',
+                            ].join(', '),
                             child: InkWell(
                               onTap: widget.onDayTap == null
                                   ? null
@@ -173,7 +175,9 @@ class _TimeGridState extends ConsumerState<TimeGrid> {
                                           fontWeight: FontWeight.w600,
                                           color: d == today
                                               ? scheme.onPrimary
-                                              : scheme.onSurface,
+                                              : (huDayInfo(d)?.isDayOff == true
+                                                    ? scheme.error
+                                                    : scheme.onSurface),
                                         ),
                                       ),
                                     ),

@@ -18,6 +18,7 @@ import 'search_page.dart';
 import 'setup_card.dart';
 import 'shortcuts.dart';
 import '../notify/reminders.dart';
+import '../widget/widget_sync.dart';
 import 'swipe_nav.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
@@ -127,6 +128,7 @@ class _Calendar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(reminderSyncProvider); // keeps the device reminders up to date
+    ref.watch(widgetSyncProvider); // and the home-screen widget (Android)
     final view = ref.watch(viewModeProvider);
     final month = ref.watch(visibleMonthProvider);
     final sel = ref.watch(selectedDayProvider);
@@ -366,6 +368,7 @@ class _DayPanel extends ConsumerWidget {
     final day = ref.watch(selectedDayProvider);
     final range = ref.watch(dayRangeProvider);
     final count = ref.watch(monthOccurrencesProvider).value?[day]?.length ?? 0;
+    final special = huDayInfo(day);
     return LayoutBuilder(
       builder: (context, c) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -385,6 +388,16 @@ class _DayPanel extends ConsumerWidget {
                       fmtDateLong(day),
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
+                    if (special != null)
+                      Text(
+                        special.label,
+                        key: const Key('day-special'),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: special.isDayOff
+                              ? Theme.of(context).colorScheme.error
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     Text(
                       count == 0
                           ? 'Nincs esemény erre a napra.'
