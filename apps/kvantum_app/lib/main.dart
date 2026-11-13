@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import 'data/db.dart';
 import 'data/startup.dart';
 import 'diag/diag_log.dart';
 import 'diag/guarded.dart';
+import 'notify/windows_autostart.dart';
 import 'providers.dart' show dbPathProvider, dbProvider;
 import 'ui/root_shell.dart';
 import 'ui/setup_guide.dart' show setupGuideProvider;
@@ -56,6 +58,10 @@ Future<void> _start(DiagLog log) async {
       'schema': AppDatabase.currentSchemaVersion,
     },
   );
+  if (Platform.isWindows) {
+    // a startup entry the user switched on follows the program where it is now
+    unawaited(_repairAutostart(log));
+  }
   final move = start.move;
   if (move != null && (move.moved || move.cleaned || move.problem != null)) {
     log.info(
@@ -95,6 +101,16 @@ Future<void> _start(DiagLog log) async {
       child: const KvantumApp(),
     ),
   );
+}
+
+Future<void> _repairAutostart(DiagLog log) async {
+  try {
+    if (await WindowsAutostart.forThisProgram().repair()) {
+      log.info('autostart', 'repaired');
+    }
+  } catch (e, st) {
+    log.error('autostart', 'repair.failed', e, st);
+  }
 }
 
 class KvantumApp extends ConsumerWidget {

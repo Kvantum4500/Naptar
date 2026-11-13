@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -10,6 +11,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../providers.dart';
 import '../ui/day_utils.dart';
 import '../diag/diag_log.dart';
+import 'windows_reminders.dart';
 
 /// What the user wants to be reminded of. Everything is off by default.
 class ReminderSettings {
@@ -59,16 +61,20 @@ class PlannedReminder {
   final String title;
   final String body;
 
+  // (compared by the instant: a time made with the time-zone package equals
+  // no other DateTime with `==`, not even the same moment read back from the
+  // device - every evening reminder looked "changed" and was set again)
   @override
   bool operator ==(Object other) =>
       other is PlannedReminder &&
       other.id == id &&
-      other.atUtc == atUtc &&
+      other.atUtc.microsecondsSinceEpoch == atUtc.microsecondsSinceEpoch &&
       other.title == title &&
       other.body == body;
 
   @override
-  int get hashCode => Object.hash(id, atUtc, title, body);
+  int get hashCode =>
+      Object.hash(id, atUtc.microsecondsSinceEpoch, title, body);
 
   @override
   String toString() => 'PlannedReminder($id, $atUtc, $title)';
@@ -302,11 +308,47 @@ class AndroidReminderScheduler implements ReminderScheduler {
   }
 }
 
+/// The scheduler of a platform: Android has its alarm manager, Windows its
+/// scheduled toasts, anything else no reminders. (The choice is a function of
+/// flags so that it can be tried on any machine.)
+ReminderScheduler reminderSchedulerFor({
+  required bool android,
+  required bool windows,
+  required Future<String?> Function(String key) read,
+  required Future<void> Function(String key, String? value) write,
+  required DateTime Function() now,
+  ToastBackend Function()? toastBackend,
+}) {
+  if (android) return AndroidReminderScheduler();
+  if (windows) {
+    return WindowsReminderScheduler(
+      backend: (toastBackend ?? PluginToastBackend.new)(),
+      read: read,
+      write: write,
+      now: now,
+    );
+  }
+  return NoopReminderScheduler();
+}
+
 final reminderSchedulerProvider = Provider<ReminderScheduler>(
-  (_) => (!kIsWeb && Platform.isAndroid)
-      ? AndroidReminderScheduler()
-      : NoopReminderScheduler(),
+  (ref) => reminderSchedulerFor(
+    android: !kIsWeb && Platform.isAndroid,
+    windows: !kIsWeb && Platform.isWindows,
+    // (looked up when needed: nothing touches the database before that)
+    read: (k) => ref.read(recordRepoProvider).meta(k),
+    write: (k, v) => ref.read(recordRepoProvider).setMeta(k, v),
+    now: () => ref.read(appClockProvider)(),
+  ),
 );
+
+/// What to tell the user when the notifications could not be switched on.
+String remindersBlockedHelp() => defaultTargetPlatform == TargetPlatform.windows
+    ? 'Az értesítések nem indíthatók el. Nézd meg a Windows értesítési '
+          'beállításait (Rendszer → Értesítések), és hogy a „Ne zavarjanak” / '
+          'Fókusz mód nincs-e bekapcsolva.'
+    : 'Az értesítések le vannak tiltva. Engedélyezd az Android beállításaiban '
+          '(Alkalmazások → Kvantum Naptár → Értesítések).';
 
 final reminderSettingsStoreProvider = Provider<ReminderSettingsStore>((ref) {
   final r = ref.watch(recordRepoProvider);

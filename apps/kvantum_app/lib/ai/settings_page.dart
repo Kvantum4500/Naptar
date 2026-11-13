@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,7 +16,10 @@ import '../update/update_dialog.dart';
 import 'ai_providers.dart';
 import 'location_service.dart';
 import 'place.dart';
+import '../notify/autostart_tile.dart';
+import '../notify/reminder_test_button.dart';
 import '../notify/reminders.dart';
+import '../notify/windows_autostart.dart' show autostartProvider;
 import 'ai_settings.dart';
 import 'endpoint_policy.dart';
 import 'handbook_page.dart';
@@ -391,10 +396,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (next.any) {
       final ok = await ref.read(reminderSchedulerProvider).ensurePermission();
       if (!ok) {
-        _toast(
-          'Az értesítések le vannak tiltva. Engedélyezd az Android beállításaiban (Alkalmazások → Kvantum Naptár → Értesítések).',
-          error: true,
-        );
+        _toast(remindersBlockedHelp(), error: true);
         return;
       }
     }
@@ -486,12 +488,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               : scheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          _hasKey
-                              ? 'API-kulcs megadva'
-                              : (info.keyOptional
-                                    ? 'Kulcs nem kötelező'
-                                    : 'Nincs API-kulcs'),
+                        Flexible(
+                          child: Text(
+                            _hasKey
+                                ? 'API-kulcs megadva'
+                                : (info.keyOptional
+                                      ? 'Kulcs nem kötelező'
+                                      : 'Nincs API-kulcs'),
+                          ),
                         ),
                       ],
                     ),
@@ -718,6 +722,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     Expanded(
                       child: DropdownButtonFormField<int>(
                         initialValue: settings.sleepStartHour,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Alvás kezdete',
                         ),
@@ -740,6 +745,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     Expanded(
                       child: DropdownButtonFormField<int>(
                         initialValue: settings.sleepEndHour,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Alvás vége',
                         ),
@@ -795,15 +801,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               section('Emlékeztetők', [
                 if (!ref.watch(reminderSchedulerProvider).supported)
                   const Text(
-                    'Az emlékeztetők ezen az eszközön még nem érhetők el (egyelőre csak Androidon működnek).',
+                    'Az emlékeztetők ezen az eszközön nem érhetők el (Androidon és Windowson működnek).',
                   )
                 else ...[
-                  const Text(
-                    'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
+                  Text(
+                    defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Helyi értesítések, nem megy el hozzá adat sehová. '
+                              'A Windows jeleníti meg őket a kitűzött időben, '
+                              'akkor is, ha a program be van zárva; az '
+                              'ütemezést a program frissíti, amikor fut.'
+                        : 'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
                     initialValue: reminders.shiftLeadMinutes,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Emlékeztető a műszak előtt',
                     ),
@@ -835,6 +847,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     onChanged: (v) =>
                         _setReminders(reminders.copyWith(checkIn: v)),
                   ),
+                  // (starting with Windows: only where there is such a thing)
+                  if (ref.watch(autostartProvider) != null)
+                    const AutostartTile(),
+                  // (a way to see at once that the reminders reach the user)
+                  const ReminderTestButton(),
                 ],
               ]),
               section('Google Wallet értesítések', const [WalletSettings()]),
@@ -887,6 +904,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 DropdownButtonFormField<ThemeMode>(
                   key: ValueKey('theme-${ref.watch(themeModeProvider).name}'),
                   initialValue: ref.watch(themeModeProvider),
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Téma'),
                   items: const [
                     DropdownMenuItem(

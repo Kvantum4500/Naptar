@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -189,6 +191,15 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   int _quiet = 0, _failures = 0, _ticks = 0;
   DateTime? _notBefore, _lastRun;
   bool _foreground = true;
+
+  /// A computer (Windows, ...) rather than a phone; asked when it matters so
+  /// that a test can pretend to be either.
+  bool get _desktop => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.linux ||
+    TargetPlatform.macOS => true,
+    _ => false,
+  };
 
   DateTime _now() => ref.read(syncClockProvider)();
 
@@ -810,6 +821,11 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
                 : left,
           );
         }
+      case AppLifecycleState.hidden when _desktop:
+        // A minimised window on a computer is a program that stays open (it
+        // may have been started minimised, to keep the reminders current): it
+        // goes on syncing at its own slow beat.
+        break;
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:

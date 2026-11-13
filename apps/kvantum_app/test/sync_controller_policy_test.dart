@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -171,6 +173,44 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(remote.pullCalls, pulls + 1, reason: '2 minutes: look now');
     });
+
+    test('a window minimised on a computer keeps the beat', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await ctl.signIn();
+      final t = live();
+      expect(t, isNotNull);
+      ctl.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      expect(live(), same(t), reason: 'a program left open goes on syncing');
+      await ctl.syncNow();
+      expect(live(), isNotNull, reason: 'and the next look is planned');
+      expect(live(), isNot(same(t)));
+    });
+
+    test('hidden on a phone stops the beat', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await ctl.signIn();
+      ctl.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      expect(live(), isNull);
+      await ctl.syncNow();
+      expect(live(), isNull);
+    });
+
+    test(
+      'a computer stops the beat when the window is gone or paused',
+      () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        await ctl.signIn();
+        ctl.didChangeAppLifecycleState(AppLifecycleState.detached);
+        expect(live(), isNull);
+        ctl.didChangeAppLifecycleState(AppLifecycleState.resumed);
+        expect(live(), isNotNull);
+        ctl.didChangeAppLifecycleState(AppLifecycleState.paused);
+        expect(live(), isNull);
+      },
+    );
 
     test('losing focus (inactive) changes nothing', () async {
       await ctl.signIn();

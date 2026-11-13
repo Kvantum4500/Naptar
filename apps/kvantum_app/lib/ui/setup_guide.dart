@@ -36,7 +36,8 @@ class SetupFacts {
   final bool walletOn;
 
   /// Whether [step] can be done on this device at all (there is no Google
-  /// sign-in in a build without keys, no reminders on Windows).
+  /// sign-in in a build without keys, no reminders where the system has no
+  /// way to schedule them, no Wallet outside Android).
   bool relevant(SetupStep step) => switch (step) {
     SetupStep.signIn => googleConfigured,
     SetupStep.aiKey || SetupStep.place => true,

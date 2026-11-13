@@ -169,6 +169,31 @@ void main() {
   );
 
   group('diffReminders: only the difference reaches the device', () {
+    test('a plan with time-zone times equals what the device reports', () {
+      // (the evening reminders are made with the time-zone package, whose
+      // times do not equal a plain DateTime of the same moment)
+      final plan = planReminders(
+        nowUtc: at(12, 10),
+        settings: const ReminderSettings(checkIn: true),
+        shifts: const [],
+        checkedInDays: {},
+      );
+      expect(plan, isNotEmpty);
+      final onDevice = [
+        for (final p in plan)
+          plannedFromPending(
+            p.id,
+            p.title,
+            p.body,
+            '${p.atUtc.millisecondsSinceEpoch}',
+          ),
+      ];
+      expect(diffReminders(onDevice, plan).isEmpty, isTrue);
+      // the same moment is one reminder, whichever kind of time holds it
+      expect(onDevice.map((r) => r.hashCode), plan.map((r) => r.hashCode));
+      expect({...onDevice, ...plan}.length, plan.length);
+    });
+
     PlannedReminder r(
       int id,
       int day, [

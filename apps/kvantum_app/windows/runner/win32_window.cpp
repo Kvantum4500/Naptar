@@ -297,8 +297,29 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
+  if (start_minimized_) {
+    // Only the first time: later calls show the window as usual.
+    start_minimized_ = false;
+    // The window sits in the taskbar and takes no focus. It is placed (not
+    // just shown) so that restoring it from there brings back the size or the
+    // maximised state it had when it was last closed.
+    WINDOWPLACEMENT placement = {};
+    placement.length = static_cast<UINT>(sizeof(placement));
+    if (GetWindowPlacement(window_handle_, &placement)) {
+      placement.showCmd = SW_SHOWMINNOACTIVE;
+      if (maximize_on_show_) {
+        placement.flags |= WPF_RESTORETOMAXIMIZED;
+      }
+      return SetWindowPlacement(window_handle_, &placement) != FALSE;
+    }
+    return ShowWindow(window_handle_, SW_SHOWMINNOACTIVE) != FALSE;
+  }
   return ShowWindow(window_handle_,
                     maximize_on_show_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
+}
+
+void Win32Window::SetStartMinimized(bool start_minimized) {
+  start_minimized_ = start_minimized;
 }
 
 // static
