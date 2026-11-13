@@ -14,6 +14,7 @@ export 'src/rrule_convert.dart';
 export 'src/recurrence.dart';
 export 'src/recurrence_spec.dart';
 export 'src/rules.dart';
+export 'src/search.dart';
 export 'src/series_ops.dart';
 export 'src/shift_pattern.dart';
 export 'src/sync_record.dart';

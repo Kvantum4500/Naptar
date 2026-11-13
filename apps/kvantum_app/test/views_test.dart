@@ -348,8 +348,8 @@ void main() {
       final db = await pumpAt(tester, 400);
       expect(find.text('2026. november'), findsOneWidget);
       final title = tester.getRect(find.text('2026. november'));
-      final prev = tester.getRect(find.byTooltip('Előző'));
-      expect(title.right, lessThanOrEqualTo(prev.left));
+      final firstButton = tester.getRect(find.byTooltip('Nézet'));
+      expect(title.right, lessThanOrEqualTo(firstButton.left));
       await shutdown(tester, db);
     });
 
@@ -364,12 +364,35 @@ void main() {
       expect(text.overflow, isNull, reason: 'no ellipsis: it scales instead');
       // what is drawn ends before the first button begins
       final title = tester.getRect(find.text('2026. nov.'));
-      final prev = tester.getRect(find.byTooltip('Előző'));
-      expect(title.right, lessThanOrEqualTo(prev.left));
+      final firstButton = tester.getRect(find.byTooltip('Nézet'));
+      expect(title.right, lessThanOrEqualTo(firstButton.left));
       expect(title.left, greaterThanOrEqualTo(0));
       expect(tester.takeException(), isNull);
       await shutdown(tester, db);
     });
+  });
+
+  testWidgets('the bar follows the width of the PAGE, not of the window', (
+    tester,
+  ) async {
+    // a wide window, but the page has only 430 px (as beside a rail)
+    useSize(tester, size: const Size(1400, 800));
+    final db = await newDb();
+    await tester.pumpWidget(
+      app(
+        const Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: 430, child: HomePage()),
+        ),
+        db,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Nézet'), findsOneWidget, reason: 'the view menu');
+    expect(find.text('Napirend'), findsNothing, reason: 'no wide controls');
+    expect(find.byTooltip('Előző'), findsNothing, reason: 'under 440: swipe');
+    expect(tester.takeException(), isNull);
+    await shutdown(tester, db);
   });
 
   testWidgets('narrow window shows a compact view menu and no overflow', (

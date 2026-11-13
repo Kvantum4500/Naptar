@@ -8,6 +8,66 @@ import '../update/update_dialog.dart' show currentBuildProvider;
 import 'format.dart';
 import 'diagnostics_page.dart';
 
+/// Why there is no sync in this build (shown by the button and by Settings).
+const noGoogleTitle = 'Nincs Google-hozzáférés';
+const noGoogleBody =
+    'Ebben a buildben nincs beállítva a Google-bejelentkezés, ezért a '
+    'naptár és a Drive szinkronja nem érhető el. A kiadott csomagban '
+    'ez be van állítva: azt telepítsd.';
+
+/// How loud the sync indicator is: fine, waiting for something, or wrong.
+enum SyncTone { ok, wait, bad }
+
+Color syncToneColor(SyncTone tone, ColorScheme scheme) => switch (tone) {
+  SyncTone.ok => scheme.primary,
+  SyncTone.wait => scheme.tertiary,
+  SyncTone.bad => scheme.error,
+};
+
+/// What the sync indicator says about a signed-in device: icon, words, tone.
+/// The app bar button and the account card in Settings both use it.
+({IconData icon, String label, SyncTone tone}) syncSummary(
+  SyncState s, {
+  DateTime? now,
+}) {
+  final stale =
+      s.lastSync != null &&
+      (now ?? DateTime.now()).difference(s.lastSync!) >
+          const Duration(minutes: 10);
+  final up = s.upload;
+  if (s.syncing) {
+    return (
+      icon: Icons.sync,
+      // while the changes go up, how far they are
+      label: up == null ? 'Szinkronizál…' : 'Feltöltés ${up.done}/${up.total}',
+      tone: SyncTone.ok,
+    );
+  }
+  if (s.mismatch != null) {
+    return (icon: Icons.sync_problem, label: 'Döntés kell', tone: SyncTone.bad);
+  }
+  if (s.error != null) {
+    return (icon: Icons.error_outline, label: 'Hiba', tone: SyncTone.bad);
+  }
+  if (s.pending > 0) {
+    return (
+      icon: Icons.cloud_upload_outlined,
+      label: '${s.pending} függőben',
+      tone: SyncTone.wait,
+    );
+  }
+  if (stale) {
+    return (icon: Icons.schedule, label: 'Régi adat', tone: SyncTone.wait);
+  }
+  return (
+    icon: Icons.cloud_done_outlined,
+    label: s.lastSync == null
+        ? 'Szinkronban'
+        : 'Szinkronban ${fmtTime(s.lastSync!)}',
+    tone: SyncTone.ok,
+  );
+}
+
 /// Always-visible sync indicator in the app bar, with a details menu.
 class SyncStatusButton extends ConsumerWidget {
   const SyncStatusButton({
@@ -27,16 +87,10 @@ class SyncStatusButton extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
 
     if (!s.configured) {
-      void help() => _info(
-        context,
-        'Nincs Google-hozzáférés',
-        'Ebben a buildben nincs beállítva a Google-bejelentkezés, ezért a '
-            'naptár és a Drive szinkronja nem érhető el. A kiadott csomagban '
-            'ez be van állítva: azt telepítsd.',
-      );
+      void help() => _info(context, noGoogleTitle, noGoogleBody);
       return compact
           ? IconButton(
-              tooltip: 'Nincs Google-hozzáférés',
+              tooltip: noGoogleTitle,
               onPressed: help,
               icon: const Icon(Icons.cloud_off_outlined),
             )
@@ -77,36 +131,11 @@ class SyncStatusButton extends ConsumerWidget {
             );
     }
 
-    final stale =
-        s.lastSync != null &&
-        DateTime.now().difference(s.lastSync!) > const Duration(minutes: 10);
     final up = s.upload;
-    final (IconData icon, String label, Color color) = s.syncing
-        ? (
-            Icons.sync,
-            // while the changes go up, how far they are
-            up == null ? 'Szinkronizál…' : 'Feltöltés ${up.done}/${up.total}',
-            scheme.primary,
-          )
-        : s.mismatch != null
-        ? (Icons.sync_problem, 'Döntés kell', scheme.error)
-        : s.error != null
-        ? (Icons.error_outline, 'Hiba', scheme.error)
-        : s.pending > 0
-        ? (
-            Icons.cloud_upload_outlined,
-            '${s.pending} függőben',
-            scheme.tertiary,
-          )
-        : stale
-        ? (Icons.schedule, 'Régi adat', scheme.tertiary)
-        : (
-            Icons.cloud_done_outlined,
-            s.lastSync == null
-                ? 'Szinkronban'
-                : 'Szinkronban ${_hm(s.lastSync!)}',
-            scheme.primary,
-          );
+    final summary = syncSummary(s, now: ref.watch(syncClockProvider)());
+    final icon = summary.icon;
+    final label = summary.label;
+    final color = syncToneColor(summary.tone, scheme);
 
     // What went wrong is one hover or long press away (it used to be in the
     // "Részletek" window only): the tooltip carries it.

@@ -31,6 +31,10 @@ class SyncIntent extends Intent {
   const SyncIntent();
 }
 
+class SearchIntent extends Intent {
+  const SearchIntent();
+}
+
 class HelpIntent extends Intent {
   const HelpIntent();
 }
@@ -44,6 +48,8 @@ const calendarShortcuts = <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.digit1): ViewIntent(CalView.month),
   SingleActivator(LogicalKeyboardKey.digit2): ViewIntent(CalView.week),
   SingleActivator(LogicalKeyboardKey.digit3): ViewIntent(CalView.day),
+  SingleActivator(LogicalKeyboardKey.digit4): ViewIntent(CalView.agenda),
+  SingleActivator(LogicalKeyboardKey.keyF, control: true): SearchIntent(),
   SingleActivator(LogicalKeyboardKey.f5): SyncIntent(),
   SingleActivator(LogicalKeyboardKey.f1): HelpIntent(),
   CharacterActivator('?'): HelpIntent(),
@@ -70,8 +76,9 @@ class PageAction<T extends Intent> extends CallbackAction<T> {
 const shortcutHelp = <(String, String)>[
   ('N', 'Új esemény'),
   ('T', 'Ugrás a mai napra'),
-  ('← →', 'Előző / következő hónap, hét vagy nap'),
-  ('1  2  3', 'Hónap, hét, nap nézet'),
+  ('← →', 'Előző / következő hónap, hét, nap vagy időszak'),
+  ('1  2  3  4', 'Hónap, hét, nap, napirend nézet'),
+  ('Ctrl+F', 'Keresés az eseményekben, feladatokban, tételekben'),
   ('F5', 'Szinkron most'),
   ('F1  vagy  ?', 'Ez a súgó'),
   ('Ctrl+S', 'Mentés (az esemény szerkesztőjében)'),

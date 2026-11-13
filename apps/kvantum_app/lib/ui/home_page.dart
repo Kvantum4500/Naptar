@@ -6,20 +6,38 @@ import 'package:kvantum_core/kvantum_core.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart';
+import 'agenda_view.dart';
 import 'breakpoints.dart';
 import 'checkin.dart';
+import 'day_utils.dart';
 import 'workout_feedback.dart';
 import 'event_editor.dart';
 import 'format.dart';
 import 'month_view.dart';
+import 'search_page.dart';
 import 'shortcuts.dart';
 import '../notify/reminders.dart';
+import 'swipe_nav.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
 import 'unreadable_events_banner.dart';
 
-class HomePage extends ConsumerWidget {
+/// The calendar page. What it shows follows the room the PAGE has: beside the
+/// rail of a wide window it is narrower than the window.
+class HomePage extends StatelessWidget {
   const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => _Calendar(width: constraints.maxWidth),
+  );
+}
+
+class _Calendar extends ConsumerWidget {
+  const _Calendar({required this.width});
+
+  /// The width the page has.
+  final double width;
 
   void _goto(WidgetRef ref, DateTime day) {
     ref.read(selectedDayProvider.notifier).set(day);
@@ -34,13 +52,49 @@ class HomePage extends ConsumerWidget {
     switch (view) {
       case CalView.month:
         final m = ref.read(visibleMonthProvider);
-        ref
-            .read(visibleMonthProvider.notifier)
-            .set(DateTime.utc(m.year, m.month + dir, 1));
+        final next = DateTime.utc(m.year, m.month + dir, 1);
+        ref.read(visibleMonthProvider.notifier).set(next);
+        // The chosen day goes with the month: the day shown under or beside
+        // the grid must belong to the month on the screen.
+        ref.read(selectedDayProvider.notifier).set(sameDayIn(sel, next));
       case CalView.week:
         _goto(ref, sel.add(Duration(days: 7 * dir)));
       case CalView.day:
         _goto(ref, sel.add(Duration(days: dir)));
+      case CalView.agenda:
+        _goto(ref, sel.add(Duration(days: agendaDays * dir)));
+    }
+  }
+
+  /// Loads the ranges next to the one on the screen in advance, so a step or a
+  /// swipe finds its events ready and the page does not flash empty first.
+  void _prefetch(WidgetRef ref, CalView view, DateTime month, DateTime sel) {
+    DayRange around(DateTime first, int days, int dir) => DayRange(
+      first.add(Duration(days: days * dir)),
+      first.add(Duration(days: days * dir + days)),
+    );
+    final ranges = <DayRange>[];
+    switch (view) {
+      case CalView.month:
+        for (final dir in const [-1, 1]) {
+          ranges.add(monthRangeOf(DateTime.utc(month.year, month.month + dir)));
+          ranges.add(around(sel, 1, dir)); // the day panel steps by a day
+        }
+      case CalView.week:
+        for (final dir in const [-1, 1]) {
+          ranges.add(around(startOfWeek(sel), 7, dir));
+        }
+      case CalView.day:
+        for (final dir in const [-1, 1]) {
+          ranges.add(around(sel, 1, dir));
+        }
+      case CalView.agenda:
+        for (final dir in const [-1, 1]) {
+          ranges.add(around(sel, agendaDays, dir));
+        }
+    }
+    for (final r in ranges) {
+      ref.listen(rangeOccurrencesProvider(r), (_, _) {});
     }
   }
 
@@ -49,12 +103,24 @@ class HomePage extends ConsumerWidget {
       case CalView.month:
         return DateFormat(short ? 'y. MMM' : 'y. MMMM', 'hu').format(month);
       case CalView.week:
-        final a = startOfWeek(sel), b = a.add(const Duration(days: 6));
-        final f = DateFormat('MMM d.', 'hu');
-        return '${a.year}. ${f.format(a)} – ${a.month == b.month ? b.day.toString() : f.format(b)}.';
+        final a = startOfWeek(sel);
+        return _range(a, a.add(const Duration(days: 6)));
       case CalView.day:
         return fmtDateLong(sel);
+      case CalView.agenda:
+        return _range(sel, sel.add(const Duration(days: agendaDays - 1)));
     }
+  }
+
+  /// "2026. nov. 9. – 15." / "2026. nov. 30. – dec. 6." /
+  /// "2026. dec. 28. – 2027. jan. 3." (the date format ends with its own dot).
+  String _range(DateTime a, DateTime b) {
+    final f = DateFormat('MMM d.', 'hu');
+    if (a.year != b.year) {
+      return '${a.year}. ${f.format(a)} – ${b.year}. ${f.format(b)}';
+    }
+    return '${a.year}. ${f.format(a)} – '
+        '${a.month == b.month ? '${b.day}.' : f.format(b)}';
   }
 
   @override
@@ -63,27 +129,37 @@ class HomePage extends ConsumerWidget {
     final view = ref.watch(viewModeProvider);
     final month = ref.watch(visibleMonthProvider);
     final sel = ref.watch(selectedDayProvider);
-    final width = MediaQuery.sizeOf(context).width;
     final wide = useSidePanel(width);
     // Icon-only controls on a narrow window; the full labels need about 800 px.
     final compact = !useFullControls(width);
     final shortTitle = useShortTitle(width);
+    // A phone held upright has no room for the arrows: a swipe steps instead.
+    // A screen reader cannot swipe the calendar, so it keeps them.
+    final arrows =
+        useStepArrows(width) || MediaQuery.accessibleNavigationOf(context);
+    _prefetch(ref, view, month, sel);
 
     Future<void> open(Occurrence o) => openEditor(context, ref, occurrence: o);
+    void step(int dir) => _shift(ref, dir);
 
     final Widget body;
     switch (view) {
       case CalView.month:
-        final grid = MonthView(
-          onOpen: open,
-          onMore: (d) {
-            _goto(ref, d);
-            ref.read(viewModeProvider.notifier).set(CalView.day);
-          },
+        final grid = SwipeNav(
+          onStep: step,
+          child: MonthView(
+            onOpen: open,
+            onMore: (d) {
+              _goto(ref, d);
+              ref.read(viewModeProvider.notifier).set(CalView.day);
+            },
+          ),
         );
         final list = _DayPanel(
           onOpen: open,
           onCreateAt: (s) => openEditor(context, ref, initialStart: s),
+          // under the month grid a swipe moves the day, not the month
+          onStep: (dir) => _goto(ref, sel.add(Duration(days: dir))),
         );
         body = wide
             ? Row(
@@ -105,23 +181,34 @@ class HomePage extends ConsumerWidget {
         final days = [
           for (var i = 0; i < 7; i++) range.first.add(Duration(days: i)),
         ];
-        body = TimeGrid(
-          days: days,
-          range: range,
-          onOpen: open,
-          onCreateAt: (s) => openEditor(context, ref, initialStart: s),
-          onDayTap: (d) {
-            _goto(ref, d);
-            ref.read(viewModeProvider.notifier).set(CalView.day);
-          },
+        body = SwipeNav(
+          onStep: step,
+          child: TimeGrid(
+            days: days,
+            range: range,
+            onOpen: open,
+            onCreateAt: (s) => openEditor(context, ref, initialStart: s),
+            onDayTap: (d) {
+              _goto(ref, d);
+              ref.read(viewModeProvider.notifier).set(CalView.day);
+            },
+          ),
         );
       case CalView.day:
         final range = ref.watch(dayRangeProvider);
-        body = TimeGrid(
-          days: [range.first],
-          range: range,
-          onOpen: open,
-          onCreateAt: (s) => openEditor(context, ref, initialStart: s),
+        body = SwipeNav(
+          onStep: step,
+          child: TimeGrid(
+            days: [range.first],
+            range: range,
+            onOpen: open,
+            onCreateAt: (s) => openEditor(context, ref, initialStart: s),
+          ),
+        );
+      case CalView.agenda:
+        body = SwipeNav(
+          onStep: step,
+          child: AgendaView(onOpen: open),
         );
     }
 
@@ -139,6 +226,7 @@ class HomePage extends ConsumerWidget {
           (_) =>
               ref.read(syncControllerProvider.notifier).syncNow(manual: true),
         ),
+        SearchIntent: PageAction<SearchIntent>((_) => openSearch(context)),
         HelpIntent: PageAction<HelpIntent>((_) => showShortcutHelp(context)),
       },
       child: Scaffold(
@@ -163,6 +251,10 @@ class HomePage extends ConsumerWidget {
                     ButtonSegment(value: CalView.month, label: Text('Hónap')),
                     ButtonSegment(value: CalView.week, label: Text('Hét')),
                     ButtonSegment(value: CalView.day, label: Text('Nap')),
+                    ButtonSegment(
+                      value: CalView.agenda,
+                      label: Text('Napirend'),
+                    ),
                   ],
                   selected: {view},
                   onSelectionChanged: (s) =>
@@ -178,13 +270,20 @@ class HomePage extends ConsumerWidget {
                   PopupMenuItem(value: CalView.month, child: Text('Hónap')),
                   PopupMenuItem(value: CalView.week, child: Text('Hét')),
                   PopupMenuItem(value: CalView.day, child: Text('Nap')),
+                  PopupMenuItem(value: CalView.agenda, child: Text('Napirend')),
                 ],
               ),
             IconButton(
-              tooltip: 'Előző',
-              icon: const Icon(Icons.chevron_left),
-              onPressed: () => _shift(ref, -1),
+              tooltip: 'Keresés',
+              icon: const Icon(Icons.search),
+              onPressed: () => openSearch(context),
             ),
+            if (arrows)
+              IconButton(
+                tooltip: 'Előző',
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => _shift(ref, -1),
+              ),
             if (compact)
               IconButton(
                 tooltip: 'Ma',
@@ -193,13 +292,14 @@ class HomePage extends ConsumerWidget {
               )
             else
               TextButton(onPressed: () => _today(ref), child: const Text('Ma')),
-            IconButton(
-              tooltip: 'Következő',
-              icon: const Icon(Icons.chevron_right),
-              onPressed: () => _shift(ref, 1),
-            ),
+            if (arrows)
+              IconButton(
+                tooltip: 'Következő',
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => _shift(ref, 1),
+              ),
             SyncStatusButton(
-              compact: compact,
+              compact: compact || !useSyncLabel(width),
               onCheckUpdate: () => showUpdateDialog(context, ref),
             ),
             const SizedBox(width: 4),
@@ -226,9 +326,16 @@ class HomePage extends ConsumerWidget {
 /// Side panel of the month view: the selected day as an hour-scale timeline,
 /// so a day can be read and extended without switching to the day view.
 class _DayPanel extends ConsumerWidget {
-  const _DayPanel({required this.onOpen, required this.onCreateAt});
+  const _DayPanel({
+    required this.onOpen,
+    required this.onCreateAt,
+    required this.onStep,
+  });
   final OpenOccurrence onOpen;
   final void Function(DateTime wallStart) onCreateAt;
+
+  /// A swipe over the day: the previous (-1) or the next (+1) day.
+  final void Function(int dir) onStep;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -255,12 +362,15 @@ class _DayPanel extends ConsumerWidget {
           ),
         ),
         Expanded(
-          child: TimeGrid(
-            days: [range.first],
-            range: range,
-            showDayHeader: false,
-            onOpen: onOpen,
-            onCreateAt: onCreateAt,
+          child: SwipeNav(
+            onStep: onStep,
+            child: TimeGrid(
+              days: [range.first],
+              range: range,
+              showDayHeader: false,
+              onOpen: onOpen,
+              onCreateAt: onCreateAt,
+            ),
           ),
         ),
       ],

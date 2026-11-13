@@ -41,6 +41,13 @@ List<DateTime> daysOf(Occurrence o, {String tz = defaultTz}) {
   String tz = defaultTz,
 }) => (resolveWallClock(tz, from), resolveWallClock(tz, toExclusive));
 
+/// The same day of the month in [month], or its last day when that month is
+/// shorter (the 31st becomes the 30th, or the 28th / 29th of February).
+DateTime sameDayIn(DateTime day, DateTime month) {
+  final last = DateTime.utc(month.year, month.month + 1, 0).day;
+  return DateTime.utc(month.year, month.month, day.day < last ? day.day : last);
+}
+
 /// 42-cell month grid (6 weeks), Monday-based.
 List<DateTime> monthGrid(DateTime month, {int weekStart = DateTime.monday}) {
   final first = DateTime.utc(month.year, month.month, 1);

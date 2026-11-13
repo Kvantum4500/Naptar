@@ -158,7 +158,10 @@ final visibleMonthProvider = NotifierProvider<VisibleMonth, DateTime>(
   VisibleMonth.new,
 );
 
-enum CalView { month, week, day }
+enum CalView { month, week, day, agenda }
+
+/// The agenda ("Napirend") lists this many days from the chosen day.
+const agendaDays = 14;
 
 /// Month is the start view; the choice is remembered between runs.
 class ViewMode extends Notifier<CalView> {
@@ -216,11 +219,16 @@ final rangeOccurrencesProvider =
       return map;
     });
 
-/// The 6-week grid of the visible month.
-final monthRangeProvider = Provider<DayRange>((ref) {
-  final grid = monthGrid(ref.watch(visibleMonthProvider));
+/// The 6-week grid of [month].
+DayRange monthRangeOf(DateTime month) {
+  final grid = monthGrid(month);
   return DayRange(grid.first, grid.last.add(const Duration(days: 1)));
-});
+}
+
+/// The 6-week grid of the visible month.
+final monthRangeProvider = Provider<DayRange>(
+  (ref) => monthRangeOf(ref.watch(visibleMonthProvider)),
+);
 
 /// Week (Mon..Sun) around the selected day, or just the day in day view.
 final weekRangeProvider = Provider<DayRange>((ref) {
@@ -234,12 +242,20 @@ final dayRangeProvider = Provider<DayRange>((ref) {
   return DayRange(d, d.add(const Duration(days: 1)));
 });
 
-/// Occurrences for whichever range the active view needs.
+/// The days the agenda lists: [agendaDays] from the chosen day.
+final agendaRangeProvider = Provider<DayRange>((ref) {
+  final d = ref.watch(selectedDayProvider);
+  return DayRange(d, d.add(const Duration(days: agendaDays)));
+});
+
+/// The occurrences of the visible month's grid. It hands on the state of the
+/// range provider itself (not a future of its own): when that range was
+/// loaded in advance, a step to the next month finds the events at once, in
+/// the same frame.
 final monthOccurrencesProvider =
-    FutureProvider<Map<DateTime, List<Occurrence>>>(
-      (ref) => ref.watch(
-        rangeOccurrencesProvider(ref.watch(monthRangeProvider)).future,
-      ),
+    Provider<AsyncValue<Map<DateTime, List<Occurrence>>>>(
+      (ref) =>
+          ref.watch(rangeOccurrencesProvider(ref.watch(monthRangeProvider))),
     );
 
 /// Quiet upkeep of the local data (see [Housekeeping]).

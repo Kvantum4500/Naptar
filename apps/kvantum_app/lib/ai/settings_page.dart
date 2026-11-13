@@ -23,6 +23,7 @@ import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
 import '../ui/diagnostics_page.dart';
 import '../ui/shortcuts.dart' show showShortcutHelp;
+import 'settings/account_card.dart';
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -442,6 +443,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              SettingsGroupHeader('Fiók és szinkron'),
+              section('Google-fiók', const [AccountSyncBody()]),
+              SettingsGroupHeader('Asszisztens'),
               section('AI-asszisztens', [
                 DropdownButtonFormField<String>(
                   key: ValueKey('provider-${settings.provider}'),
@@ -687,107 +691,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                 ],
               ]),
-              section('Google Wallet értesítések', const [WalletSettings()]),
-              section('Emlékeztetők', [
-                if (!ref.watch(reminderSchedulerProvider).supported)
-                  const Text(
-                    'Az emlékeztetők ezen az eszközön még nem érhetők el (egyelőre csak Androidon működnek).',
-                  )
-                else ...[
-                  const Text(
-                    'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    initialValue: reminders.shiftLeadMinutes,
-                    decoration: const InputDecoration(
-                      labelText: 'Emlékeztető a műszak előtt',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 0, child: Text('Ki')),
-                      DropdownMenuItem(
-                        value: 60,
-                        child: Text('1 órával előtte'),
-                      ),
-                      DropdownMenuItem(
-                        value: 120,
-                        child: Text('2 órával előtte'),
-                      ),
-                      DropdownMenuItem(
-                        value: 180,
-                        child: Text('3 órával előtte'),
-                      ),
-                    ],
-                    onChanged: (v) => v == null
-                        ? null
-                        : _setReminders(
-                            reminders.copyWith(shiftLeadMinutes: v),
-                          ),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Napi check-in emlékeztető (20:00)'),
-                    value: reminders.checkIn,
-                    onChanged: (v) =>
-                        _setReminders(reminders.copyWith(checkIn: v)),
-                  ),
-                ],
-              ]),
-              section('Edzés utáni visszajelzés', [
-                const Text(
-                  'Egy edzés után (a címéből ismeri fel: Gym, Calisthenics, futás, kajak …) a főoldalon rákérdez, milyen nehéz volt, mennyi energiával kezdted és fejezted be, és milyen élmény volt. Pár koppintás, és nem kötelező. Ebből tanul: ha egy edzés-típus a visszajelzéseid szerint nehezebb, mint amit a program feltételez, magától szigorít; ha könnyebb, csak a jóváhagyásoddal lazít (a jóváhagyás a Kézikönyv „Tanult szokások” fájljába kerül, ott törölheted).',
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Edzés utáni visszajelzés kérése'),
-                  subtitle: const Text(
-                    'Kikapcsolva nem kérdez, és nem tanul újat; a már megadott válaszok megmaradnak.',
-                  ),
-                  value: settings.workoutFeedback,
-                  onChanged: (v) =>
-                      notifier.change(settings.copyWith(workoutFeedback: v)),
-                ),
-              ]),
-              section('Mentés és visszaállítás', [
-                const Text(
-                  'A naptár egy .ics fájlba menthető, amit bármely naptárprogram megnyit. A visszaállítás csak hozzáad vagy frissít, soha nem töröl.',
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _fileJob == null ? _export : null,
-                      icon: _fileIcon(_FileJob.exportIcs, Icons.download),
-                      label: const Text('Mentés fájlba'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _fileJob == null ? _import : null,
-                      icon: _fileIcon(_FileJob.importIcs, Icons.upload_file),
-                      label: const Text('Visszaállítás fájlból'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _fileJob == null ? _exportFinance : null,
-                      icon: _fileIcon(
-                        _FileJob.exportFinance,
-                        Icons.account_balance_wallet_outlined,
-                      ),
-                      label: const Text('Pénzügyek mentése'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _fileJob == null ? _importFinance : null,
-                      icon: _fileIcon(_FileJob.importFinance, Icons.restore),
-                      label: const Text('Pénzügyek visszaállítása'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'A pénzügyi adatok csak az eszközödön vannak meg (a Drive-ba csak a változások kerülnek), ezért érdemes időnként elmenteni őket.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ]),
               section('Alvási sáv', [
                 const Text(
                   'Ebben az időszakban az asszisztens semmit nem tervez. Éjszakás időszakban állítsd át arra, amikor ténylegesen alszol (pl. 08:00–16:00).',
@@ -841,6 +744,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ],
                 ),
               ]),
+              section('Edzés utáni visszajelzés', [
+                const Text(
+                  'Egy edzés után (a címéből ismeri fel: Gym, Calisthenics, futás, kajak …) a főoldalon rákérdez, milyen nehéz volt, mennyi energiával kezdted és fejezted be, és milyen élmény volt. Pár koppintás, és nem kötelező. Ebből tanul: ha egy edzés-típus a visszajelzéseid szerint nehezebb, mint amit a program feltételez, magától szigorít; ha könnyebb, csak a jóváhagyásoddal lazít (a jóváhagyás a Kézikönyv „Tanult szokások” fájljába kerül, ott törölheted).',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Edzés utáni visszajelzés kérése'),
+                  subtitle: const Text(
+                    'Kikapcsolva nem kérdez, és nem tanul újat; a már megadott válaszok megmaradnak.',
+                  ),
+                  value: settings.workoutFeedback,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(workoutFeedback: v)),
+                ),
+              ]),
               section('Kézikönyv', [
                 const Text(
                   'Az asszisztens szabályai, a profilod és az összefüggések. Szerkesztheted, és a Google Drive-on át minden eszközön ugyanaz.',
@@ -856,6 +774,95 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   label: const Text('Kézikönyv szerkesztése'),
                 ),
               ]),
+              SettingsGroupHeader('Értesítések'),
+              section('Emlékeztetők', [
+                if (!ref.watch(reminderSchedulerProvider).supported)
+                  const Text(
+                    'Az emlékeztetők ezen az eszközön még nem érhetők el (egyelőre csak Androidon működnek).',
+                  )
+                else ...[
+                  const Text(
+                    'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    initialValue: reminders.shiftLeadMinutes,
+                    decoration: const InputDecoration(
+                      labelText: 'Emlékeztető a műszak előtt',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 0, child: Text('Ki')),
+                      DropdownMenuItem(
+                        value: 60,
+                        child: Text('1 órával előtte'),
+                      ),
+                      DropdownMenuItem(
+                        value: 120,
+                        child: Text('2 órával előtte'),
+                      ),
+                      DropdownMenuItem(
+                        value: 180,
+                        child: Text('3 órával előtte'),
+                      ),
+                    ],
+                    onChanged: (v) => v == null
+                        ? null
+                        : _setReminders(
+                            reminders.copyWith(shiftLeadMinutes: v),
+                          ),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Napi check-in emlékeztető (20:00)'),
+                    value: reminders.checkIn,
+                    onChanged: (v) =>
+                        _setReminders(reminders.copyWith(checkIn: v)),
+                  ),
+                ],
+              ]),
+              section('Google Wallet értesítések', const [WalletSettings()]),
+              SettingsGroupHeader('Adatok'),
+              section('Mentés és visszaállítás', [
+                const Text(
+                  'A naptár egy .ics fájlba menthető, amit bármely naptárprogram megnyit. A visszaállítás csak hozzáad vagy frissít, soha nem töröl.',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _fileJob == null ? _export : null,
+                      icon: _fileIcon(_FileJob.exportIcs, Icons.download),
+                      label: const Text('Mentés fájlba'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _fileJob == null ? _import : null,
+                      icon: _fileIcon(_FileJob.importIcs, Icons.upload_file),
+                      label: const Text('Visszaállítás fájlból'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _fileJob == null ? _exportFinance : null,
+                      icon: _fileIcon(
+                        _FileJob.exportFinance,
+                        Icons.account_balance_wallet_outlined,
+                      ),
+                      label: const Text('Pénzügyek mentése'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _fileJob == null ? _importFinance : null,
+                      icon: _fileIcon(_FileJob.importFinance, Icons.restore),
+                      label: const Text('Pénzügyek visszaállítása'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'A pénzügyi adatok csak az eszközödön vannak meg (a Drive-ba csak a változások kerülnek), ezért érdemes időnként elmenteni őket.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ]),
+              SettingsGroupHeader('Névjegy'),
               section('A program', [
                 Text('Verzió: ${build == null ? '…' : 'build $build'}'),
                 const SizedBox(height: 8),

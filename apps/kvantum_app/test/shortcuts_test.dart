@@ -233,7 +233,15 @@ void main() {
     final keys = shortcutHelp.map((e) => e.$1).toList();
     expect(
       keys,
-      containsAll(['N', 'T', '← →', '1  2  3', 'F5', 'F1  vagy  ?']),
+      containsAll([
+        'N',
+        'T',
+        '← →',
+        '1  2  3  4',
+        'Ctrl+F',
+        'F5',
+        'F1  vagy  ?',
+      ]),
     );
   });
 
@@ -244,6 +252,7 @@ void main() {
       TodayIntent,
       StepIntent,
       ViewIntent,
+      SearchIntent,
       SyncIntent,
       HelpIntent,
     });
