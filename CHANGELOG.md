@@ -2,6 +2,40 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 4. fázis, 4.1/F – automatikus mentés és visszaállítás (F csomag)
+
+**Teljes mentés egyetlen fájlban**
+- A mentés egy **zip-fájl**, amelyben minden benne van, amit a program tárol: a naptár (`calendar.ics`), a pénzügyek (`finance.json`), a feladatok, a napi check-inek, a kézikönyv és az edzésnapló (`records.json`), és egy `meta.json` (mikor készült, melyik buildből, mennyi mi van benne). Bármely tömörítőprogram megnyitja. **Jelszóval is lezárható** (AES-256 zip, az `archive` csomaggal – új függőség nincs); jelszó nélkül, rossz jelszóval, nem mentés-fájllal, újabb verzió fájljával és sérült fájllal is érthető magyar üzenet jön (nem „félig beolvasott” siker).
+- **Vigyázz a jelszóval:** a fájlba a program nem teszi bele a jelszót, és nem tudja visszafejteni; ha elfelejted, a fájl nem nyitható meg – ezt a párbeszéd is kimondja.
+
+**Napi automatikus mentés az eszközön** (Beállítások → Adatok → **Automatikus mentés**)
+- A program indulásakor, és ha napokig nyitva marad, a visszatéréskor is: legfeljebb **20 óránként** egy mentés az adatbázis melletti `backups` mappába (Windowson `%LOCALAPPDATA%\KvantumNaptar\backups`, Androidon az app privát mappája). Közben a felület nem fagy le: a becsomagolás külön szálon (isolate) megy; a fájl először `.part` néven készül, és csak kész állapotban kapja meg a nevét.
+- **Megőrzés:** az utolsó 7 nap mindegyikéről a legfrissebb, előtte 4 hétre hetente egy; a többi törlődik. A nem a program által elnevezett fájlokhoz soha nem nyúl.
+- A kártyán: kapcsoló, „Utolsó mentés: …” (vagy az utolsó hiba oka magyarul), **Mentés most**, **Mentés fájlba…** (jelszóval is), **Visszaállítás fájlból…**, és a mentések listája mérettel; soronként Visszaállítás… / Mentés fájlba… / Törlés… (a törlés megerősítéssel).
+- A hiba nem zavarja az appot: a sikertelen mentés a kártyán és a Diagnosztikában látszik, a következő indításkor újra próbálja.
+
+**Visszaállítás előnézettel**
+- Mielőtt bármit írna, megmutatja, mi történne: a naptárban hány esemény új, hány változatlan, **hány módosult azóta ezen az eszközön** (a nevekkel); a pénzügyeknél és a többi adatnál hány új, hány frissül, hány azonos; a fájl olvashatatlan részei.
+- A módosult eseményekre kérdez: **„A módosultak nélkül”** (csak ami hiányzik) vagy **„Mindent, felülírással”** (a mostani módosításaid elvesznek). Ha nincs mit visszaállítani, ezt mondja.
+- **Soha nem töröl.** A naptárban a mentés óta törölt események visszajönnek; a feladatoknál, a check-ineknél és a pénzügyeknél mezőnként / rekordonként az újabb nyer, és amit a mentés óta töröltél vagy átírtál, az marad (ezt a párbeszéd kimondja). Ami visszajön, az feltöltésre kerül (Google, Drive): a visszaállítás után a program szinkront kér.
+- Zárolt fájlnál a jelszót megkérdezi (hibás jelszónál újra).
+
+**Titkosított másolat a Google Drive-ban** (ugyanott, a kártya alsó része)
+- **Hetente** (6 nap 20 óra) egy teljes mentés kerül a Drive **rejtett app-mappájába** (csak ez a program látja), **a te jelszavaddal titkosítva** (legalább 8 karakter, kétszer kell beírni), `kvbackup-<dátum>.zip.b64` néven; az utolsó **3** marad meg. Ez az eszköz elvesztése ellen is véd, amit a helyi mentések nem.
+- A jelszót a program az operációs rendszer **biztonságos tárolójában** őrzi (Windows: DPAPI, Android: Keystore); sem az adatbázisba, sem a Drive-ra, sem a naplóba, sem a mentésbe nem kerül. A kapcsoló addig nem kapcsolható, amíg nincs jelszó és nem vagy belépve; bekapcsoláskor azonnal elkészül az első példány, nem egy hét múlva. A jelszó törlése kikapcsolja a másolást (a Drive-on lévők maradnak).
+- **Visszaállítás a Drive-ról…:** a példányok listája (legfrissebb elöl); a tárolt jelszóval magától próbálja; ha az nem jó (például másik eszközön), megkérdezi – és ezt nem nevezi „hibás jelszónak”, csak a beírt jelszó hibáját. Új eszközön tehát elég belépni és ugyanazt a jelszót beírni.
+- A másolat feltöltése a belépés után is megtörténik (ha az indításkor még nem volt belépés), és visszatéréskor is megnézi, esedékes-e; a méretkorlát ≈ 4 MB (a Drive egyszerű feltöltése 5 MB-ig megy); ennél nagyobb mentés nem megy fel, és ezt kimondja. A program a Drive-mappa többi fájljához (`task-…`, `fin-…` levelek) nem nyúl.
+
+**Útközben**
+- A szinkron-vezérlő kiadja a belépett fiók Drive-mappáját (`driveRemote()`), a kijelentkezés eltünteti.
+- A Beállítások oldala magasabb lett; a kapcsolódó (nagy ablakos) tesztek ablaka 6400 képpont magas.
+
+Tesztek: app 1792 (volt 1643), mag 490 (változatlan), az elemzők és a formázás tiszták; a Flutter 3.47.9-en és a 3.50.0-n is zöld. 93 szándékos elrontás (a fájlformátum, a mappa és a megőrzés szabályai, a mentés / előnézet / visszaállítás, a napi és a Drive-mentés időzítése és őrei, a kártya és a párbeszédek, az indítás / visszatérés / belépés kapcsolók) – mind elbukik. A próba **tizenkét tesztelési hiányt** hozott felszínre – egy nem UTF-8 szövegű rész a mentésben, a törölt rekordok a számolásban és a mentésben, a naptár olvasási hibái a visszaállítás jelentésében, a csak rekordot érintő változás az előnézetben, a visszaállított frissítés feltöltésre sorolása, a pénzügyi előnézet írása frissítésnél, az egyszerre egy mentés, az olvashatatlan beállítások, az idegen nevek a Drive-listában, a Drive-mentés tiltása a teszt-módban és a jelszó-párbeszéd görgetése rövid ablakban –, mindegyikre szigorúbb teszt készült; egy elrontás elsőre nem fordult le (javítva). Tanulság: a párbeszédek görgetésének kihagyása csak akkor látszik, ha a teszt a párbeszéd megnyitása után rövidre veszi az ablakot.
+
+**Nem ellenőrizhető itt:** a fájlmentés és -választás valódi eszközön (Android: a rendszer fájlkezelője; Windows: mentés / megnyitás párbeszéd); a **valódi Drive** (a tesztek hamis Drive-ot használnak: a tényleges feltöltés, a listázás, az 5 MB-os korlát, a kvóta); hogy a más programok (7-Zip, WinRAR, Windows Intéző) megnyitják-e az AES-titkosított zip-et; a mentés időtartama és memóriaigénye nagy adatbázisnál (az ICS-kimenet a fő szálon készül, a becsomagolás külön szálon); a jelszó-tár valódi eszközön (Android Keystore, Windows DPAPI); az érintés- és billentyűérzet.
+
+**Eltérések a tervtől és ismert korlátok:** a **program beállításai** (AI-szolgáltató és -modell, téma, kapcsolók) és a **belépési adatok, API-kulcsok** nincsenek a mentésben (az utóbbiak az eszköz biztonságos tárolójában vannak, és ott is maradnak); a helyi mentések az eszközön maradnak (az Android automatikus mentése ki van kapcsolva, ez szándékos), ezért az eszköz elvesztése ellen a „Mentés fájlba” és a Drive-példány véd – ezt a kártya kimondja; a visszaállítás a feladatokat és a pénzügyeket nem hozza vissza törölt állapotból (a rekordonkénti „újabb nyer” szabály miatt) – az események igen; a Drive-példány a jelszó megadása nélkül nem készül; az időzítés nem háttérszolgáltatás, hanem indításkor / visszatéréskor / belépéskor fut (a háttérben futó alkalmazás nem ébreszti fel magát).
+
 ## 3d. fázis – hozzáférhetőség, nagy betű, téma, első indítás (UX-7, UX-8, UX-9)
 
 **Képernyőolvasó (UX-8)**
