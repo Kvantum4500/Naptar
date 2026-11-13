@@ -2,6 +2,30 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 3b-1. fázis – visszavonás: törlés után 10 másodpercig „Visszavonás” (események, feladatok, pénzügy, Beosztás)
+
+**Visszavonás (UX-2)**
+- Eddig sehol nem volt visszavonás: a törlés csak megerősítő ablakkal ment, és végleges volt. Mostantól a törlés **azonnal megtörténik, és alul 10 másodpercig „Visszavonás” gomb áll.** A megerősítő ablakok kikerültek (esemény, Beosztás-műszak, feladat, pénzügyi tétel, ismétlődő tétel, cél). Az ismétlődő eseménynél a „Csak ez az esemény / Ez és a következő események / Az összes esemény” választás marad: az nem megerősítés, hanem döntés.
+- **Visszavonható:** egy esemény; egy sorozat egy előfordulása, a sorozat vége vagy az egész sorozat a kivételeivel; egy Beosztás-műszak törlése és a **Beosztás generálása / újragenerálása** (a régi terv visszajön, az új eltűnik); egy feladat; egy pénzügyi tétel; egy kategória (a keretével együtt); egy keret; egy ismétlődő tétel; egy cél (a befizetéseivel együtt).
+- **Egyszerre egy sáv van:** ha újabb törlést végzel, az előző véglegessé válik. A sáv a lebegő gomb fölött jelenik meg (nem takarja), széles ablakban legfeljebb 560 px széles.
+- **Nem ír felül semmit:** ha a törlés óta a törölt dolog (vagy a sorozata) megváltozott – átnevezted, másik eszköz módosította, egy másik törlés érintette –, a visszavonás nem történik meg („A visszavonás már nem lehetséges: közben megváltozott.”), és a törlés a szokott módon feltöltődik. A visszavonás mindig mindent együtt hoz vissza, vagy semmit.
+
+**A törlés addig nem megy fel a Google-be, amíg visszavonható (szinkron-tartás)**
+- A törölt esemény – sorozatnál a teljes sorozat és a kivételei – a 10 másodperc alatt **nem töltődik fel**; így a visszavonás a Google-ban semmit nem mozdít, és az esemény Google-oldali mezői (emlékeztető, vendégek, Meet-link) sem vesznek el. A sáv eltűnésekor a törlés a szokott módon feltöltődik (a program ekkor magától elindítja a szinkront). Ha az app a 10 másodperc alatt bezárul, a törlés később feltöltődik (a biztonságos irány). A tartás csak memóriában él.
+- **Verseny a sáv utolsó pillanatában:** ha a törlés már úton volt a Google felé, amikor visszavontad, az esemény **megmarad** (a feltöltés vége csak a törlési jelzést törli, az élő sort nem), és a következő szinkron újra létrehozza a Google-ban. Ha a törlés már fel is töltődött, a visszavonás az eseményt **új Google-eseményként** hozza vissza (a Google-oldali plusz mezők ilyenkor elvesznek; ez csak versenyhelyzetben fordulhat elő).
+- Feladatnál és pénzügynél nincs tartás: a visszaállítás feltöltés után is ártalmatlan (nagyobb bélyeggel nyer minden eszközön); a másik eszköz egy pillanatra láthatja a törlést, aztán a visszaállítást.
+
+**Egyéb**
+- **Flutter 3.50:** a *gombos* üzenetsáv alapból nem záródik be magától, ezért a sáv kifejezetten időzített (`persist: false`), és külön biztonsági időzítő is szabadítja fel a tartást, ha a sáv sosem jelenne meg.
+- **Atomi törlés:** a szerkesztő törlése eddig nem volt atomi (1…N+1 külön írás, a megnyitáskor készült pillanatképből dolgozott); mostantól egy tranzakció, friss olvasással, ugyanaz a függvény, mint az asszisztens törlésénél. A kategória törlése (kategória + keret) szintén egy tranzakció.
+- **Ha a visszavonás hibára fut,** rövid magyar üzenet jelenik meg, a hiba a helyi naplóba kerül (cím és adat nélkül), a törlés pedig a szokott módon feltöltődik.
+
+Tesztek: app 1260 (volt 1172), mag 459, az elemzők és a formázás tiszták; a Flutter 3.50.0-n is zöld. 52 szándékos elrontást (a tartás számlálása, a sorozat-kulcs, a motor ellenőrzése és számlálója, a `markPushed` őr hiánya, a változáshalmaz őrei és a verzió-emelés, a mester-előre sorrend, a Google-kapcsolatok elvágása, az egyesítés, a sáv időzítése és a 3.50-es `persist`, a biztonsági időzítő, a csere, a hiba üzenete, a sorozat-hatókörök, a feladat és a pénzügy azonosság-őre, az összetett törlések egységessége, a kategória-tartalék, a bélyeg) mind elkapnak a tesztek.
+
+**Szándékos eltérés az audit szövegétől:** az audit „késleltetett commit”-ot írt (a törlés csak 10 másodperc múlva történne). Helyette azonnali törlés + visszaállítás + memóriabeli szinkron-tartás készült: nincs mit kiírni kilépéskor, a képernyők azonnal frissülnek, a sorozatokra is működik, és a Google felé a tartás védi a törlést.
+
+**Nem ellenőrizhető itt:** a sáv helye és érzete telefonon és Windowson (gesztusvezérlő sáv, billentyűzet; a tesztek az Ahem betűtípussal futnak); a visszavonás valódi Google-szinkronnal (a tartás alatt és a feltöltés utáni versenyben); a másik eszközön látszó villanás feladatnál és pénzügynél; a Beosztás-visszavonás ~90 elemmel valódi eszközön.
+
 ## 3a. fázis – kezelhetőség: alsó sáv, tiszta fejléc, hónap-pöttyök, billentyűparancsok, az ablak mérete
 
 **Navigáció (UX-1)**
