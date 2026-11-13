@@ -11,6 +11,7 @@ export 'src/hu_calendar.dart';
 export 'src/ics.dart';
 export 'src/local_answers.dart';
 export 'src/models.dart';
+export 'src/progress.dart';
 export 'src/reconcile.dart';
 export 'src/rrule_convert.dart';
 export 'src/quick_entry.dart';

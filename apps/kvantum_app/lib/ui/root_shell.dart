@@ -13,6 +13,7 @@ import '../widget/widget_sync.dart';
 import 'breakpoints.dart';
 import 'finance/finance_page.dart';
 import 'home_page.dart';
+import 'progress_page.dart';
 import 'quick_entry_dialog.dart';
 import 'shell_tab.dart';
 import 'shift_page.dart';
@@ -20,9 +21,10 @@ import 'tasks_page.dart';
 import 'text_scale.dart';
 
 /// What "Több" offers: the quick entry, and pages that are visited now and
-/// then.
+/// then (the progress, the shifts, the settings).
 enum _More {
   quick('Gyors felvitel', Icons.bolt),
+  progress('Haladás', Icons.show_chart),
   shifts('Beosztás', Icons.event_repeat),
   settings('Beállítások', Icons.settings_outlined);
 
@@ -170,6 +172,7 @@ class _RootShellState extends ConsumerState<RootShell>
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => switch (choice) {
+          _More.progress => const ProgressPage(),
           _More.shifts => const ShiftPage(),
           _More.settings => const SettingsPage(),
           _More.quick => const SizedBox.shrink(), // (handled above)
