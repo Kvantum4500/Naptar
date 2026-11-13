@@ -2,6 +2,42 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 4. fázis, 4.5/D-4 – költségkeret-értesítés és bérbecslés a beosztásból (D csomag, negyedik rész)
+
+**Új: két funkció, mindkettő a saját eszközödön él, hálózat nélkül.**
+
+**1. Költségkeret-értesítés** (Beállítások → Értesítések → „Költségkeret”; alapból KI, eszközönként)
+- **Mit csinál:** ha egy kiadási kategória eléri a keret 80 %-át („közel”) vagy túllépi, a program értesítést küld: *„Költségkeret: Élelmiszer – A keret 85%-a elfogyott: 42 500 Ft / 50 000 Ft.”*, illetve *„Túllépted a keretet: 52 300 Ft / 50 000 Ft (+2 300 Ft).”* Szintenként, kategóriánként, hónaponként egyszer; ugyanaz a hír ugyanazt az értesítést cseréli le, nem halmozódnak.
+- **A szintek ugyanazok, mint a Költségkeretek kártyán** (`BudgetStatus.level`: 80 % = közel, a keret fölött = túllépve; pontosan 100 % még „közel”) – egyetlen küszöb van a programban.
+- **Mikor szól:** amikor a tétel bekerül – kézi felvétel, bank-import, másik eszközről szinkronnal érkező tétel; a **Google Wallet-tételnél az app megnyitásakor**, mert a háttérben a program nem dolgoz fel semmit. A figyelés 1,5 másodpercet vár az utolsó változás után, így egy bank-import egy nézésre és legfeljebb egy értesítésre jön.
+- **Csak az emelkedés hír:** közel → túllépve, rendben → közel / túllépve. A program kategóriánként megjegyzi az utoljára látott szintet (havonta, csak az eszközön); ha a szint csökken (törölt tétel, megemelt keret), a memória is lejjebb megy, így az újabb átlépés újra hír. Két hónapnál régebbi memória törlődik.
+- **Az ismétlődő szabály okozta szint nem hír:** a lakbér-szabály a hónap elején (amikor a Pénzügyek megnyílik) magától a keret 100 %-ára viheti a kategóriát; erről a program nem csörög, csak arról, ami fölötte van. (Az azonosítóról ismeri fel: `rec-…`.)
+- **Bekapcsoláskor** a már fennálló szint csak megjegyződik: ha egy kategória már túl van a kereten, nem szól róla, csak az utána jövő lépésekről. A kapcsoló az értesítési engedélyt is kéri; ha megtagadod, kikapcsolva marad, és megmondja, hol engedélyezheted.
+- **Sok egyszerre:** háromnál több új átlépés (pl. egy havi bank-kivonat) egyetlen értesítésben jön, listaként (legfeljebb 6 sor, „…és még N”).
+- **Android:** külön értesítési csatorna („Költségkeret”) – a Beállításokban külön elnémítható az emlékeztetőktől; **Windows:** toast, ugyanazon a Windows-kapcsolaton, amelyen az emlékeztetők.
+- **Új fájlok:** mag `budget_alerts.dart` (`planBudgetAlerts`, `currentBudgetLevels`, `BudgetAlert`, `BudgetMemory`, `encode/decodeBudgetMemory`, `budgetAlertMessages`); `FinTx` rule-azonosító előtag közös konstans (`recurringTxPrefix`); app `notify/budget_notify.dart` (`BudgetNotifier` – külön interfész, nem a `ReminderScheduler`-t bővíti –, Android / Windows / Noop, `budgetNotificationId`: FNV-1a, 1,7–1,8 milliárd közötti azonosító), `notify/budget_alerts.dart` (`BudgetAlertsSetting`, `budgetAlertsProvider`), a `ToastBackend` `show`-val bővült, `toastBackendProvider` (az emlékeztetők és az értesítések egy Windows-kapcsolatot használnak).
+
+**2. Bérbecslés a beosztásból** (Beosztás → a „Havi összesítő” alatt)
+- **Egy kártya a megjelenített hónapra** (a havi léptetővel együtt mozog): az alapbér, a pótlékok soronként (óra × %), és az **Összesen (bruttó becslés)**. Amíg nincs beállítva, a kártya felkínálja a beállítást.
+- **Beállítás** (a kártya ikonja): **órabér** (Ft/óra) és öt pótlék százalékban: **esti** (18–22), **éjszakai** (22–6), **szombati**, **vasárnapi**, **ünnepnapi**. **Minden szám a tiéd:** üresen 0, a program nem tudja és nem állítja, mennyi jár (a törvény, a szerződés, a cégnél érvényes szabály eltérhet; a keresés szerint pl. a műszakpótlék a 18–6 közötti órákra jár, az éjszakai pótlék 22–6 között, a vasárnapi csak bizonyos esetben – ezért **nincs előtöltött „szokásos érték”**). Ha a 18 és 6 óra közötti órákra egy pótlék jár, mindkét sávba ugyanazt írd; „Hogyan számol?” összecsukható magyarázat a párbeszédben.
+- **A számolás szabályai** (kimondva a kártyán és itt):
+  - csak a Beosztás-generátor műszakjai számítanak (a módosítottak is), a **kezdésük hónapja** szerint – mint a havi összesítőben –, a falióra szerinti időtartammal (az óraátállítás éjszakája névleges);
+  - **percre pontos**: minden perc a naptári napja szerinti **napfajtát** kapja (ünnepnap > vasárnap > szombat; az áthelyezett munkanap-szombat és az áthelyezett pihenőnap sima nap), és az **idősávját** (18–22 esti, 22–6 éjszakai, különben nincs); az idősáv és a napfajta pótléka **összeadódik**;
+  - soronként forintra kerekítve (a fél felfelé), az összeg a sorok összege; **túlóra, jutalom, adó, járulék nincs** – ez becslés a beosztásból, nem bérszámfejtés.
+- **Adatvédelem:** a bér csak az eszközön él (meta `pay.settings`): **nem szinkronizál, nem megy az asszisztensnek, nincs az automatikus mentésben és a fájlmentésben** (új eszközön újra be kell írni). Egy forrásőr-teszt rögzíti, hogy a programban csak a kártya olvassa.
+- **Új fájlok:** mag `pay_estimate.dart` (`PaySettings`, `estimatePay`, `PayEstimate`, `PayLine`, `PayKind`, `payKindLabel`); app `ui/shift_pay_card.dart` (`ShiftPayCard`, `PaySettingsDialog`, `paySettingsProvider`); a Beosztás oldal a kártyát a havi összesítő alá teszi (a „Következő műszakok” lista lejjebb került).
+
+**Útközben javítva / észrevéve:** (1) Riverpod 3-ban az a stream-szolgáltató, amelyet senki nem figyel, szünetel, és `ref.read(….future)` rá soha nem válaszol – a kapcsoló bekapcsolása és a kategórianevek ezért az adatbázistól kérdeznek, nem a szolgáltatótól (a tesztek 40 másodperces akadása mutatta ki); (2) a Windows-os értesítési kapcsolat korábban az emlékeztetőké volt – most közös, így a program egyszer regisztrál a Windowsban; (3) a Beosztás oldal korábbi tesztjei tudatosan frissültek: a „Következő műszakok” lista a bérbecslés kártya miatt lejjebb került, és a hónap-címke („2026. 12. hó”) már csak egyszer szerepel az oldalon.
+
+**Ellenőrzés:** mag 1459 teszt (volt 1376), app 2470 (volt 2403); az elemzők és a formázás tiszták Flutter 3.47.9-en és 3.50.0-n. Szándékos elrontás: a magon **142** (a keret-értesítés és a bérbecslés), az alkalmazás oldalán **101**: az első menetben a magon egy (PL3: a „rec-” előtagot az azonosító bármely helyén szabálynak vette – ezt a teszt nem ellenőrizte), az alkalmazás oldalán egy (SC29: a kártya adatvédelmi mondatának tartalmát nem ellenőrizte teszt) ment át, mindkettőre szigorúbb teszt készült; a bérbecslés kártya képernyőolvasó-mondataira utólag írt kilenc további elrontás elsőre elbukott; a végső listákon mind elbukik, egyenértékű nincs. A bérbecslés magját egy perc-perc oracle is ellenőrzi (véletlen műszakok hét hónapra), és egy teljes hónapot a ciklus alapján kézzel levezetett összeggel.
+
+**Nem ellenőrzött / ismert korlátok**
+- **Az értesítések megjelenése valódi Androidon és Windowson** (csatorna, engedély, hang, zárolt képernyő); a Wallet-tételnél az értesítés az app megnyitásakor jön. Ha két eszközön fut az app, mindkettő jelezhet ugyanarról az átlépésről (mindegyik a magáét figyeli).
+- **A bérbecslés a te beosztásoddal és szerződéseddel** – a százalékok, a sávok (18–22 és 22–6 rögzítve), az „összeadódik” szabály és a kerekítés a te számításodtól eltérhet; a valódi bérpapír mérvadó.
+- A „műszakpótlék” törvényi szabályait nem állítom: a keresés szerint a 18–6 közötti sáv és az éjszakai pótlék 22–6 között jár, de a konkrét szabály a szerződéseden és a cégen múlik.
+- A hosszú hónap-összesítő és a Beosztás oldal új kártyája a kirajzolt képeken (Roboto, telefon, 1× és 2× betű, világos és sötét) rendben van, a valódi eszközön még nem láttam.
+- Ezzel a 4. fázis minden tétele megvan; következik az 5. fázis (biztonság, kiadás, minőség, dokumentáció).
+
 ## 4. fázis, 4.5/D-3 – bank-kivonat (CSV) importálása (D csomag, harmadik rész)
 
 **Új: Pénzügyek → fent a feltöltés-ikon, „Bank-kivonat importálása (CSV)”.** Háromlépéses varázsló. A fájl nem megy sehova (a program a gépen olvassa, nem küld el semmit), és az utolsó gombig semmi nem kerül a könyvelésbe.
@@ -27,7 +63,7 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - A 20 000 soros fájl sebessége valódi telefonon (a tesztek 2 000 sorral futnak le; a lista lusta, a feldolgozás egyszer megy végig a soron).
 - A „hasonló” ablaka (3 nap) becslés; az átutalás a saját számlák között két tételként (egy kiadás, egy bevétel) kerül be – a program nem párosítja őket.
 - Az árfolyamot te adod meg; az átváltási díjat és a banki árfolyam-különbséget nem ismeri (ha a bank mást terhelt, írd át az árfolyamot úgy, hogy a forintérték egyezzen).
-- A következő, a D-4 rész: a keret-túllépés értesítés és a műszakpótlék- / bérbecslés.
+- A D-4 rész (a keret-túllépés értesítés és a műszakpótlék- / bérbecslés) a 4.5/D-4-ben elkészült.
 
 ## 4. fázis, 4.5/D-2 – külföldi pénznem: a tétel euróban (vagy más pénznemben) is felvehető (D csomag, második rész)
 
@@ -51,7 +87,7 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - Az összeg számolása: a program a tizedes- és ezres-elválasztót találgatja (az összegnél az egyedüli elválasztó három számjeggyel utána ezres: „1,234” = 1234; az árfolyamnál az egyedüli elválasztó mindig tizedes); a kiszámolt forintérték mindig látszik a mező alatt, ellenőrizd mentés előtt.
 - A kártyás elszámolás és az átváltási díj nincs benne: a tétel azt a forintot őrzi, amelyet az árfolyam megad; ha a bank más forintot terhelt, írd át az árfolyamot úgy, hogy a forintérték egyezzen.
 - A régi appverziók nem ismerik az `fx` kulcsot (lásd fent); a vegyes használat csak addig gond, amíg minden eszköz nem frissült.
-- A bank-CSV import a 4.5/D-3-ban elkészült; a keret-értesítés és a bérbecslés a D-4 része.
+- A bank-CSV import a 4.5/D-3-ban, a keret-értesítés és a bérbecslés a 4.5/D-4-ben elkészült.
 
 ## 4. fázis, 4.5/D-1 – pénzügyi trend, előfizetés-felismerés, CSV-export (D csomag, első rész)
 
@@ -71,7 +107,7 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - A CSV megnyitása valódi Excelben / LibreOffice-ban magyar területi beállítással (oszlopokra bontás, ékezetek, a dátum és a negatív szám felismerése); a tesztek a fájl tartalmát ellenőrzik, programot nem nyitnak.
 - Az előfizetés-felismerés a te tételeiden: a küszöbök (24–38 és 350–380 nap, ×1,25, 45 / 400 nap) becslések; a rendszeresen látogatott, de nem előfizetéses bolt megjelenhet, az az előfizetés, amelynek az ára sokat ugrik vagy a díjnapja nagyon csúszik, kimaradhat.
 - A Trend fül sebessége több ezer tétellel (a számítás minden újraépítéskor egyszer végigmegy a tételeken); a 24 hónapos nézet az évhatáron valódi adaton.
-- Egyetlen pénznem van (forint) – a 4.5/D-2 külföldi pénznemmel bővítette; a bank-CSV import a 4.5/D-3-ban készült el, a keret-értesítés és a bérbecslés a D-4 része.
+- Egyetlen pénznem van (forint) – a 4.5/D-2 külföldi pénznemmel bővítette; a bank-CSV import a 4.5/D-3-ban, a keret-értesítés és a bérbecslés a 4.5/D-4-ben készült el.
 
 ## 4. fázis, 4.4/C – haladás: edzésnapló és trend-grafikonok (C csomag)
 
