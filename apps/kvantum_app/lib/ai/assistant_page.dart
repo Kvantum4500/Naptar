@@ -132,7 +132,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 children: [
                   for (final q in _quickPrompts)
                     ActionChip(
-                      label: Text(q),
+                      // (a chip is one line unless told otherwise: at a large
+                      // text size a suggestion would be cut off)
+                      label: Text(q, softWrap: true, maxLines: 3),
                       onPressed: (st.busy || applying) ? null : () => _send(q),
                     ),
                 ],
@@ -327,13 +329,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 );
               }(),
             ],
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 OutlinedButton(
                   onPressed: applying ? null : ctl.declineMoves,
                   child: const Text('Mégse'),
                 ),
-                const SizedBox(width: 10),
                 FilledButton(
                   // (the bar for "Visszavonás" is shown from here: the site is
                   // taken now, while this page is surely there)
@@ -434,13 +438,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 );
               }(),
             ],
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 OutlinedButton(
                   onPressed: applying ? null : ctl.declineDeletions,
                   child: const Text('Mégse'),
                 ),
-                const SizedBox(width: 10),
                 FilledButton(
                   onPressed: applying
                       ? null
@@ -522,7 +528,10 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             ),
           ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             FilledButton.icon(
               onPressed: (st.selected.isEmpty || applying)
@@ -531,7 +540,6 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
               icon: const Icon(Icons.event_available),
               label: Text('Elfogadom a kijelölteket (${st.selected.length})'),
             ),
-            const SizedBox(width: 10),
             TextButton(
               onPressed: applying ? null : ctl.discardPlan,
               child: const Text('Elvetem'),
@@ -556,7 +564,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           tilePadding: EdgeInsets.zero,
           title: Text(
             'Nem javasolt (${(o.dropped as List).length}): szabálysértés vagy nem található',
-            style: TextStyle(color: scheme.outline),
+            style: TextStyle(color: scheme.onSurfaceVariant),
           ),
           children: [
             for (final d in o.dropped as List<String>)
@@ -643,7 +651,7 @@ class _WhyCardState extends ConsumerState<_WhyCard> {
               children: [
                 for (final c in _whyChips)
                   ActionChip(
-                    label: Text(c),
+                    label: Text(c, softWrap: true, maxLines: 3),
                     onPressed: () => setState(() => _text.text = c),
                   ),
               ],
@@ -657,7 +665,10 @@ class _WhyCardState extends ConsumerState<_WhyCard> {
               ),
               onChanged: (_) => setState(() {}),
             ),
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 FilledButton(
                   onPressed: _text.text.trim().isEmpty
@@ -665,7 +676,6 @@ class _WhyCardState extends ConsumerState<_WhyCard> {
                       : () => ctl.rememberHabit(_text.text),
                   child: const Text('Megjegyzem'),
                 ),
-                const SizedBox(width: 10),
                 TextButton(
                   onPressed: ctl.skipHabit,
                   child: const Text('Nem most'),
@@ -742,7 +752,9 @@ class _PreviewPanel extends StatelessWidget {
               if (r == null) {
                 return const Padding(
                   padding: EdgeInsets.all(8),
-                  child: LinearProgressIndicator(),
+                  child: LinearProgressIndicator(
+                    semanticsLabel: 'Az előnézet készül',
+                  ),
                 );
               }
               return Column(
@@ -857,10 +869,12 @@ class _LocalCardState extends State<_LocalCard> {
                   color: scheme.primary,
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  'Helyi válasz, modell nélkül',
-                  style: Theme.of(context).textTheme.labelLarge
-                      ?.copyWith(color: scheme.primary),
+                Flexible(
+                  child: Text(
+                    'Helyi válasz, modell nélkül',
+                    style: Theme.of(context).textTheme.labelLarge
+                        ?.copyWith(color: scheme.primary),
+                  ),
                 ),
               ],
             ),

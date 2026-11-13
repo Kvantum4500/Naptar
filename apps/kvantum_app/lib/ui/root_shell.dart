@@ -12,6 +12,7 @@ import 'home_page.dart';
 import 'shell_tab.dart';
 import 'shift_page.dart';
 import 'tasks_page.dart';
+import 'text_scale.dart';
 
 /// What "Több" offers: pages that are visited now and then.
 enum _More {
@@ -188,6 +189,12 @@ class _RootShellState extends ConsumerState<RootShell>
         bottomNavigationBar: NavigationBar(
           selectedIndex: tab.index,
           onDestinationSelected: _onSelected,
+          // Five labels do not fit side by side at a large text size: then
+          // only the chosen one is written (the others are still read out
+          // and shown as a tooltip).
+          labelBehavior: context.textFactor() >= 1.3
+              ? NavigationDestinationLabelBehavior.onlyShowSelected
+              : NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
             for (final t in ShellTab.values)
               NavigationDestination(

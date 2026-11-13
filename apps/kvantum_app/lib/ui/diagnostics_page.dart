@@ -48,7 +48,9 @@ class DiagnosticsPage extends ConsumerWidget {
             child: _Body(snapshot: s),
           ),
         ),
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(
+          child: CircularProgressIndicator(semanticsLabel: 'Betöltés'),
+        ),
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),

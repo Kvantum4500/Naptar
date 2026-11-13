@@ -6,6 +6,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../providers.dart';
 import '../format.dart';
+import '../theme.dart';
 import '../undo_service.dart';
 import 'finance_editors.dart';
 
@@ -216,8 +217,11 @@ class RecurringTab extends ConsumerWidget {
                           ? Icons.south_west
                           : Icons.north_east,
                       color: r.kind == FinKind.income
-                          ? Colors.green
+                          ? statusColorsOf(context).ok
                           : Theme.of(context).colorScheme.error,
+                      semanticLabel: r.kind == FinKind.income
+                          ? 'Bevétel'
+                          : 'Kiadás',
                     ),
                     title: Text(r.title),
                     subtitle: Text(
@@ -431,7 +435,8 @@ class _RuleEditorState extends ConsumerState<_RuleEditor> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       const Text('Mettől: '),
                       TextButton(
@@ -443,7 +448,8 @@ class _RuleEditorState extends ConsumerState<_RuleEditor> {
                       ),
                     ],
                   ),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       const Text('Meddig: '),
                       TextButton(
@@ -651,18 +657,24 @@ class _GoalCard extends StatelessWidget {
                 ),
               ],
             ),
-            LinearProgressIndicator(
-              value: p.ratio.clamp(0.0, 1.0),
-              minHeight: 10,
-              borderRadius: BorderRadius.circular(5),
-              color: p.reached ? Colors.green : null,
+            // (the words below say the same: the bar is for the eyes)
+            ExcludeSemantics(
+              child: LinearProgressIndicator(
+                value: p.ratio.clamp(0.0, 1.0),
+                minHeight: 10,
+                borderRadius: BorderRadius.circular(5),
+                color: p.reached ? statusColorsOf(context).ok : null,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               '${formatHuf(p.saved)} / ${formatHuf(p.target)} (${(p.ratio * 100).round()}%)',
             ),
             if (p.reached)
-              const Text('Cél elérve!', style: TextStyle(color: Colors.green))
+              Text(
+                'Cél elérve!',
+                style: TextStyle(color: statusColorsOf(context).ok),
+              )
             else ...[
               Text('Hátravan: ${formatHuf(p.remaining)}'),
               if (goal.deadline != null)
@@ -761,7 +773,8 @@ class _GoalEditorState extends ConsumerState<_GoalEditor> {
           decoration: const InputDecoration(labelText: 'Célösszeg (Ft)'),
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
               icon: const Icon(Icons.event),

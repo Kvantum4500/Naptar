@@ -237,6 +237,7 @@ class SyncStatusButton extends ConsumerWidget {
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           color: color,
+                          semanticsLabel: label,
                         ),
                       )
                     : Icon(icon, size: 18, color: color),

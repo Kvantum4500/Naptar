@@ -15,6 +15,7 @@ import 'event_editor.dart';
 import 'format.dart';
 import 'month_view.dart';
 import 'search_page.dart';
+import 'setup_card.dart';
 import 'shortcuts.dart';
 import '../notify/reminders.dart';
 import 'swipe_nav.dart';
@@ -312,15 +313,38 @@ class _Calendar extends ConsumerWidget {
         ),
         body: Column(
           children: [
-            const CheckInBanner(),
-            const WorkoutFeedbackBanner(),
-            const UnreadableEventsBanner(),
+            const _Banners(),
             Expanded(child: body),
           ],
         ),
       ),
     );
   }
+}
+
+/// The banners above the calendar. Where space is short (a large text size, a
+/// phone held sideways) they take a third of the height at most and scroll,
+/// so that the calendar is never squeezed out by them.
+class _Banners extends StatelessWidget {
+  const _Banners();
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    key: const Key('home-banners'),
+    constraints: BoxConstraints(
+      maxHeight: MediaQuery.sizeOf(context).height / 3,
+    ),
+    child: const SingleChildScrollView(
+      child: Column(
+        children: [
+          SetupCard(),
+          CheckInBanner(),
+          WorkoutFeedbackBanner(),
+          UnreadableEventsBanner(),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Side panel of the month view: the selected day as an hour-scale timeline,
@@ -342,38 +366,50 @@ class _DayPanel extends ConsumerWidget {
     final day = ref.watch(selectedDayProvider);
     final range = ref.watch(dayRangeProvider);
     final count = ref.watch(monthOccurrencesProvider).value?[day]?.length ?? 0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                fmtDateLong(day),
-                style: Theme.of(context).textTheme.titleMedium,
+    return LayoutBuilder(
+      builder: (context, c) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // The title takes at most half of the panel and scrolls beyond that
+          // (a large text size on a small phone), so the hours are never
+          // squeezed out and nothing overflows.
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: c.maxHeight / 2),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fmtDateLong(day),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      count == 0
+                          ? 'Nincs esemény erre a napra.'
+                          : '$count esemény',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
-              Text(
-                count == 0 ? 'Nincs esemény erre a napra.' : '$count esemény',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: SwipeNav(
-            onStep: onStep,
-            child: TimeGrid(
-              days: [range.first],
-              range: range,
-              showDayHeader: false,
-              onOpen: onOpen,
-              onCreateAt: onCreateAt,
             ),
           ),
-        ),
-      ],
+          Expanded(
+            child: SwipeNav(
+              onStep: onStep,
+              child: TimeGrid(
+                days: [range.first],
+                range: range,
+                showDayHeader: false,
+                onOpen: onOpen,
+                onCreateAt: onCreateAt,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

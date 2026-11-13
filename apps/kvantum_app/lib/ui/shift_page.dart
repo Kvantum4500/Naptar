@@ -207,32 +207,35 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
     TimeOfDay e,
     void Function(TimeOfDay) setS,
     void Function(TimeOfDay) setE,
-  ) => Row(
-    children: [
-      SizedBox(width: 140, child: Text(label)),
-      OutlinedButton(
-        onPressed: () async {
-          final t = await _time(s);
-          if (t != null) setState(() => setS(t));
-        },
-        child: Text(
-          '${s.hour.toString().padLeft(2, '0')}:${s.minute.toString().padLeft(2, '0')}',
+  ) => _LabelRow(
+    label,
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        OutlinedButton(
+          onPressed: () async {
+            final t = await _time(s);
+            if (t != null) setState(() => setS(t));
+          },
+          child: Text(
+            '${s.hour.toString().padLeft(2, '0')}:${s.minute.toString().padLeft(2, '0')}',
+          ),
         ),
-      ),
-      const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 8),
-        child: Text('–'),
-      ),
-      OutlinedButton(
-        onPressed: () async {
-          final t = await _time(e);
-          if (t != null) setState(() => setE(t));
-        },
-        child: Text(
-          '${e.hour.toString().padLeft(2, '0')}:${e.minute.toString().padLeft(2, '0')}',
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: Text('–'),
         ),
-      ),
-    ],
+        OutlinedButton(
+          onPressed: () async {
+            final t = await _time(e);
+            if (t != null) setState(() => setE(t));
+          },
+          child: Text(
+            '${e.hour.toString().padLeft(2, '0')}:${e.minute.toString().padLeft(2, '0')}',
+          ),
+        ),
+      ],
+    ),
   );
 
   ShiftHours get _hours => ShiftHours(
@@ -376,13 +379,13 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
-                  child: Text(
-                    'Következő műszakok',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
+                Text(
+                  'Következő műszakok',
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
                 TextButton.icon(
                   onPressed: _addExtra,
@@ -602,41 +605,37 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
               (t) => _dayEnd = t,
             ),
             const Divider(height: 28),
-            Row(
-              children: [
-                const SizedBox(width: 140, child: Text('Kezdőnap')),
-                OutlinedButton(
-                  onPressed: () async {
-                    final d = await showDatePicker(
-                      context: context,
-                      initialDate: DateTime(_from.year, _from.month, _from.day),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2100),
+            _LabelRow(
+              'Kezdőnap',
+              OutlinedButton(
+                onPressed: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime(_from.year, _from.month, _from.day),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (d != null) {
+                    setState(
+                      () => _from = DateTime.utc(d.year, d.month, d.day),
                     );
-                    if (d != null) {
-                      setState(
-                        () => _from = DateTime.utc(d.year, d.month, d.day),
-                      );
-                    }
-                  },
-                  child: Text(fmtDateLong(_from)),
-                ),
-              ],
+                  }
+                },
+                child: Text(fmtDateLong(_from)),
+              ),
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                const SizedBox(width: 140, child: Text('Meddig')),
-                DropdownButton<int>(
-                  value: _months,
-                  items: const [
-                    DropdownMenuItem(value: 3, child: Text('3 hónapig')),
-                    DropdownMenuItem(value: 6, child: Text('6 hónapig')),
-                    DropdownMenuItem(value: 12, child: Text('12 hónapig')),
-                  ],
-                  onChanged: (v) => setState(() => _months = v!),
-                ),
-              ],
+            _LabelRow(
+              'Meddig',
+              DropdownButton<int>(
+                value: _months,
+                items: const [
+                  DropdownMenuItem(value: 3, child: Text('3 hónapig')),
+                  DropdownMenuItem(value: 6, child: Text('6 hónapig')),
+                  DropdownMenuItem(value: 12, child: Text('12 hónapig')),
+                ],
+                onChanged: (v) => setState(() => _months = v!),
+              ),
             ),
             const SizedBox(height: 16),
             Card(
@@ -706,5 +705,27 @@ class _Working extends StatelessWidget {
         ),
       ),
     ),
+  );
+}
+
+/// A label and what it labels: side by side where they fit, the controls
+/// under the label where they do not (a narrow window, large text).
+class _LabelRow extends StatelessWidget {
+  const _LabelRow(this.label, this.child);
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    crossAxisAlignment: WrapCrossAlignment.center,
+    spacing: 8,
+    runSpacing: 4,
+    children: [
+      ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 132),
+        child: Text(label),
+      ),
+      child,
+    ],
   );
 }

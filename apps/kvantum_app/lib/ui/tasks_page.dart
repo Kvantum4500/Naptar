@@ -130,7 +130,7 @@ class _TaskTile extends ConsumerWidget {
         task.title,
         style: TextStyle(
           decoration: task.done ? TextDecoration.lineThrough : null,
-          color: task.done ? scheme.outline : null,
+          color: task.done ? scheme.onSurfaceVariant : null,
         ),
       ),
       subtitle: Text(

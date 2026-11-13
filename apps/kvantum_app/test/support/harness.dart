@@ -46,16 +46,36 @@ List<Override> baseOverrides(AppDatabase db) => [
   googleConfiguredProvider.overrideWithValue(false),
 ];
 
-Widget app(Widget home, AppDatabase db, {List<Override> extra = const []}) =>
-    ProviderScope(
-      overrides: [...baseOverrides(db), ...extra],
-      child: MaterialApp(
-        locale: const Locale('hu'),
-        supportedLocales: const [Locale('hu')],
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        home: home,
-      ),
-    );
+/// [textScale] enlarges all text the way the system's font size does;
+/// [theme], [darkTheme] and [themeMode] put the app in a theme (by default the
+/// framework's own light theme).
+Widget app(
+  Widget home,
+  AppDatabase db, {
+  List<Override> extra = const [],
+  double? textScale,
+  ThemeData? theme,
+  ThemeData? darkTheme,
+  ThemeMode themeMode = ThemeMode.light,
+}) => ProviderScope(
+  overrides: [...baseOverrides(db), ...extra],
+  child: MaterialApp(
+    locale: const Locale('hu'),
+    supportedLocales: const [Locale('hu')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
+    theme: theme,
+    darkTheme: darkTheme,
+    themeMode: themeMode,
+    builder: textScale == null
+        ? null
+        : (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+    home: home,
+  ),
+);
 
 /// Unmount first so drift's stream-cleanup timers run, then close the db in
 /// real time (closing inside fake async would never complete).

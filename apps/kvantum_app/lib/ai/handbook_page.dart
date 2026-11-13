@@ -162,7 +162,9 @@ class _HandbookEditorPageState extends ConsumerState<HandbookEditorPage> {
           ],
         ),
         body: !_loaded
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+                child: CircularProgressIndicator(semanticsLabel: 'Betöltés'),
+              )
             : Padding(
                 padding: const EdgeInsets.all(12),
                 child: TextField(

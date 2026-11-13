@@ -4,11 +4,13 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
+import 'a11y.dart';
 import 'day_utils.dart';
 import 'format.dart';
 import 'month_view.dart' show OpenOccurrence;
 import 'palette.dart';
 import 'tasks_page.dart' show openTaskEditor;
+import 'text_scale.dart';
 
 /// "Ma", "Holnap", "Holnapután" and "Tegnap" for the days around [today];
 /// null for any other day.
@@ -120,6 +122,10 @@ class AgendaView extends ConsumerWidget {
   }
 }
 
+/// The width of the time column ("07:00" over "08:30"): 52 pixels at the
+/// normal text size, wider with larger text so that a time is not broken.
+double _whenWidth(BuildContext context) => 52 * context.textFactor(max: 2);
+
 class _DayHeader extends StatelessWidget {
   const _DayHeader(this.title, {this.color});
   final String title;
@@ -147,39 +153,47 @@ class _EventRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = eventColor(o.colorId);
-    return InkWell(
-      key: ValueKey('agenda-event-${o.eventId}-${o.originalStart}-$day'),
-      onTap: () => onOpen(o),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 52,
-              child: Text(
-                agendaWhen(o, day),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontFeatures: const [FontFeature.tabularFigures()],
+    return Semantics(
+      container: true,
+      button: true,
+      label: spokenEvent(o, day),
+      child: InkWell(
+        key: ValueKey('agenda-event-${o.eventId}-${o.originalStart}-$day'),
+        onTap: () => onOpen(o),
+        // (the words are in the label above)
+        child: ExcludeSemantics(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: _whenWidth(context),
+                  child: Text(
+                    agendaWhen(o, day),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 ),
-              ),
+                Container(
+                  width: 4,
+                  height: 34 * context.textFactor(max: 2),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    o.title.isEmpty ? '(nincs cím)' : o.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
-            Container(
-              width: 4,
-              height: 34,
-              decoration: BoxDecoration(
-                color: bg,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                o.title.isEmpty ? '(nincs cím)' : o.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -195,48 +209,59 @@ class _TaskRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
-    return InkWell(
-      key: ValueKey('agenda-task-${task.id}'),
-      onTap: () => openTaskEditor(context, ref, task: task),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 52,
-              child: Icon(
-                Icons.check_box_outline_blank,
-                size: 20,
-                color: overdue ? scheme.error : scheme.outline,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: task.title),
-                    if (overdue && task.due != null)
-                      TextSpan(
-                        text: '  ·  határidő: ${fmtDate(task.due!)}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.error,
-                        ),
-                      )
-                    else
-                      TextSpan(
-                        text: '  ·  feladat',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.outline,
-                        ),
-                      ),
-                  ],
+    final due = task.due == null ? '' : ', határidő: ${fmtDate(task.due!)}';
+    return Semantics(
+      container: true,
+      button: true,
+      label: overdue
+          ? 'Késésben lévő feladat: ${task.title}$due'
+          : 'Feladat: ${task.title}$due',
+      child: InkWell(
+        key: ValueKey('agenda-task-${task.id}'),
+        onTap: () => openTaskEditor(context, ref, task: task),
+        // (the words are in the label above)
+        child: ExcludeSemantics(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: _whenWidth(context),
+                  child: Icon(
+                    Icons.check_box_outline_blank,
+                    size: 20,
+                    color: overdue ? scheme.error : scheme.onSurfaceVariant,
+                  ),
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: task.title),
+                        if (overdue && task.due != null)
+                          TextSpan(
+                            text: '  ·  határidő: ${fmtDate(task.due!)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.error,
+                            ),
+                          )
+                        else
+                          TextSpan(
+                            text: '  ·  feladat',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

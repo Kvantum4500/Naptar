@@ -5,7 +5,10 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../providers.dart';
 import '../../sync/sync_controller.dart';
+import '../a11y.dart';
 import '../format.dart';
+import '../text_scale.dart';
+import '../theme.dart';
 import 'finance_editors.dart';
 import 'finance_tabs.dart';
 
@@ -116,9 +119,24 @@ class MonthBar extends ConsumerWidget {
 }
 
 Color levelColor(BuildContext context, BudgetLevel l) => switch (l) {
-  BudgetLevel.ok => Colors.green,
-  BudgetLevel.warn => Colors.orange,
+  BudgetLevel.ok => statusColorsOf(context).ok,
+  BudgetLevel.warn => statusColorsOf(context).warn,
   BudgetLevel.over => Theme.of(context).colorScheme.error,
+};
+
+/// The mark that goes with a level, so the colour is not the only signal.
+IconData levelIcon(BudgetLevel l) => switch (l) {
+  BudgetLevel.ok => Icons.check_circle_outline,
+  BudgetLevel.warn => Icons.warning_amber_outlined,
+  BudgetLevel.over => Icons.error_outline,
+};
+
+/// The line under a budget bar: the level in words (the colour and the mark
+/// are not the only signal).
+String budgetHint(BudgetStatus b) => switch (b.level) {
+  BudgetLevel.over => 'Túllépve: ${formatHuf(-b.remaining)}',
+  BudgetLevel.warn => 'Közel a kerethez – maradt: ${formatHuf(b.remaining)}',
+  BudgetLevel.ok => 'Maradt: ${formatHuf(b.remaining)}',
 };
 
 class OverviewTab extends ConsumerWidget {
@@ -149,41 +167,84 @@ class OverviewTab extends ConsumerWidget {
     final signedIn = sync.signedIn;
     final scheme = Theme.of(context).colorScheme;
 
-    Widget card(String label, int value, Color color) => Expanded(
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 4),
-              Text(
-                formatHuf(value),
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(color: color, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-        ),
+    final amountStyle = Theme.of(context).textTheme.titleMedium
+        ?.copyWith(fontWeight: FontWeight.w600);
+    final summary = [
+      ('Bevétel', s.income, statusColorsOf(context).ok),
+      ('Kiadás', s.expense, scheme.error),
+      (
+        'Egyenleg',
+        s.balance,
+        s.balance >= 0 ? statusColorsOf(context).ok : scheme.error,
       ),
+    ];
+
+    // Three cards side by side where the biggest amount fits in one (card
+    // padding 12 + 12, margin 4 + 4); at a large text size, one card with the
+    // three lines under each other.
+    Widget summaryCards() => LayoutBuilder(
+      builder: (context, c) {
+        final widest = summary
+            .map((e) => textWidth(context, formatHuf(e.$2), amountStyle))
+            .reduce((a, b) => a > b ? a : b);
+        if (widest + 32 <= c.maxWidth / 3) {
+          return Row(
+            children: [
+              for (final (label, value, color) in summary)
+                Expanded(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            label,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            formatHuf(value),
+                            style: amountStyle?.copyWith(color: color),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        }
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                for (final (label, value, color) in summary)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text(label)),
+                        Text(
+                          formatHuf(value),
+                          style: amountStyle?.copyWith(color: color),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
 
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         const MonthBar(),
-        Row(
-          children: [
-            card('Bevétel', s.income, Colors.green),
-            card('Kiadás', s.expense, scheme.error),
-            card(
-              'Egyenleg',
-              s.balance,
-              s.balance >= 0 ? Colors.green : scheme.error,
-            ),
-          ],
-        ),
+        summaryCards(),
         if (uncategorized.isNotEmpty)
           Card(
             color: scheme.tertiaryContainer,
@@ -209,9 +270,13 @@ class OverviewTab extends ConsumerWidget {
               right: '${formatHuf(b.spent)} / ${formatHuf(b.limit)}',
               ratio: b.ratio,
               color: levelColor(context, b.level),
-              hint: b.level == BudgetLevel.over
-                  ? 'Túllépve: ${formatHuf(-b.remaining)}'
-                  : 'Maradt: ${formatHuf(b.remaining)}',
+              icon: levelIcon(b.level),
+              hint: budgetHint(b),
+              spoken: spokenBudget(
+                b,
+                categoryName(cats, b.categoryId),
+                budgetHint(b),
+              ),
             ),
         ],
         if (unbudgeted.isNotEmpty) ...[
@@ -228,6 +293,11 @@ class OverviewTab extends ConsumerWidget {
               right: formatHuf(e.value),
               ratio: s.expense == 0 ? 0 : e.value / s.expense,
               color: scheme.primary,
+              spoken: spokenShare(
+                categoryName(cats, e.key),
+                e.value,
+                s.expense == 0 ? 0 : e.value / s.expense,
+              ),
             ),
         ],
         if (s.income == 0 && s.expense == 0)
@@ -261,36 +331,84 @@ class _BarRow extends StatelessWidget {
     required this.right,
     required this.ratio,
     required this.color,
+    required this.spoken,
+    this.icon,
     this.hint,
   });
   final String label;
   final String right;
   final double ratio;
   final Color color;
+
+  /// The whole row as one sentence for a screen reader (the row is one stop,
+  /// not five: label, amounts, bar, hint).
+  final String spoken;
+
+  /// A mark beside the label (budget rows), so the colour is not alone.
+  final IconData? icon;
   final String? hint;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    label: spoken,
+    child: ExcludeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: Text(label)),
-            Text(right, style: Theme.of(context).textTheme.bodySmall),
+            // The label and the amounts side by side where both fit on one
+            // line; the amounts under the label where they do not (a large
+            // text size breaks a name in the middle of its word otherwise).
+            LayoutBuilder(
+              builder: (context, c) {
+                final small = Theme.of(context).textTheme.bodySmall;
+                final sideBySide =
+                    (icon == null ? 0 : 24) +
+                        textWidth(
+                          context,
+                          label,
+                          DefaultTextStyle.of(context).style,
+                        ) +
+                        8 +
+                        textWidth(context, right, small) <=
+                    c.maxWidth;
+                final head = Row(
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: 18, color: color),
+                      const SizedBox(width: 6),
+                    ],
+                    Expanded(child: Text(label)),
+                    if (sideBySide) Text(right, style: small),
+                  ],
+                );
+                if (sideBySide) return head;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    head,
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(right, style: small),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 4),
+            LinearProgressIndicator(
+              value: ratio.clamp(0.0, 1.0),
+              color: color,
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            if (hint != null)
+              Text(hint!, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
-        const SizedBox(height: 4),
-        LinearProgressIndicator(
-          value: ratio.clamp(0.0, 1.0),
-          color: color,
-          minHeight: 8,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        if (hint != null)
-          Text(hint!, style: Theme.of(context).textTheme.bodySmall),
-      ],
+      ),
     ),
   );
 }
@@ -332,11 +450,15 @@ class TransactionsTab extends ConsumerWidget {
       children.add(
         ListTile(
           dense: true,
-          leading: Icon(switch (t.source) {
-            FinSource.wallet => Icons.account_balance_wallet_outlined,
-            FinSource.recurring => Icons.event_repeat,
-            FinSource.manual => income ? Icons.south_west : Icons.north_east,
-          }, color: income ? Colors.green : scheme.error),
+          leading: Icon(
+            switch (t.source) {
+              FinSource.wallet => Icons.account_balance_wallet_outlined,
+              FinSource.recurring => Icons.event_repeat,
+              FinSource.manual => income ? Icons.south_west : Icons.north_east,
+            },
+            color: income ? statusColorsOf(context).ok : scheme.error,
+            semanticLabel: income ? 'Bevétel' : 'Kiadás',
+          ),
           title: Text(
             t.merchant.isEmpty ? categoryName(cats, t.categoryId) : t.merchant,
           ),
@@ -349,7 +471,7 @@ class TransactionsTab extends ConsumerWidget {
           trailing: Text(
             '${income ? '+' : '-'}${formatHuf(t.amount)}',
             style: TextStyle(
-              color: income ? Colors.green : scheme.error,
+              color: income ? statusColorsOf(context).ok : scheme.error,
               fontWeight: FontWeight.w600,
             ),
           ),

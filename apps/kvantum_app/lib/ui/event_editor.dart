@@ -13,6 +13,7 @@ import 'delete_ops.dart';
 import 'format.dart';
 import 'palette.dart';
 import 'repeat_editor.dart';
+import 'text_scale.dart';
 import 'undo_service.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
@@ -773,18 +774,36 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     String? time,
     VoidCallback onDate,
     VoidCallback onTime,
-  ) => Row(
-    children: [
-      SizedBox(width: 84, child: Text(label)),
-      Expanded(
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(onPressed: onDate, child: Text(date)),
+  ) {
+    // At a large text size the label and the date do not fit side by side
+    // (a label broken in the middle of its word, a date over four lines): the
+    // buttons flow under the label then.
+    if (context.textFactor() >= 1.3) {
+      return Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 84),
+            child: Text(label),
+          ),
+          TextButton(onPressed: onDate, child: Text(date)),
+          if (time != null) TextButton(onPressed: onTime, child: Text(time)),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        SizedBox(width: 84, child: Text(label)),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: onDate, child: Text(date)),
+          ),
         ),
-      ),
-      if (time != null) TextButton(onPressed: onTime, child: Text(time)),
-    ],
-  );
+        if (time != null) TextButton(onPressed: onTime, child: Text(time)),
+      ],
+    );
+  }
 }
 
 class _ColorPicker extends StatelessWidget {

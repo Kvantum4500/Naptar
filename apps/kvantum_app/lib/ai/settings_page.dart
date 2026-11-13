@@ -22,7 +22,9 @@ import 'provider_catalog.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
 import '../ui/diagnostics_page.dart';
+import '../ui/setup_guide.dart';
 import '../ui/shortcuts.dart' show showShortcutHelp;
+import '../ui/theme.dart';
 import 'settings/account_card.dart';
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
@@ -145,6 +147,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         key,
         provider: info.id,
       ); // only a key that works is kept
+      ref.invalidate(setupFactsProvider); // (the first-run guide looks again)
       _key.clear();
       final notifier = ref.read(aiSettingsProvider.notifier);
       final known = models.any((m) => m.id == chosen.model);
@@ -399,6 +402,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _deleteKey(String provider) async {
     await ref.read(apiKeyStoreProvider).write(null, provider: provider);
+    ref.invalidate(setupFactsProvider);
     setState(() {
       _hasKey = false;
       _models = const [];
@@ -450,6 +454,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 DropdownButtonFormField<String>(
                   key: ValueKey('provider-${settings.provider}'),
                   initialValue: settings.provider,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Szolgáltató'),
                   items: [
                     for (final p in kProviders)
@@ -462,22 +467,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 const SizedBox(height: 6),
                 Text(info.note, style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 10),
-                Row(
+                // (a Wrap: the link goes under the state where they do not fit
+                // side by side, a narrow window, large text)
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
                   children: [
-                    Icon(
-                      _hasKey ? Icons.check_circle : Icons.info_outline,
-                      size: 18,
-                      color: _hasKey ? scheme.primary : scheme.outline,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _hasKey ? Icons.check_circle : Icons.info_outline,
+                          size: 18,
+                          color: _hasKey
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _hasKey
+                              ? 'API-kulcs megadva'
+                              : (info.keyOptional
+                                    ? 'Kulcs nem kötelező'
+                                    : 'Nincs API-kulcs'),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _hasKey
-                          ? 'API-kulcs megadva'
-                          : (info.keyOptional
-                                ? 'Kulcs nem kötelező'
-                                : 'Nincs API-kulcs'),
-                    ),
-                    const Spacer(),
                     TextButton.icon(
                       onPressed: () => launchUrl(
                         Uri.parse(info.keyUrl),
@@ -866,6 +882,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               section('A program', [
                 Text('Verzió: ${build == null ? '…' : 'build $build'}'),
                 const SizedBox(height: 8),
+                DropdownButtonFormField<ThemeMode>(
+                  key: ValueKey('theme-${ref.watch(themeModeProvider).name}'),
+                  initialValue: ref.watch(themeModeProvider),
+                  decoration: const InputDecoration(labelText: 'Téma'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: ThemeMode.system,
+                      child: Text('Rendszer szerint'),
+                    ),
+                    DropdownMenuItem(
+                      value: ThemeMode.light,
+                      child: Text('Világos'),
+                    ),
+                    DropdownMenuItem(
+                      value: ThemeMode.dark,
+                      child: Text('Sötét'),
+                    ),
+                  ],
+                  onChanged: (m) => m == null
+                      ? null
+                      : ref.read(themeModeProvider.notifier).set(m),
+                ),
+                const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () => showUpdateDialog(context, ref),
                   icon: const Icon(Icons.system_update_alt),
@@ -888,6 +927,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onPressed: () => showShortcutHelp(context),
                   icon: const Icon(Icons.keyboard_outlined),
                   label: const Text('Billentyűparancsok'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('reset-setup'),
+                  onPressed: () {
+                    ref.read(setupFlagsProvider.notifier).reset();
+                    _toast(
+                      'Az első lépések újra megjelennek a naptár tetején.',
+                    );
+                  },
+                  icon: const Icon(Icons.checklist),
+                  label: const Text('Első lépések újra'),
                 ),
               ]),
             ],

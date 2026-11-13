@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
+import '../ui/theme.dart';
 import 'wallet_ingest.dart';
 
 /// Settings block for reading Google Wallet payment notifications (Android).
@@ -122,7 +123,7 @@ class _WalletSettingsState extends ConsumerState<WalletSettings>
             Icon(
               _enabled == true ? Icons.check_circle : Icons.error_outline,
               color: _enabled == true
-                  ? Colors.green
+                  ? statusColorsOf(context).ok
                   : Theme.of(context).colorScheme.error,
               size: 18,
             ),

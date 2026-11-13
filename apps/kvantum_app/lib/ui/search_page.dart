@@ -11,6 +11,7 @@ import 'format.dart';
 import 'palette.dart';
 import 'shell_tab.dart';
 import 'tasks_page.dart';
+import 'theme.dart';
 
 /// What is typed into the search box. It lives as long as the page is open,
 /// so a new search starts empty.
@@ -261,15 +262,17 @@ class _EventTile extends ConsumerWidget {
     final o = hit.occurrence;
     return ListTile(
       key: ValueKey('hit-event-${o.eventId}-${o.originalStart}'),
-      leading: SizedBox(
-        width: 24,
-        child: Center(
-          child: Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: eventColor(o.colorId),
-              shape: BoxShape.circle,
+      leading: ExcludeSemantics(
+        child: SizedBox(
+          width: 24,
+          child: Center(
+            child: Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                color: eventColor(o.colorId),
+                shape: BoxShape.circle,
+              ),
             ),
           ),
         ),
@@ -302,7 +305,7 @@ class _TaskTile extends ConsumerWidget {
         task.title,
         style: TextStyle(
           decoration: task.done ? TextDecoration.lineThrough : null,
-          color: task.done ? scheme.outline : null,
+          color: task.done ? scheme.onSurfaceVariant : null,
         ),
       ),
       subtitle: Text(
@@ -330,7 +333,8 @@ class _TxTile extends ConsumerWidget {
       key: ValueKey('hit-tx-${tx.id}'),
       leading: Icon(
         income ? Icons.south_west : Icons.north_east,
-        color: income ? Colors.green : scheme.error,
+        color: income ? statusColorsOf(context).ok : scheme.error,
+        semanticLabel: income ? 'Bevétel' : 'Kiadás',
       ),
       title: Text(tx.merchant.isEmpty ? cat : tx.merchant),
       subtitle: Text(
@@ -343,7 +347,7 @@ class _TxTile extends ConsumerWidget {
       trailing: Text(
         '${income ? '+' : '-'}${formatHuf(tx.amount)}',
         style: TextStyle(
-          color: income ? Colors.green : scheme.error,
+          color: income ? statusColorsOf(context).ok : scheme.error,
           fontWeight: FontWeight.w600,
         ),
       ),

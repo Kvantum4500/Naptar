@@ -14,7 +14,9 @@ import 'diag/diag_log.dart';
 import 'diag/guarded.dart';
 import 'providers.dart' show dbPathProvider, dbProvider;
 import 'ui/root_shell.dart';
+import 'ui/setup_guide.dart' show setupGuideProvider;
 import 'ui/startup_problem.dart';
+import 'ui/theme.dart';
 import 'update/update_service.dart' show cleanupOldFiles;
 
 void main() {
@@ -78,28 +80,28 @@ Future<void> _start(DiagLog log) async {
         }),
         dbPathProvider.overrideWithValue(start.path),
         diagLogProvider.overrideWithValue(log),
+        // the first-run guide above the calendar (off in tests)
+        setupGuideProvider.overrideWithValue(true),
       ],
       child: const KvantumApp(),
     ),
   );
 }
 
-class KvantumApp extends StatelessWidget {
+class KvantumApp extends ConsumerWidget {
   const KvantumApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) => MaterialApp(
     title: 'Kvantum Naptár',
     debugShowCheckedModeBanner: false,
     locale: const Locale('hu'),
     supportedLocales: const [Locale('hu')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-    darkTheme: ThemeData(
-      colorSchemeSeed: Colors.indigo,
-      brightness: Brightness.dark,
-      useMaterial3: true,
-    ),
+    theme: appTheme(Brightness.light),
+    darkTheme: appTheme(Brightness.dark),
+    // light, dark or the system's: the choice is in Settings
+    themeMode: ref.watch(themeModeProvider),
     home: const RootShell(),
   );
 }

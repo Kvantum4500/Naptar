@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme.dart' show contrastRatio;
+
 /// Google Calendar's 11 event colours (colorId '1'..'11') with Hungarian names.
 const eventColorNames = <String, String>{
   '1': 'Levendula',
@@ -34,9 +36,11 @@ const defaultEventColor = Color(0xFF3F6FD8);
 
 Color eventColor(String? colorId) => _eventColors[colorId] ?? defaultEventColor;
 
-/// Readable text colour on top of [bg].
+/// Readable text colour on top of [bg]: white or near-black, whichever stands
+/// out more (a guess from the brightness alone left white on the mid-tones,
+/// 2.8 : 1 on the flamingo colour).
 Color onEventColor(Color bg) =>
-    ThemeData.estimateBrightnessForColor(bg) == Brightness.dark
+    contrastRatio(Colors.white, bg) >= contrastRatio(Colors.black87, bg)
     ? Colors.white
     : Colors.black87;
 

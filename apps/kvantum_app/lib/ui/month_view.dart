@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -5,9 +7,11 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
 import 'breakpoints.dart';
+import 'a11y.dart';
 import 'day_utils.dart';
 import 'format.dart';
 import 'palette.dart';
+import 'text_scale.dart';
 
 typedef OpenOccurrence = void Function(Occurrence o);
 
@@ -109,13 +113,19 @@ class _DayCell extends StatelessWidget {
   final OpenOccurrence onOpen;
   final void Function(DateTime) onMore;
 
-  static const double _head = 26, _line = 18;
+  // (at the normal text size; they grow with the text, see build)
+  static const double _head = 26;
 
   /// A cell at least this wide has room for "18:00 " before the title.
   static const double _timeFromWidth = 92;
 
   @override
   Widget build(BuildContext context) {
+    // The rows are made for 11-point text: at a larger text size they are
+    // as tall as that text needs (the day number: its own line; a colour bar:
+    // its title), so that the title still fits and no space is wasted.
+    final head = math.max(_head - 4, context.scaled(12) * 1.2 + 6);
+    final line = _chipHeight(context) + 1;
     // All-day first, then by start time.
     final sorted = [...items]
       ..sort((a, b) {
@@ -123,8 +133,17 @@ class _DayCell extends StatelessWidget {
         return a.startUtc.compareTo(b.startUtc);
       });
     return Semantics(
-      label: '${day.year}. ${day.month}. ${day.day}., ${items.length} esemény',
+      // one stop for the screen reader: the day, what is on it, whether it is
+      // today; the events in it are stops of their own
+      container: true,
       button: true,
+      selected: selected,
+      label: spokenCell(
+        day: day,
+        events: items.length,
+        today: today,
+        inMonth: inMonth,
+      ),
       child: InkWell(
         onTap: onTapDay,
         child: Container(
@@ -148,10 +167,11 @@ class _DayCell extends StatelessWidget {
               // padding (4) + header (22) are fixed; the rest holds 18 px rows
               final fit = dots
                   ? 0
-                  : ((c.maxHeight - 4 - (_head - 4)) / _line).floor().clamp(
-                      0,
-                      12,
-                    );
+                  : ((c.maxHeight - 4 - head) / line).floor().clamp(0, 12);
+              // dots need a row under the number (7 + 2 pixels); in a cell too
+              // short for it (a large text size) a "•" after the number says
+              // that there is something on the day
+              final dotsFit = c.maxHeight - 4 - head >= 9;
               final overflow = sorted.length > fit;
               // keep one row for the "+N további" link when needed
               final shown = fit == 0 ? 0 : (overflow ? fit - 1 : sorted.length);
@@ -172,40 +192,45 @@ class _DayCell extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SizedBox(
-                          height: _head - 4,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                              ),
-                              decoration: today
-                                  ? BoxDecoration(
-                                      color: scheme.primary,
-                                      borderRadius: BorderRadius.circular(10),
-                                    )
-                                  : null,
-                              child: Text(
-                                !dots && fit == 0 && sorted.isNotEmpty
-                                    ? '${day.day} •'
-                                    : '${day.day}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: today
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: today
-                                      ? scheme.onPrimary
-                                      : (inMonth
-                                            ? scheme.onSurface
-                                            : scheme.outline),
+                          height: head,
+                          child: ExcludeSemantics(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                ),
+                                decoration: today
+                                    ? BoxDecoration(
+                                        color: scheme.primary,
+                                        borderRadius: BorderRadius.circular(10),
+                                      )
+                                    : null,
+                                child: Text(
+                                  sorted.isNotEmpty &&
+                                          (dots ? !dotsFit : fit == 0)
+                                      ? '${day.day} •'
+                                      : '${day.day}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: today
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: today
+                                        ? scheme.onPrimary
+                                        : (inMonth
+                                              ? scheme.onSurface
+                                              : scheme.onSurfaceVariant),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
                         if (dots)
-                          _Dots(items: sorted, scheme: scheme)
+                          (dotsFit
+                              ? _Dots(items: sorted, scheme: scheme)
+                              : const SizedBox.shrink())
                         else
                           for (final o in sorted.take(shown))
                             _Chip(
@@ -215,22 +240,30 @@ class _DayCell extends StatelessWidget {
                               showTime: showTime,
                             ),
                         if (hidden > 0)
-                          SizedBox(
-                            height: _line,
-                            child: InkWell(
-                              onTap: () => onMore(day),
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 3),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    '+$hidden további',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: scheme.primary,
+                          Semantics(
+                            container: true,
+                            button: true,
+                            label: '$hidden további esemény, a nap megnyitása',
+                            child: SizedBox(
+                              height: line,
+                              child: InkWell(
+                                onTap: () => onMore(day),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 3),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    // (the words are in the label above)
+                                    child: ExcludeSemantics(
+                                      child: Text(
+                                        '+$hidden további',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: scheme.primary,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -298,6 +331,10 @@ class _Dots extends StatelessWidget {
   }
 }
 
+/// The height of a colour bar in a month cell: 17 pixels at the normal text
+/// size, the height of its (11-point) line of text and a margin at a larger one.
+double _chipHeight(BuildContext context) => context.scaled(11) * 1.1 + 4.9;
+
 class _Chip extends StatelessWidget {
   const _Chip({
     required this.o,
@@ -325,35 +362,42 @@ class _Chip extends StatelessWidget {
         : '';
     return Padding(
       padding: const EdgeInsets.only(bottom: 1),
-      child: SizedBox(
-        height: 17,
-        child: Material(
-          color: o.allDay ? bg : bg.withValues(alpha: .18),
-          borderRadius: BorderRadius.circular(4),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => onOpen(o),
-            child: Row(
-              children: [
-                if (!o.allDay) Container(width: 3, color: bg),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      '$time${o.title.isEmpty ? '(nincs cím)' : o.title}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.1,
-                        color: o.allDay
-                            ? fg
-                            : Theme.of(context).colorScheme.onSurface,
+      child: Semantics(
+        container: true,
+        button: true,
+        label: spokenEvent(o, day),
+        child: SizedBox(
+          height: _chipHeight(context),
+          child: Material(
+            color: o.allDay ? bg : bg.withValues(alpha: .18),
+            borderRadius: BorderRadius.circular(4),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => onOpen(o),
+              child: Row(
+                children: [
+                  if (!o.allDay) Container(width: 3, color: bg),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ExcludeSemantics(
+                        child: Text(
+                          '$time${o.title.isEmpty ? '(nincs cím)' : o.title}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.1,
+                            color: o.allDay
+                                ? fg
+                                : Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

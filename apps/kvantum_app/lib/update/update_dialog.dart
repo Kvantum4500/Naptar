@@ -275,6 +275,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
                 const SizedBox(height: 14),
                 LinearProgressIndicator(
                   value: _progress == 0 ? null : _progress,
+                  semanticsLabel: 'Letöltés',
                 ),
                 const SizedBox(height: 4),
                 Text('Letöltés… ${((_progress ?? 0) * 100).round()}%'),
