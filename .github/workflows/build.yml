@@ -8,6 +8,18 @@ name: Build apps
 # settings, which change no build output) never builds: it would publish a
 # release of unchanged app code (tag pushes are not filtered).
 #
+# Channels (the release job): a build of main or of a version tag is STABLE:
+# it is what GitHub marks "latest", and it is published only for a commit whose
+# CI passed. A build of any other branch (work in progress) is a PREVIEW: a
+# pre-release, never "latest"; the app finds it only while its switch "also
+# look for preview versions" is on.
+#
+# Signing (the release job): when the secret UPDATE_SIGNING_KEY exists, every
+# published package gets a <package>.sig, an Ed25519 signature of
+# "build-<N>|<sha256 of the package>" (see docs/alairt-frissites.md). The apps
+# that have the matching public key built in (the variable UPDATE_PUBLIC_KEY)
+# check it. Without the secret nothing is signed and the flow is what it was.
+#
 # The tool versions are pinned on purpose (see ci.yml for why and how to
 # upgrade): Flutter 3.50.0, and Java 21 for the Android job - the lint step of
 # the Android Gradle plugin 9.3 (the one Flutter 3.50 recommends) crashes on 17.
@@ -15,8 +27,12 @@ name: Build apps
 # Repository secrets used:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   Google sign-in
 #   UPDATE_TOKEN                             read-only token the app uses to find updates
+#   UPDATE_SIGNING_KEY                       the private Ed25519 key (PEM) the releases are signed with (optional)
 #   ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
 #   ANDROID_KEY_PASSWORD                     stable Android signing key (optional)
+# Repository variables used (no secrets in them):
+#   UPDATE_PUBLIC_KEY                        the public key(s) the apps check the signature with, comma separated
+#   UPDATE_REQUIRE_SIGNATURE                 "true": the apps refuse a release without a valid signature
 on:
   workflow_dispatch:
   push:
@@ -46,10 +62,58 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
+          UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+          UPDATE_REQUIRE_SIGNATURE: ${{ vars.UPDATE_REQUIRE_SIGNATURE }}
         run: |
+          # The signing settings are checked before they are built in: a key that
+          # is not a 32-byte Ed25519 key would make every app refuse every signed
+          # update, so such a build is stopped here.
+          key_norm() {
+            local s="${1//-/+}"
+            s="${s//_//}"
+            s="${s%%=*}"
+            while [ $(( ${#s} % 4 )) -ne 0 ]; do s="${s}="; done
+            printf '%s' "$s"
+          }
+          for k in $(printf '%s' "$UPDATE_PUBLIC_KEY" | tr ',;' '  '); do
+            # (32 bytes are 43 base64 characters and one "=")
+            if ! [[ "$(key_norm "$k")" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+              echo "::error::Az UPDATE_PUBLIC_KEY egyik kulcsa nem 32 bájtos Ed25519 kulcs (base64): $k"
+              exit 1
+            fi
+          done
+          require=false
+          if [ "${UPDATE_REQUIRE_SIGNATURE,,}" = "true" ]; then
+            require=true
+            if [ -z "$(printf '%s' "$UPDATE_PUBLIC_KEY" | tr -d '[:space:],;')" ]; then
+              echo "::error::Az UPDATE_REQUIRE_SIGNATURE igaz, de nincs UPDATE_PUBLIC_KEY: az app így semmilyen frissítést nem fogadna el."
+              exit 1
+            fi
+          fi
           jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" --arg t "$UPDATE_TOKEN" \
-            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t}' > secrets.json
+            --arg k "$UPDATE_PUBLIC_KEY" --arg r "$require" \
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
       - run: flutter build windows --release --build-number=$BUILD_NUMBER --build-name=0.2.$BUILD_NUMBER --dart-define-from-file=secrets.json
+      - name: Visual C++ runtime next to the program (advisory)
+        # The program is built against the dynamic Visual C++ runtime; on a PC
+        # that does not have it the program does not start. The three DLLs are
+        # redistributable and go into the folder (app-local). Never stops the build.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $rel = 'build/windows/x64/runner/Release'
+          $lines = @('### Visual C++ futtatókörnyezet a program mellett (tanácsadó)')
+          foreach ($n in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            $src = Join-Path $env:SystemRoot "System32\$n"
+            if (Test-Path $src) {
+              Copy-Item $src $rel -Force
+              $lines += "- $n bemásolva ($((Get-Item $src).VersionInfo.FileVersion))"
+            } else {
+              $lines += "- $n nincs a gépen, nem kerül a csomagba"
+              Write-Host "::warning::$n nem található, nem kerül a csomagba"
+            }
+          }
+          $lines | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
       - name: Package (zip + sha256)
         shell: pwsh
         run: |
@@ -102,10 +166,86 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
+          UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+          UPDATE_REQUIRE_SIGNATURE: ${{ vars.UPDATE_REQUIRE_SIGNATURE }}
         run: |
+          # The signing settings are checked before they are built in: a key that
+          # is not a 32-byte Ed25519 key would make every app refuse every signed
+          # update, so such a build is stopped here.
+          key_norm() {
+            local s="${1//-/+}"
+            s="${s//_//}"
+            s="${s%%=*}"
+            while [ $(( ${#s} % 4 )) -ne 0 ]; do s="${s}="; done
+            printf '%s' "$s"
+          }
+          for k in $(printf '%s' "$UPDATE_PUBLIC_KEY" | tr ',;' '  '); do
+            # (32 bytes are 43 base64 characters and one "=")
+            if ! [[ "$(key_norm "$k")" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+              echo "::error::Az UPDATE_PUBLIC_KEY egyik kulcsa nem 32 bájtos Ed25519 kulcs (base64): $k"
+              exit 1
+            fi
+          done
+          require=false
+          if [ "${UPDATE_REQUIRE_SIGNATURE,,}" = "true" ]; then
+            require=true
+            if [ -z "$(printf '%s' "$UPDATE_PUBLIC_KEY" | tr -d '[:space:],;')" ]; then
+              echo "::error::Az UPDATE_REQUIRE_SIGNATURE igaz, de nincs UPDATE_PUBLIC_KEY: az app így semmilyen frissítést nem fogadna el."
+              exit 1
+            fi
+          fi
           jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" --arg t "$UPDATE_TOKEN" \
-            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t}' > secrets.json
+            --arg k "$UPDATE_PUBLIC_KEY" --arg r "$require" \
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
       - run: flutter build apk --release --build-number=$BUILD_NUMBER --build-name=0.2.$BUILD_NUMBER --dart-define-from-file=secrets.json
+      - name: Check the APK (advisory)
+        # Looks at what the build made: alignment (4 bytes, and the 16 KB pages
+        # newer Android versions want), the permissions against the list the app
+        # is meant to have (android_manifest_test.dart), minSdk and targetSdk.
+        # Writes the answer into the job summary; never stops the build.
+        continue-on-error: true
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          bt=$(ls "$sdk/build-tools" 2>/dev/null | sort -V | tail -1 || true)
+          analyzer="$sdk/cmdline-tools/latest/bin/apkanalyzer"
+          # the permissions the app is meant to have (see android_manifest_test.dart;
+          # the generated ...DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION is the build's own)
+          allowed='android.permission.INTERNET
+          android.permission.REQUEST_INSTALL_PACKAGES
+          android.permission.POST_NOTIFICATIONS
+          android.permission.RECEIVE_BOOT_COMPLETED
+          android.permission.ACCESS_COARSE_LOCATION
+          android.permission.VIBRATE'
+          warns=()
+          {
+            echo '### APK-ellenőrzés (tanácsadó)'
+            echo
+            if [ -n "$bt" ] && "$sdk/build-tools/$bt/zipalign" -c -P 16 -v 4 "$apk" > /dev/null 2>&1; then
+              echo "- igazítás: rendben (4 bájt és 16 KB; build-tools $bt)"
+            else
+              echo "- igazítás: **nem sikerült igazolni** (4 bájt / 16 KB; build-tools ${bt:-nincs})"
+              warns+=("Az APK igazítása (4 bájt / 16 KB) nem igazolható.")
+            fi
+            if [ -x "$analyzer" ]; then
+              perms=$("$analyzer" manifest permissions "$apk" 2>/dev/null || true)
+              extra=$(printf '%s\n' "$perms" | grep -v '^$' | grep -v 'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION$' | grep -vxF -f <(printf '%s\n' "$allowed") || true)
+              echo "- engedélyek az APK-ban:"
+              printf '%s\n' "$perms" | sed 's/^/  - /'
+              if [ -n "$extra" ]; then
+                echo "- **váratlan engedély:** $(printf '%s' "$extra" | tr '\n' ' ')"
+                warns+=("Váratlan engedély az APK-ban: $(printf '%s' "$extra" | tr '\n' ' ')")
+              else
+                echo "- engedélyek: a várt halmaz"
+              fi
+              echo "- minSdk $("$analyzer" manifest min-sdk "$apk" 2>/dev/null || echo ?), targetSdk $("$analyzer" manifest target-sdk "$apk" 2>/dev/null || echo ?)"
+            else
+              echo "- az apkanalyzer nem található, az engedélyek nincsenek ellenőrizve"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          for w in "${warns[@]}"; do
+            echo "::warning::$w"
+          done
       - name: Package (apk + sha256)
         run: |
           mkdir -p dist
@@ -124,7 +264,41 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
+      - name: Decide the channel
+        id: channel
+        run: |
+          # main and the version tags are the stable channel, every other branch
+          # (work in progress) is a preview
+          if [ "$GITHUB_REF" = "refs/heads/main" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=preview" >> "$GITHUB_OUTPUT"
+          fi
+      - name: A stable release only for a commit whose CI passed
+        if: steps.channel.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The CI of the same push is usually still running when the build is
+          # done: wait for it (up to about 25 minutes), then require a pass.
+          for i in $(seq 1 50); do
+            runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --json status,conclusion --limit 20)
+            ok=$(printf '%s' "$runs" | jq '[.[] | select(.conclusion == "success")] | length')
+            open=$(printf '%s' "$runs" | jq '[.[] | select(.status != "completed")] | length')
+            if [ "$ok" -gt 0 ]; then
+              echo "A CI sikeres volt erre a commitra ($GITHUB_SHA)."
+              exit 0
+            fi
+            if [ "$open" -eq 0 ]; then
+              echo "::error::Nincs sikeres CI-futás erre a commitra ($GITHUB_SHA), ezért nem készül stabil kiadás. Javítsd a CI-t, majd futtasd újra ezt a munkafolyamatot."
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "::error::A CI nem fejeződött be időben ($GITHUB_SHA), ezért nem készül stabil kiadás."
+          exit 1
       - uses: actions/download-artifact@v4
         with: { name: naptar-windows, path: out }
       - uses: actions/download-artifact@v4
@@ -139,17 +313,85 @@ jobs:
             echo "apk=out/naptar-android-${BUILD_NUMBER}.apk" >> "$GITHUB_OUTPUT"
             echo "apksha=out/naptar-android-${BUILD_NUMBER}.apk.sha256" >> "$GITHUB_OUTPUT"
           fi
+      - name: Sign the packages (only if the signing key exists)
+        env:
+          KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          PUBLIC: ${{ vars.UPDATE_PUBLIC_KEY }}
+          APK: ${{ steps.files.outputs.apk }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::Nincs UPDATE_SIGNING_KEY titok: a kiadás nincs aláírva (a folyamat a régi)."
+            exit 0
+          fi
+          umask 077
+          key="$RUNNER_TEMP/update-signing-key.pem"
+          pub="$RUNNER_TEMP/update-signing-key.pub.pem"
+          msg="$RUNNER_TEMP/update-message.bin"
+          sig="$RUNNER_TEMP/update-signature.bin"
+          trap 'rm -f "$key" "$pub" "$msg" "$sig"' EXIT
+          printf '%s\n' "$KEY" > "$key"
+          if ! openssl pkey -in "$key" -text -noout 2>/dev/null | grep -q '^ED25519 Private-Key'; then
+            echo "::error::Az UPDATE_SIGNING_KEY nem érvényes Ed25519 titkos kulcs (PEM)."
+            exit 1
+          fi
+          openssl pkey -in "$key" -pubout -out "$pub"
+          raw=$(openssl pkey -in "$key" -pubout -outform DER | tail -c 32 | base64 -w0)
+          # The apps must have the matching public key, or they would refuse
+          # this release: better no release than one nobody can install.
+          key_norm() {
+            local s="${1//-/+}"
+            s="${s//_//}"
+            s="${s%%=*}"
+            while [ $(( ${#s} % 4 )) -ne 0 ]; do s="${s}="; done
+            printf '%s' "$s"
+          }
+          if [ -n "$(printf '%s' "$PUBLIC" | tr -d '[:space:],;')" ]; then
+            found=no
+            for k in $(printf '%s' "$PUBLIC" | tr ',;' '  '); do
+              if [ "$(key_norm "$k")" = "$raw" ]; then found=yes; fi
+            done
+            if [ "$found" != "yes" ]; then
+              echo "::error::Az UPDATE_SIGNING_KEY nyilvános párja ($raw) nincs az UPDATE_PUBLIC_KEY változóban: az appok elutasítanák ezt a kiadást."
+              exit 1
+            fi
+          else
+            echo "::warning::Nincs UPDATE_PUBLIC_KEY változó: az appokban még nincs kulcs, az aláírást egyelőre senki nem ellenőrzi. A kulcs: $raw"
+          fi
+          for f in "out/naptar-windows-${BUILD_NUMBER}.zip" ${APK:+"$APK"}; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Hiányzik a $f."
+              exit 1
+            fi
+            have=$(sha256sum "$f" | cut -d' ' -f1)
+            want=$(cut -d' ' -f1 "$f.sha256" | tr 'A-F' 'a-f')
+            if [ "$have" != "$want" ]; then
+              echo "::error::A $f ellenőrző összege nem egyezik a .sha256 fájlával."
+              exit 1
+            fi
+            printf 'build-%s|%s' "$BUILD_NUMBER" "$have" > "$msg"
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "$msg" -out "$sig"
+            openssl pkeyutl -verify -rawin -pubin -inkey "$pub" -in "$msg" -sigfile "$sig" > /dev/null
+            base64 -w0 "$sig" > "$f.sig"
+            echo "Aláírva: $f.sig"
+          done
+          {
+            echo "### Aláírás"
+            echo
+            echo "A kiadás aláírva, a nyilvános kulcs: \`$raw\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           name: Build ${{ github.run_number }}
+          prerelease: ${{ steps.channel.outputs.channel != 'stable' }}
+          make_latest: ${{ steps.channel.outputs.channel == 'stable' }}
           body: |
-            Build ${{ github.run_number }} (${{ github.sha }})
+            Build ${{ github.run_number }} (${{ github.sha }}), ${{ steps.channel.outputs.channel == 'stable' && 'stabil' || 'előzetes' }} csatorna
             ${{ github.event.head_commit.message }}
-          make_latest: true
           files: |
             out/naptar-windows-${{ github.run_number }}.zip
             out/naptar-windows-${{ github.run_number }}.zip.sha256
             ${{ steps.files.outputs.apk }}
             ${{ steps.files.outputs.apksha }}
+            out/*.sig

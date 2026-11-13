@@ -5,9 +5,22 @@ name: CI
 # new version locally first (flutter analyze + flutter test), then change
 # `flutter-version` here and in build.yml, and `sdk` below (the Dart that ships
 # with that Flutter).
+#
+# A stable release (build.yml: main, version tags) waits for this workflow to
+# pass on its commit.
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the run of the older one pointless,
+# except on main, where every commit's result is what a stable release waits for.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   core:
     runs-on: ubuntu-latest
@@ -18,6 +31,7 @@ jobs:
         with: { sdk: '3.14.0' } # the Dart of Flutter 3.50.0
       - run: dart pub get
       - run: dart analyze
+      - run: dart format --output=none --set-exit-if-changed .
       - run: dart test
   app:
     runs-on: ubuntu-latest
@@ -30,4 +44,23 @@ jobs:
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
       - run: flutter analyze
-      - run: flutter test
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter test --coverage
+      - name: Coverage (advisory)
+        # What share of the lines the tests run: written into the job summary
+        # and kept as lcov.info for two weeks. It stops nothing.
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "Nincs lefedettségi jelentés." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          awk -F: '/^LF:/{f+=$2} /^LH:/{h+=$2} END{printf "### Lefedettség (tanácsadó)\n\n%d sor a %d-ből fut a tesztekben (%.1f %%)\n", h, f, (f ? 100*h/f : 0)}' coverage/lcov.info >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-app
+          path: apps/kvantum_app/coverage/lcov.info
+          retention-days: 14
+          if-no-files-found: ignore

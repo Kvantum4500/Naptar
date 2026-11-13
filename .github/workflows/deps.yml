@@ -1,0 +1,32 @@
+name: Dependencies (weekly look)
+# Once a week (and on demand) lists the packages that have newer versions and
+# writes the list into the job summary. It changes nothing, publishes nothing
+# and a package that is outdated never makes it fail: it is a reminder to
+# upgrade on purpose (see the note on upgrading at the top of ci.yml), not a gate.
+on:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays, 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  outdated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: '3.50.0', channel: stable, cache: true }
+      - name: Outdated packages
+        run: |
+          {
+            echo '## Elavult csomagok (app)'
+            echo '```'
+            (cd apps/kvantum_app && flutter pub get > /dev/null 2>&1; flutter pub outdated 2>&1) || true
+            echo '```'
+            echo '## Elavult csomagok (mag)'
+            echo '```'
+            (cd packages/kvantum_core && dart pub get > /dev/null 2>&1; dart pub outdated 2>&1) || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
