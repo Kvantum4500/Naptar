@@ -213,23 +213,27 @@ class EventRepository {
     return out;
   }
 
-  Future<void> markPushed(OutboxItem item, {String? googleId, String? etag}) =>
-      db.transaction(() async {
-        await (db.delete(
-          db.outboxRows,
-        )..where((t) => t.seq.equals(item.seq))).go();
-        if (item.op == 'delete') {
-          await (db.delete(
-            db.eventRows,
-          )..where((t) => t.id.equals(item.event.id))).go();
-        } else {
-          await (db.update(
-            db.eventRows,
-          )..where((t) => t.id.equals(item.event.id))).write(
-            EventRowsCompanion(googleId: Value(googleId), etag: Value(etag)),
-          );
-        }
-      });
+  Future<void> markPushed(
+    OutboxItem item, {
+    String? googleId,
+    String? etag,
+  }) => db.transaction(() async {
+    await (db.delete(db.outboxRows)..where((t) => t.seq.equals(item.seq))).go();
+    if (item.op == 'delete') {
+      // Only the tombstone goes. An event that was brought back while its
+      // deletion was on the wire stays (its link to Google is stale; the
+      // next pull sees the cancellation and uploads it again).
+      await (db.delete(db.eventRows)
+            ..where((t) => t.id.equals(item.event.id) & t.deleted.equals(true)))
+          .go();
+    } else {
+      await (db.update(
+        db.eventRows,
+      )..where((t) => t.id.equals(item.event.id))).write(
+        EventRowsCompanion(googleId: Value(googleId), etag: Value(etag)),
+      );
+    }
+  });
 
   /// The item itself was refused: one more failed attempt.
   Future<void> markFailed(OutboxItem item, String error) =>

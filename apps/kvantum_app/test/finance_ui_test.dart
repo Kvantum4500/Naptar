@@ -173,16 +173,79 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Törlés'));
     await tester.pumpAndSettle();
-    expect(find.text('Törlöd a tételt?'), findsOneWidget);
-    await tester.tap(find.text('Mégse').last);
-    await tester.pumpAndSettle();
-    expect((await tester.runAsync(repo.txs))!.length, 1); // still there
-    await tester.tap(find.text('Törlés'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Törlés').last);
-    await tester.pumpAndSettle();
+    expect(find.text('Törlöd a tételt?'), findsNothing);
     expect((await tester.runAsync(repo.txs))!, isEmpty);
     expect(find.text('Kávé'), findsNothing);
+    expect(find.textContaining('Tétel törölve'), findsOneWidget);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('"Visszavonás" brings a deleted transaction back', (
+    tester,
+  ) async {
+    await boot(tester);
+    await goTo(tester, 'Tételek');
+    await addTx(tester, '1000', merchant: 'Kávé');
+    await tester.tap(find.text('Kávé'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Törlés'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kávé'), findsNothing);
+
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    final t = (await tester.runAsync(repo.txs))!.single;
+    expect((t.merchant, t.amount), ('Kávé', 1000));
+    expect(find.text('Kávé'), findsOneWidget);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('an unused category can be deleted and taken back', (
+    tester,
+  ) async {
+    await boot(tester);
+    await goTo(tester, 'Keretek');
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(ListTile, 'Szórakozás'),
+        matching: find.byTooltip('Kategória'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Törlés'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Szórakozás'), findsNothing);
+    expect(find.text('Kategória törölve'), findsOneWidget);
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Szórakozás'), findsOneWidget);
+    expect(
+      (await tester.runAsync(repo.categories))!.any((c) => c.id == 'cat-fun'),
+      isTrue,
+    );
+    await shutdown(tester, db);
+  });
+
+  testWidgets('a budget can be cleared and taken back', (tester) async {
+    await boot(tester);
+    await goTo(tester, 'Keretek');
+    await tester.tap(find.byTooltip('Keret beállítása').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '10000');
+    await tester.tap(find.text('Mentés'));
+    await tester.pumpAndSettle();
+    expect(find.text('Havi keret: 10 000 Ft'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Keret beállítása').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keret törlése'));
+    await tester.pumpAndSettle();
+    expect(find.text('Havi keret: 10 000 Ft'), findsNothing);
+    expect(find.text('Keret törölve'), findsOneWidget);
+
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    expect(find.text('Havi keret: 10 000 Ft'), findsOneWidget);
     await shutdown(tester, db);
   });
 
@@ -321,10 +384,50 @@ void main() {
 
     await tester.tap(find.byTooltip('Cél törlése'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Törlés').last);
-    await tester.pumpAndSettle();
+    expect(find.text('Törlöd a célt?'), findsNothing);
     expect(find.text('Nyaralás'), findsNothing);
     expect((await tester.runAsync(repo.deposits))!, isEmpty);
+    expect(find.textContaining('Cél törölve'), findsOneWidget);
+
+    // taking it back brings the deposits with it
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nyaralás'), findsOneWidget);
+    expect(find.textContaining('(25%)'), findsOneWidget);
+    expect((await tester.runAsync(repo.deposits))!.single.amount, 150000);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('a recurring item can be deleted and taken back', (tester) async {
+    await boot(tester);
+    await goTo(tester, 'Ismétlődők');
+    await tester.tap(find.byTooltip('Új ismétlődő tétel'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Név (pl. Fizetés, Lakbér)'),
+      'Lakbér',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Összeg (Ft)'),
+      '120000',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'A hónap hányadik napján'),
+      '1',
+    );
+    await tester.tap(find.text('Mentés'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lakbér'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Törlés'));
+    await tester.pumpAndSettle();
+    expect(find.text('Törlöd az ismétlődő tételt?'), findsNothing);
+    expect((await tester.runAsync(repo.recurring))!, isEmpty);
+    expect(find.text('Ismétlődő tétel törölve'), findsOneWidget);
+
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    expect((await tester.runAsync(repo.recurring))!.single.title, 'Lakbér');
     await shutdown(tester, db);
   });
 

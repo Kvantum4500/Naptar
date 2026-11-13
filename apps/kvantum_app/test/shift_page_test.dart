@@ -1,10 +1,13 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/sync_hold.dart';
+import 'package:kvantum_app/ui/format.dart';
 import 'package:kvantum_app/ui/shift_page.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -177,19 +180,88 @@ void main() {
     await shutdown(tester, db);
   });
 
-  testWidgets('deleting a shift asks first', (tester) async {
+  testWidgets('deleting a shift needs no question and can be taken back', (
+    tester,
+  ) async {
+    await boot(tester, floating(2026, 11, 12));
+    await create(tester);
+    final all0 = await shifts(tester);
+    // the first row of the list on the page is the one that goes
+    final first = all0.first;
+    final row =
+        '${fmtDate(first.start)} ${fmtTime(first.start)}  ${first.title}';
+    expect(find.text(row), findsOneWidget);
+    await tapFirst(tester, 'Műszak törlése');
+    expect(find.text('Törlöd ezt a műszakot?'), findsNothing);
+    final left = await shifts(tester);
+    expect(left.length, all0.length - 1);
+    expect(left.any((e) => e.id == first.id), isFalse);
+    expect(find.text('Műszak törölve'), findsOneWidget);
+    expect(find.text(row), findsNothing, reason: 'the list is up to date');
+    final hold = ProviderScope.containerOf(
+      tester.element(find.byType(ShiftPage)),
+    ).read(syncHoldProvider);
+    expect(hold.isHeld(first.id), isTrue, reason: 'not uploaded yet');
+
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    final back = await shifts(tester);
+    expect(back.map((e) => e.id), all0.map((e) => e.id));
+    expect(hold.isHeld(first.id), isFalse);
+    expect(
+      find.text(row),
+      findsOneWidget,
+      reason: 'the list on the page shows it again',
+    );
+    await shutdown(tester, db);
+  });
+
+  testWidgets('a deleted shift stays deleted when "Visszavonás" is not used', (
+    tester,
+  ) async {
     await boot(tester, floating(2026, 11, 12));
     await create(tester);
     final before = (await shifts(tester)).length;
     await tapFirst(tester, 'Műszak törlése');
-    expect(find.text('Törlöd ezt a műszakot?'), findsOneWidget);
-    await tester.tap(find.text('Mégse'));
+    await tester.pump(const Duration(seconds: 12));
     await tester.pumpAndSettle();
-    expect((await shifts(tester)).length, before);
-    await tapFirst(tester, 'Műszak törlése');
-    await tester.tap(find.text('Törlés'));
-    await tester.pumpAndSettle();
+    expect(find.text('Visszavonás'), findsNothing);
     expect((await shifts(tester)).length, before - 1);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('"Visszavonás" after a regeneration brings the old plan back', (
+    tester,
+  ) async {
+    await boot(tester, floating(2026, 11, 12));
+    await create(tester);
+    final first = await shifts(tester);
+    await create(tester); // replaces every generated shift
+    final second = await shifts(tester);
+    final hold = ProviderScope.containerOf(
+      tester.element(find.byType(ShiftPage)),
+    ).read(syncHoldProvider);
+    expect(
+      hold.isHeld(second.first.id) && hold.isHeld(first.first.id),
+      isTrue,
+      reason: 'neither the new nor the replaced shifts go up yet',
+    );
+    expect(
+      second
+          .map((e) => e.id)
+          .toSet()
+          .intersection(first.map((e) => e.id).toSet()),
+      isEmpty,
+    );
+    expect(
+      find.textContaining('Beosztás elkészült: ${second.length} műszak'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Visszavonás'));
+    await tester.pumpAndSettle();
+    final undone = await shifts(tester);
+    expect(undone.map((e) => e.id).toList(), first.map((e) => e.id).toList());
     await shutdown(tester, db);
   });
 

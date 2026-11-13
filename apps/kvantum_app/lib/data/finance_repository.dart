@@ -16,6 +16,19 @@ const _kDeposit = 'deposit';
 /// The version of the finance backup file this build writes and reads.
 const financeBackupVersion = 1;
 
+/// A record that was deleted: enough to put it back
+/// ([FinanceRepository.undelete]).
+class DeletedRef {
+  const DeletedRef(this.kind, this.id, this.updatedAt);
+  final String kind;
+  final String id;
+
+  /// The stamp of the deletion mark. A record is put back only while it still
+  /// is exactly this mark: if anything wrote it since (another device, an
+  /// edit), putting the old version back would overwrite newer data.
+  final int updatedAt;
+}
+
 /// Local finance store. The database file on the device is the source of
 /// truth; [FinRows.dirty] marks what still has to be mailed to other devices.
 class FinanceRepository {
@@ -184,40 +197,134 @@ class FinanceRepository {
     onChanged?.call();
   }
 
+  /// The deletion mark of a record, if it is deleted right now.
+  Future<DeletedRef?> _mark(String kind, String id) async {
+    final row = await (db.select(
+      db.finRows,
+    )..where((t) => t.kind.equals(kind) & t.id.equals(id))).getSingleOrNull();
+    if (row == null || !row.deleted) return null;
+    return DeletedRef(kind, id, row.updatedAt);
+  }
+
   /// Deleting leaves a tombstone, so the deletion reaches the other devices.
-  Future<void> deleteTx(String id) async {
+  /// The deletes return what they deleted, so it can be put back with
+  /// [undelete] (empty: there was nothing to delete).
+  Future<List<DeletedRef>> deleteTx(String id) async {
     for (final t in await _all(_kTx, FinTx.fromJson)) {
-      if (t.id == id) return saveTx(t.copyWith(deleted: true));
+      if (t.id == id) {
+        await saveTx(t.copyWith(deleted: true));
+        return [?await _mark(_kTx, id)];
+      }
     }
+    return const [];
   }
 
-  Future<void> deleteBudget(String categoryId) async {
+  Future<List<DeletedRef>> deleteBudget(String categoryId) async {
     for (final b in await budgets()) {
-      if (b.id == categoryId) return saveBudget(b.copyWith(deleted: true));
+      if (b.id == categoryId) {
+        await saveBudget(b.copyWith(deleted: true));
+        return [?await _mark(_kBudget, categoryId)];
+      }
     }
+    return const [];
   }
 
-  Future<void> deleteRecurring(String id) async {
+  Future<List<DeletedRef>> deleteRecurring(String id) async {
     for (final r in await recurring()) {
-      if (r.id == id) return saveRecurring(r.copyWith(deleted: true));
+      if (r.id == id) {
+        await saveRecurring(r.copyWith(deleted: true));
+        return [?await _mark(_kRecurring, id)];
+      }
     }
+    return const [];
   }
 
   /// Deleting a goal also removes its deposits.
-  Future<void> deleteGoal(String id) => db.transaction(() async {
+  Future<List<DeletedRef>> deleteGoal(String id) => db.transaction(() async {
+    final refs = <DeletedRef>[];
     for (final g in await goals()) {
-      if (g.id == id) await saveGoal(g.copyWith(deleted: true));
+      if (g.id == id) {
+        await saveGoal(g.copyWith(deleted: true));
+        final m = await _mark(_kGoal, id);
+        if (m != null) refs.add(m);
+      }
     }
     for (final d in await deposits()) {
-      if (d.goalId == id) await saveDeposit(d.copyWith(deleted: true));
+      if (d.goalId == id) {
+        await saveDeposit(d.copyWith(deleted: true));
+        final m = await _mark(_kDeposit, d.id);
+        if (m != null) refs.add(m);
+      }
     }
+    return refs;
   });
 
-  Future<void> deleteDeposit(String id) async {
+  Future<List<DeletedRef>> deleteDeposit(String id) async {
     for (final d in await deposits()) {
-      if (d.id == id) return saveDeposit(d.copyWith(deleted: true));
+      if (d.id == id) {
+        await saveDeposit(d.copyWith(deleted: true));
+        return [?await _mark(_kDeposit, id)];
+      }
     }
+    return const [];
   }
+
+  /// Puts deleted records back, all or nothing, and only while every one of
+  /// them is still exactly the deletion mark it was (see [DeletedRef]). Returns
+  /// whether it did.
+  ///
+  /// A transaction whose category was deleted meanwhile comes back as
+  /// "Besorolatlan" instead of pointing at a category that is gone.
+  Future<bool> undelete(List<DeletedRef> refs) => db.transaction(() async {
+    if (refs.isEmpty) return false;
+    final rows = <FinRow>[];
+    for (final r in refs) {
+      final row =
+          await (db.select(db.finRows)
+                ..where((t) => t.kind.equals(r.kind) & t.id.equals(r.id)))
+              .getSingleOrNull();
+      if (row == null || !row.deleted || row.updatedAt != r.updatedAt) {
+        return false;
+      }
+      rows.add(row);
+    }
+    final categoriesNow = {for (final c in await categories()) c.id};
+    String category(String id) =>
+        id == kUncategorized || categoriesNow.contains(id)
+        ? id
+        : kUncategorized;
+    for (final row in rows) {
+      switch (row.kind) {
+        case _kTx:
+          final t = _parse(row.json, FinTx.fromJson);
+          if (t != null) {
+            await saveTx(
+              t.copyWith(deleted: false, categoryId: category(t.categoryId)),
+            );
+          }
+        case _kCategory:
+          final c = _parse(row.json, FinCategory.fromJson);
+          if (c != null) await saveCategory(c.copyWith(deleted: false));
+        case _kBudget:
+          final b = _parse(row.json, FinBudget.fromJson);
+          if (b != null) await saveBudget(b.copyWith(deleted: false));
+        case _kRecurring:
+          final r = _parse(row.json, FinRecurring.fromJson);
+          if (r != null) {
+            await saveRecurring(
+              r.copyWith(deleted: false, categoryId: category(r.categoryId)),
+            );
+          }
+        case _kGoal:
+          final g = _parse(row.json, FinGoal.fromJson);
+          if (g != null) await saveGoal(g.copyWith(deleted: false));
+        case _kDeposit:
+          final d = _parse(row.json, FinDeposit.fromJson);
+          if (d != null) await saveDeposit(d.copyWith(deleted: false));
+      }
+    }
+    return true;
+  });
 
   /// How many live transactions / rules still use a category.
   Future<int> categoryUsage(String id) async {
@@ -226,18 +333,22 @@ class FinanceRepository {
     return t + r;
   }
 
-  /// Deletes a category only when nothing uses it. Returns false otherwise.
-  Future<bool> deleteCategory(String id) async {
-    if (await categoryUsage(id) > 0) return false;
-    for (final c in await categories()) {
-      if (c.id == id) {
-        await saveCategory(c.copyWith(deleted: true));
-        await deleteBudget(id);
-        return true;
-      }
-    }
-    return false;
-  }
+  /// Deletes a category (and its budget) only when nothing uses it. Returns
+  /// what was deleted, or null when it is in use (or unknown).
+  Future<List<DeletedRef>?> deleteCategory(String id) =>
+      db.transaction(() async {
+        if (await categoryUsage(id) > 0) return null;
+        for (final c in await categories()) {
+          if (c.id == id) {
+            await saveCategory(c.copyWith(deleted: true));
+            return <DeletedRef>[
+              ?await _mark(_kCategory, id),
+              ...await deleteBudget(id),
+            ];
+          }
+        }
+        return null;
+      });
 
   // ------------------------------------------------------------- mailing
 

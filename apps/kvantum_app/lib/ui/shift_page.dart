@@ -3,13 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
+import '../data/event_change.dart';
 import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'day_utils.dart';
-import 'event_editor.dart' show openEditor;
+import 'delete_ops.dart';
+import 'event_editor.dart' show Scope, openEditor;
 import 'format.dart';
 import 'shift_ops.dart';
+import 'undo_service.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
 
@@ -125,6 +128,8 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       _busy = true;
       _msg = null;
     });
+    final site = UndoSite.of(context);
+    final undo = ref.read(undoServiceProvider);
     try {
       final repo = ref.read(repoProvider);
       final all = await repo.all();
@@ -158,10 +163,24 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
       ];
       // One unit: the screens change once (not ninety times), and an
       // interruption leaves the old plan or the new one, never half of each.
-      await repo.atomically(() async {
-        await repo.deleteAll(removeIds);
-        await repo.saveAll(fresh);
-      });
+      // "Visszavonás" brings the old plan back and removes the new one.
+      await undo.run(
+        site,
+        holdIds: removeIds,
+        newIds: [for (final f in fresh) f.id],
+        change: () => repo.tracked(
+          existing: removeIds,
+          created: [for (final f in fresh) f.id],
+          change: () => repo.atomically(() async {
+            await repo.deleteAll(removeIds);
+            await repo.saveAll(fresh);
+          }),
+        ),
+        message: (_) => 'Beosztás elkészült: ${fresh.length} műszak',
+        onUndone: () async {
+          if (mounted) await _reload();
+        },
+      );
       final removed = removeIds.length, created = fresh.length;
       ref.read(syncControllerProvider.notifier).requestSync();
       await _reload();
@@ -257,29 +276,29 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
   }
 
   Future<void> _remove(CalEvent e) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Törlöd ezt a műszakot?'),
-        content: Text(
-          '${e.title}, ${fmtDate(e.start)} ${fmtTime(e.start)}. Az újragenerálás visszahozhatja.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Mégse'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Törlés'),
-          ),
-        ],
+    // No question: "Visszavonás" takes it back (and a regeneration brings the
+    // shift back as well).
+    final repo = ref.read(repoProvider);
+    final undo = ref.read(undoServiceProvider);
+    final sync = ref.read(syncControllerProvider.notifier);
+    final site = UndoSite.of(context);
+    await undo.run(
+      site,
+      holdIds: [e.id],
+      change: () => deleteEvent(
+        repo,
+        eventId: e.id,
+        originalStart: e.start,
+        recurring: false,
+        scope: Scope.only,
       ),
+      message: (_) => 'Műszak törölve',
+      onUndone: () async {
+        if (mounted) await _reload();
+      },
     );
-    if (ok != true) return;
-    await ref.read(repoProvider).deleteLocal(e.id);
-    ref.read(syncControllerProvider.notifier).requestSync();
-    await _reload();
+    sync.requestSync();
+    if (mounted) await _reload();
   }
 
   Future<void> _addExtra() async {

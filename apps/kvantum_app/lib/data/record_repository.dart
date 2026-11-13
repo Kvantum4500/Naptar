@@ -124,6 +124,28 @@ class RecordRepository {
     });
   }
 
+  /// Takes a soft delete back (undo): the record is edited to "not deleted",
+  /// with a stamp above the deletion's, so it wins on every device that has
+  /// seen the deletion. Returns false when the record is not deleted (any
+  /// more): it was never there, was cleaned up, or was brought back already.
+  /// (Editing a missing record would create an empty ghost, hence the check.)
+  Future<bool> undelete(String kind, String id) async {
+    final dev = await deviceId();
+    return db.transaction(() async {
+      final base = await get(kind, id);
+      if (base == null || !base.deleted) return false;
+      await _put(
+        base.edit(
+          {'deleted': false},
+          ts: stampAfter(base, const ['deleted'], now()),
+          dev: dev,
+        ),
+        dirty: true,
+      );
+      return true;
+    });
+  }
+
   /// The newest write stamp of any record, in milliseconds (null: none yet).
   Future<int?> newestStamp() async =>
       (await (db.selectOnly(

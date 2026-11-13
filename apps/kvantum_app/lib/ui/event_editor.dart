@@ -9,9 +9,11 @@ import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'breakpoints.dart';
 import 'day_utils.dart';
+import 'delete_ops.dart';
 import 'format.dart';
 import 'palette.dart';
 import 'repeat_editor.dart';
+import 'undo_service.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
 
@@ -460,62 +462,42 @@ class _EventEditorState extends ConsumerState<EventEditor> {
   // ------------------------------------------------------------- delete
 
   Future<void> _delete() async {
-    final repo = ref.read(repoProvider);
     final e = _e!;
-    if (!_isSeries) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Törlés'),
-          content: const Text('Biztosan törlöd ezt az eseményt?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Mégse'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Törlés'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true) return;
-      await repo.deleteLocal(e.id);
-    } else {
-      final scope = await _askScope(delete: true);
-      if (scope == null) return;
-      final m = _master!;
-      final orig = t.originalStart!;
-      switch (scope) {
-        case Scope.only:
-          await repo.saveLocal(deleteInstance(m, orig));
-          if (e.isException) await repo.deleteLocal(e.id);
-        case Scope.following:
-          final cut = deleteFollowing(m, orig);
-          if (cut == null) {
-            await _deleteSeries(repo, m);
-          } else {
-            await repo.saveLocal(cut);
-            for (final o in t.overrides) {
-              if (o.originalStart != null && !o.originalStart!.isBefore(orig)) {
-                await repo.deleteLocal(o.id);
-              }
-            }
-          }
-        case Scope.all:
-          await _deleteSeries(repo, m);
-      }
+    // A recurring event: which part goes is a choice, not a confirmation.
+    // A single event goes at once: "Visszavonás" takes it back.
+    var scope = Scope.only;
+    if (_isSeries) {
+      final asked = await _askScope(delete: true);
+      if (asked == null || !mounted) return;
+      scope = asked;
     }
-    ref.read(syncControllerProvider.notifier).requestSync();
+    // This page closes below, and its context and `ref` are dead when the
+    // user taps "Visszavonás": everything that is needed is taken now.
+    final repo = ref.read(repoProvider);
+    final undo = ref.read(undoServiceProvider);
+    final sync = ref.read(syncControllerProvider.notifier);
+    final site = UndoSite.of(context);
+    final originalStart = t.originalStart ?? e.start;
+    final recurring = _isSeries;
+    await undo.run(
+      site,
+      holdIds: [e.id],
+      change: () => deleteEvent(
+        repo,
+        eventId: e.id,
+        originalStart: originalStart,
+        recurring: recurring,
+        scope: scope,
+      ),
+      message: (_) => switch ((recurring, scope)) {
+        (false, _) => 'Esemény törölve',
+        (true, Scope.only) => 'Az előfordulás törölve',
+        (true, Scope.following) => 'Az előfordulás és a következők törölve',
+        (true, Scope.all) => 'A sorozat törölve',
+      },
+    );
+    sync.requestSync();
     if (mounted) Navigator.of(context).pop(true);
-  }
-
-  Future<void> _deleteSeries(EventRepository repo, CalEvent m) async {
-    for (final o in t.overrides) {
-      await repo.deleteLocal(o.id);
-    }
-    await repo.deleteLocal(m.id);
   }
 
   // ----------------------------------------------------------------- UI

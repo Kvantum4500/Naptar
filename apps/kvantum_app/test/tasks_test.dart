@@ -148,7 +148,7 @@ void main() {
     });
 
     testWidgets(
-      'editing keeps the done state; deleting asks and then hides it (tombstone)',
+      'editing keeps the done state; deleting hides it at once (tombstone)',
       (tester) async {
         await boot(tester, const TasksPage());
         await seedTask(tester, 'a', 'Régi cím', done: true);
@@ -167,9 +167,7 @@ void main() {
 
         await tester.tap(find.byTooltip('Törlés'));
         await tester.pumpAndSettle();
-        expect(find.textContaining('Biztosan törlöd'), findsOneWidget);
-        await tester.tap(find.text('Törlés').last);
-        await tester.pumpAndSettle();
+        expect(find.textContaining('Biztosan törlöd'), findsNothing);
         expect(find.text('Új cím'), findsNothing);
         t = TaskView(
           (await tester.runAsync<SyncRecord?>(() => repo.get(kindTask, 'a')))!,
@@ -178,6 +176,46 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    testWidgets('"Visszavonás" brings a deleted task back as it was', (
+      tester,
+    ) async {
+      await boot(tester, const TasksPage());
+      final t0 = today();
+      await seedTask(tester, 'a', 'Fogorvos', due: t0);
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsOneWidget);
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsNothing);
+      expect(find.text('Feladat törölve'), findsOneWidget);
+
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsOneWidget);
+      final back = TaskView(
+        (await tester.runAsync<SyncRecord?>(() => repo.get(kindTask, 'a')))!,
+      );
+      expect(back.deleted, isFalse);
+      expect(back.title, 'Fogorvos');
+      expect(back.due, t0);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a deleted task stays deleted when the bar runs out', (
+      tester,
+    ) async {
+      await boot(tester, const TasksPage());
+      await seedTask(tester, 'a', 'Fogorvos');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(find.text('Visszavonás'), findsNothing);
+      expect(find.text('Fogorvos'), findsNothing);
+      await shutdown(tester, db);
+    });
   });
 
   group('check-in', () {

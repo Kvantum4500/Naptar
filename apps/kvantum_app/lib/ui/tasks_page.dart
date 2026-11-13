@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'format.dart';
+import 'undo_service.dart';
 
 const _priorityLabels = {1: 'Alacsony', 2: 'Normál', 3: 'Magas'};
 
@@ -139,33 +140,26 @@ class _TaskTile extends ConsumerWidget {
       trailing: IconButton(
         tooltip: 'Törlés',
         icon: const Icon(Icons.delete_outline),
-        onPressed: () => _confirmDelete(context, ref),
+        onPressed: () => _delete(context, ref),
       ),
       onTap: () => openTaskEditor(context, ref, task: task),
     );
   }
 
-  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Feladat törlése'),
-        content: Text('Biztosan törlöd: „${task.title}”?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Mégse'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Törlés'),
-          ),
-        ],
-      ),
+  /// Deletes the task at once; "Visszavonás" brings it back.
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    // the row is gone as soon as the list refreshes: take what the undo needs now
+    final records = ref.read(recordRepoProvider);
+    final sync = ref.read(syncControllerProvider.notifier);
+    final undo = ref.read(undoServiceProvider);
+    final site = UndoSite.of(context);
+    await records.delete(kindTask, task.id);
+    sync.requestSync();
+    undo.offer(
+      site,
+      message: 'Feladat törölve',
+      undo: () => records.undelete(kindTask, task.id),
     );
-    if (ok != true) return;
-    await ref.read(recordRepoProvider).delete(kindTask, task.id);
-    ref.read(syncControllerProvider.notifier).requestSync();
   }
 }
 

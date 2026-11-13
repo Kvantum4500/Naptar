@@ -16,6 +16,10 @@ class SyncReport {
   int failed = 0;
   int deferred = 0; // waiting for something else (e.g. the series master)
 
+  /// Queued changes left alone because the user can still take them back
+  /// (see `SyncHold`); they go up once the hold is released.
+  int held = 0;
+
   /// Items given up on after [SyncEngine.maxAttempts] refusals: they wait for
   /// a manual retry (or for the next edit of the event).
   int parked = 0;
@@ -41,7 +45,7 @@ class SyncReport {
   final List<String> localWonConflicts = [];
   @override
   String toString() =>
-      'SyncReport(pulled:$pulled pushed:$pushed failed:$failed parked:$parked full:$fullResync early:$stoppedEarly)';
+      'SyncReport(pulled:$pulled pushed:$pushed failed:$failed parked:$parked held:$held full:$fullResync early:$stoppedEarly)';
 }
 
 /// The meta key that remembers which account / calendar this device syncs
@@ -69,6 +73,7 @@ class SyncEngine {
     this.maxAttempts = maxUploadAttempts,
     this.maxPushPerRun = 150,
     this.pace = Duration.zero,
+    this.isHeld,
     this._log,
   }) : _uuid = uuid ?? const Uuid();
 
@@ -85,6 +90,10 @@ class SyncEngine {
   /// Pause between two consecutive uploads. Google throttles quick bursts of
   /// writes (tens of events in a few seconds) with a "usage limits" error.
   final Duration pace;
+
+  /// Whether the queued changes of an event must wait because the user can
+  /// still take them back. Such an item is left in the queue untouched.
+  final bool Function(CalEvent event)? isHeld;
   Future<void>? _running;
 
   /// Serialises runs: a second call while one is active waits for it and then
@@ -299,6 +308,11 @@ class SyncEngine {
   Future<void> _push(SyncReport report) async {
     var uploads = 0;
     for (final item in await repo.pending()) {
+      if (isHeld?.call(item.event) ?? false) {
+        // the user can still take this back: it stays in the queue as it is
+        report.held++;
+        continue;
+      }
       if (item.attempts >= maxAttempts) {
         report.failed++;
         report.parked++;

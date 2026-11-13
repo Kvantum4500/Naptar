@@ -5,6 +5,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../providers.dart';
 import '../format.dart';
+import '../undo_service.dart';
 
 /// Display name of a category id ("Besorolatlan" for the fallback).
 String categoryName(List<FinCategory> cats, String id) {
@@ -167,26 +168,6 @@ class _TextDialogState extends State<_TextDialog> {
   );
 }
 
-Future<bool> confirm(BuildContext context, String title, String body) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Mégse'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Törlés'),
-          ),
-        ],
-      ),
-    ) ??
-    false;
-
 /// Opens the transaction editor (new when [existing] is null).
 Future<void> editTx(BuildContext context, {FinTx? existing, DateTime? day}) =>
     showDialog<void>(
@@ -259,10 +240,19 @@ class _TxEditorState extends ConsumerState<TxEditor> {
   Future<void> _delete() async {
     final old = widget.existing;
     if (old == null) return;
-    if (!await confirm(context, 'Törlöd a tételt?', formatHuf(old.amount))) {
-      return;
+    // No question: "Visszavonás" takes it back. This dialog closes below, so
+    // everything the undo needs is taken now.
+    final repo = ref.read(financeRepoProvider);
+    final undo = ref.read(undoServiceProvider);
+    final site = UndoSite.of(context);
+    final deleted = await repo.deleteTx(old.id);
+    if (deleted.isNotEmpty) {
+      undo.offer(
+        site,
+        message: 'Tétel törölve (${formatHuf(old.amount)})',
+        undo: () => repo.undelete(deleted),
+      );
     }
-    await ref.read(financeRepoProvider).deleteTx(old.id);
     if (mounted) Navigator.pop(context);
   }
 

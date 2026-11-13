@@ -118,6 +118,45 @@ void main() {
       expect((await a.records.get('task', 't1'))!.deleted, isTrue);
     });
 
+    test(
+      'a task taken back wins on the device that saw the deletion',
+      () async {
+        await a.records.edit('task', 't1', {'title': 'Fogorvos'});
+        await b.records.applyRemote((await a.records.get('task', 't1'))!);
+        a.time += 1000;
+        await a.records.delete('task', 't1');
+        await b.records.applyRemote((await a.records.get('task', 't1'))!);
+        expect((await b.records.get('task', 't1'))!.deleted, isTrue);
+
+        a.time += 1000;
+        expect(await a.records.undelete('task', 't1'), isTrue);
+        final back = (await a.records.get('task', 't1'))!;
+        expect(back.deleted, isFalse);
+        expect(back['title'], 'Fogorvos', reason: 'nothing else was touched');
+        await b.records.applyRemote(back);
+        expect((await b.records.get('task', 't1'))!.deleted, isFalse);
+      },
+    );
+
+    test('taking a deletion back in the same millisecond still wins', () async {
+      await a.records.edit('task', 't1', {'title': 'Fogorvos'});
+      await b.records.applyRemote((await a.records.get('task', 't1'))!);
+      await a.records.delete('task', 't1'); // (the clock has not moved)
+      await b.records.applyRemote((await a.records.get('task', 't1'))!);
+      expect(await a.records.undelete('task', 't1'), isTrue);
+      await b.records.applyRemote((await a.records.get('task', 't1'))!);
+      expect((await b.records.get('task', 't1'))!.deleted, isFalse);
+    });
+
+    test('a record that is not deleted, or not there, cannot be undeleted '
+        '(no empty ghost is created)', () async {
+      expect(await a.records.undelete('task', 'nincs'), isFalse);
+      expect(await a.records.get('task', 'nincs'), isNull);
+      await a.records.edit('task', 't1', {'title': 'x'});
+      expect(await a.records.undelete('task', 't1'), isFalse);
+      expect((await a.records.get('task', 't1'))!['title'], 'x');
+    });
+
     test('an unchanged value is not stamped again', () async {
       await a.records.edit('task', 't1', {'title': 'x'});
       final first = (await a.records.get('task', 't1'))!.fields['title']!.ts;

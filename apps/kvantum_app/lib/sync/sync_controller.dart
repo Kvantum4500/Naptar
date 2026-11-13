@@ -21,6 +21,7 @@ import 'error_catalog.dart';
 import 'remote.dart';
 import 'retry_after_client.dart';
 import 'sync_engine.dart';
+import 'sync_hold.dart';
 import 'sync_pacer.dart';
 import 'sync_reset.dart';
 
@@ -248,10 +249,12 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     );
     final events = ref.read(repoProvider);
     final records = ref.read(recordRepoProvider);
+    final hold = ref.read(syncHoldProvider);
     _engine = SyncEngine(
       events,
       ref.read(remoteFactoryProvider)(tapped),
       pace: ref.read(syncPaceProvider),
+      isHeld: hold.holdsEvent,
       log: _log,
     );
     final driveRemote = ref.read(driveFactoryProvider)(tapped);

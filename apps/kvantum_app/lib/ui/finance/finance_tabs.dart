@@ -6,6 +6,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../providers.dart';
 import '../format.dart';
+import '../undo_service.dart';
 import 'finance_editors.dart';
 
 // ------------------------------------------------------------------ budgets
@@ -56,18 +57,28 @@ class BudgetsTab extends ConsumerWidget {
     }
 
     Future<void> remove(FinCategory c) async {
-      final ok = await repo.deleteCategory(c.id);
-      if (!ok && context.mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                'A(z) „${c.name}” kategóriát tételek vagy ismétlődők használják, ezért nem törölhető. Előbb sorold át őket.',
+      final undo = ref.read(undoServiceProvider);
+      final site = UndoSite.of(context);
+      final deleted = await repo.deleteCategory(c.id);
+      if (deleted == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(
+                  'A(z) „${c.name}” kategóriát tételek vagy ismétlődők használják, ezért nem törölhető. Előbb sorold át őket.',
+                ),
               ),
-            ),
-          );
+            );
+        }
+        return;
       }
+      undo.offer(
+        site,
+        message: 'Kategória törölve',
+        undo: () => repo.undelete(deleted),
+      );
     }
 
     return ListView(
@@ -93,6 +104,8 @@ class BudgetsTab extends ConsumerWidget {
                   tooltip: 'Keret beállítása',
                   icon: const Icon(Icons.savings_outlined),
                   onPressed: () async {
+                    final undo = ref.read(undoServiceProvider);
+                    final site = UndoSite.of(context);
                     final v = await askAmount(
                       context,
                       title: 'Havi keret: ${c.name}',
@@ -103,7 +116,14 @@ class BudgetsTab extends ConsumerWidget {
                     );
                     if (v == null) return;
                     if (v == -1) {
-                      await repo.deleteBudget(c.id);
+                      final deleted = await repo.deleteBudget(c.id);
+                      if (deleted.isNotEmpty) {
+                        undo.offer(
+                          site,
+                          message: 'Keret törölve',
+                          undo: () => repo.undelete(deleted),
+                        );
+                      }
                     } else {
                       await repo.saveBudget(
                         (budgets[c.id] ?? FinBudget(categoryId: c.id, limit: v))
@@ -464,16 +484,21 @@ class _RuleEditorState extends ConsumerState<_RuleEditor> {
               if (widget.existing != null)
                 TextButton.icon(
                   onPressed: () async {
-                    if (!await confirm(
-                      context,
-                      'Törlöd az ismétlődő tételt?',
-                      'A már létrejött tételek megmaradnak, újak nem jönnek létre.',
-                    )) {
-                      return;
+                    // no question: "Visszavonás" brings the rule back (the
+                    // transactions it already made stay either way)
+                    final repo = ref.read(financeRepoProvider);
+                    final undo = ref.read(undoServiceProvider);
+                    final site = UndoSite.of(context);
+                    final deleted = await repo.deleteRecurring(
+                      widget.existing!.id,
+                    );
+                    if (deleted.isNotEmpty) {
+                      undo.offer(
+                        site,
+                        message: 'Ismétlődő tétel törölve',
+                        undo: () => repo.undelete(deleted),
+                      );
                     }
-                    await ref
-                        .read(financeRepoProvider)
-                        .deleteRecurring(widget.existing!.id);
                     if (context.mounted) Navigator.pop(context);
                   },
                   icon: const Icon(Icons.delete_outline),
@@ -554,12 +579,17 @@ class GoalsTab extends ConsumerWidget {
                       );
                     },
                     onDelete: () async {
-                      if (await confirm(
-                        context,
-                        'Törlöd a célt?',
-                        '„${g.name}” és a befizetései is törlődnek.',
-                      )) {
-                        await repo.deleteGoal(g.id);
+                      // no question: "Visszavonás" brings back the goal with
+                      // the deposits that went with it
+                      final undo = ref.read(undoServiceProvider);
+                      final site = UndoSite.of(context);
+                      final deleted = await repo.deleteGoal(g.id);
+                      if (deleted.isNotEmpty) {
+                        undo.offer(
+                          site,
+                          message: 'Cél törölve (a befizetéseivel együtt)',
+                          undo: () => repo.undelete(deleted),
+                        );
                       }
                     },
                     onEdit: () => showDialog<void>(

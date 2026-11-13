@@ -44,12 +44,12 @@ void main() {
     test('a category in use cannot be deleted, a free one can', () async {
       await repo.ensureDefaults();
       await repo.saveTx(tx('a', 500));
-      expect(await repo.deleteCategory('cat-food'), isFalse);
+      expect(await repo.deleteCategory('cat-food'), isNull);
       expect((await repo.categories()).any((c) => c.id == 'cat-food'), isTrue);
       await repo.saveBudget(
         const FinBudget(categoryId: 'cat-fun', limit: 1000),
       );
-      expect(await repo.deleteCategory('cat-fun'), isTrue);
+      expect(await repo.deleteCategory('cat-fun'), isNotNull);
       expect((await repo.categories()).any((c) => c.id == 'cat-fun'), isFalse);
       expect(await repo.budgets(), isEmpty); // its budget goes with it
     });
@@ -191,6 +191,140 @@ void main() {
       await repo.deleteGoal('g');
       expect(await repo.goals(), isEmpty);
       expect((await repo.deposits()).map((d) => d.id), ['d2']);
+    });
+  });
+
+  group('taking a deletion back', () {
+    test(
+      'a transaction comes back with a newer stamp and is mailed again',
+      () async {
+        await repo.ensureDefaults();
+        await repo.saveTx(tx('a', 500));
+        final deleted = await repo.deleteTx('a');
+        expect(deleted.single.kind, 'tx');
+        expect(await repo.txs(), isEmpty);
+        final mark = deleted.single.updatedAt;
+
+        expect(await repo.undelete(deleted), isTrue);
+        final back = (await repo.txs()).single;
+        expect((back.id, back.amount, back.deleted), ('a', 500, false));
+        expect(back.updatedAt, greaterThan(mark), reason: 'wins over the mark');
+        final row = await (db.select(
+          db.finRows,
+        )..where((r) => r.id.equals('a'))).getSingle();
+        expect(row.dirty, isTrue, reason: 'other devices must hear about it');
+      },
+    );
+
+    test('deleting what is not there gives nothing to take back', () async {
+      expect(await repo.deleteTx('nincs-ilyen'), isEmpty);
+      expect(await repo.undelete(const []), isFalse);
+    });
+
+    test('only while the record still is exactly that deletion mark', () async {
+      await repo.saveTx(tx('a', 500));
+      final deleted = await repo.deleteTx('a');
+      // somebody (another device, an edit) wrote the record again meanwhile:
+      // still deleted, but with a newer stamp
+      await repo.saveTx(tx('a', 999).copyWith(deleted: true));
+      expect(await repo.undelete(deleted), isFalse);
+      expect(await repo.txs(), isEmpty, reason: 'nothing was put back');
+    });
+
+    test('a purged deletion mark cannot be taken back', () async {
+      await repo.saveTx(tx('a', 500));
+      final deleted = await repo.deleteTx('a');
+      await repo.purgeTombstones(1 << 40);
+      expect(await repo.undelete(deleted), isFalse);
+      expect(await repo.txs(), isEmpty);
+    });
+
+    test('a transaction whose category went meanwhile comes back as '
+        '"Besorolatlan"', () async {
+      await repo.ensureDefaults();
+      await repo.saveCategory(
+        const FinCategory(id: 'cat-x', name: 'Új', kind: FinKind.expense),
+      );
+      await repo.saveTx(tx('a', 500, cat: 'cat-x'));
+      final deletedTx = await repo.deleteTx('a');
+      expect(await repo.deleteCategory('cat-x'), isNotNull); // now unused
+      expect(await repo.undelete(deletedTx), isTrue);
+      expect((await repo.txs()).single.categoryId, kUncategorized);
+    });
+
+    test('a category goes back together with its budget', () async {
+      await repo.ensureDefaults();
+      await repo.saveBudget(
+        const FinBudget(categoryId: 'cat-fun', limit: 1000),
+      );
+      final deleted = (await repo.deleteCategory('cat-fun'))!;
+      expect(deleted.map((d) => d.kind).toSet(), {'category', 'budget'});
+      expect(await repo.undelete(deleted), isTrue);
+      expect((await repo.categories()).any((c) => c.id == 'cat-fun'), isTrue);
+      expect((await repo.budgets()).single.limit, 1000);
+    });
+
+    test(
+      'all or nothing: one record changed meanwhile stops the whole undo',
+      () async {
+        await repo.ensureDefaults();
+        await repo.saveBudget(
+          const FinBudget(categoryId: 'cat-fun', limit: 1000),
+        );
+        final deleted = (await repo.deleteCategory('cat-fun'))!;
+        // the budget (only) is written again by somebody else
+        await repo.saveBudget(
+          const FinBudget(categoryId: 'cat-fun', limit: 7000, deleted: true),
+        );
+        expect(await repo.undelete(deleted), isFalse);
+        expect(
+          (await repo.categories()).any((c) => c.id == 'cat-fun'),
+          isFalse,
+          reason: 'the category was NOT put back alone',
+        );
+      },
+    );
+
+    test('a goal goes back together with the deposits it took along', () async {
+      await repo.saveGoal(
+        const FinGoal(id: 'g', name: 'Nyaralás', target: 100000),
+      );
+      for (final id in ['d1', 'd2']) {
+        await repo.saveDeposit(
+          FinDeposit(
+            id: id,
+            goalId: 'g',
+            date: floating(2026, 11, 1),
+            amount: 1000,
+          ),
+        );
+      }
+      // a deposit deleted earlier must NOT come back with the goal
+      await repo.deleteDeposit('d1');
+      final deleted = await repo.deleteGoal('g');
+      expect(deleted.map((d) => d.id).toSet(), {'g', 'd2'});
+      expect(await repo.undelete(deleted), isTrue);
+      expect((await repo.goals()).single.id, 'g');
+      expect((await repo.deposits()).map((d) => d.id), ['d2']);
+    });
+
+    test('a recurring rule comes back', () async {
+      await repo.ensureDefaults();
+      await repo.saveRecurring(
+        FinRecurring(
+          id: 'r',
+          title: 'Lakbér',
+          amount: 120000,
+          kind: FinKind.expense,
+          categoryId: 'cat-housing',
+          dayOfMonth: 1,
+          fromMonth: floating(2026, 11, 1),
+        ),
+      );
+      final deleted = await repo.deleteRecurring('r');
+      expect(await repo.recurring(), isEmpty);
+      expect(await repo.undelete(deleted), isTrue);
+      expect((await repo.recurring()).single.title, 'Lakbér');
     });
   });
 

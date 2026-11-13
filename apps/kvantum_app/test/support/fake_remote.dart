@@ -59,6 +59,10 @@ class FakeRemote implements RemoteCalendar {
 
   /// Makes every delete fail with this error (the pull still works).
   Object? failDelete;
+
+  /// While set, a `delete` waits for it AFTER it was logged in [pushLog]: a
+  /// deletion that is on the wire (the user can act in the meantime).
+  Completer<void>? deleteGate;
   final Map<String, int> _changedAt = {};
 
   String _etag(String g) => 'etag-${_rev[g]}';
@@ -181,6 +185,8 @@ class FakeRemote implements RemoteCalendar {
     if (offline) throw TransientSyncError('offline');
     if (failDelete != null) throw failDelete!;
     pushLog.add(('delete', event.id));
+    final gate = deleteGate;
+    if (gate != null) await gate.future;
     final g = event.googleId ?? appIdToGoogle[event.id];
     if (g != null && events.containsKey(g)) {
       _cancelled[g] = true;

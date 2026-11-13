@@ -176,6 +176,26 @@ void main() {
     expect(await b.amounts(), isEmpty);
   });
 
+  test('a deletion that was taken back wins over the deletion on the other '
+      'device', () async {
+    await introduce();
+    await a.addTx('t1', 500);
+    await a.mail.sync();
+    await b.mail.sync();
+    a.now += 100;
+    final deleted = await a.repo.deleteTx('t1');
+    await a.mail.sync();
+    await b.mail.sync();
+    expect(await b.amounts(), isEmpty, reason: 'b saw the deletion');
+
+    a.now += 100;
+    expect(await a.repo.undelete(deleted), isTrue);
+    await a.mail.sync();
+    await b.mail.sync();
+    expect(await b.amounts(), {'t1': 500});
+    expect(await a.amounts(), {'t1': 500});
+  });
+
   test('applying the same letter twice changes nothing', () async {
     await introduce();
     await a.addTx('t1', 500);
