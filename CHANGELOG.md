@@ -2,6 +2,28 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 4. fázis, 4.4/C – haladás: edzésnapló és trend-grafikonok (C csomag)
+
+**Új oldal: Több → Haladás** (alsó sávban és oldalsínben is). Csak a gépen lévő adatból dolgozik – a napi check-inből és az edzés utáni visszajelzésből –, nem küld el semmit, hálózat nélkül is működik, és a másik eszközön kitöltött válaszokat is mutatja (azok a Drive-on át érkeznek).
+- **Időszak:** 4 hét · 12 hét (alap) · Fél év; a hetek hétfőn kezdődnek, az utolsó a mostani (még nem kész) hét.
+- **Ez a hét** – mondatokban: hány edzés és hány perc („3 edzés, összesen 2 óra 45 perc (az előző héten 2 edzés, 1 óra 30 perc)”), kihagyott edzés, az edzések átlagos nehézsége fizikailag és szellemileg, az energiád alakulása az edzések alatt („csökkent (4,0 → 2,8 az 5-ös skálán)”), az élmény átlaga; majd a napi check-in négy kérdése: a mostani hét eddigi napjainak átlaga az előző hétéhez mérve – **javult / romlott / nagyjából ugyanannyi** (a megjelenített, egy tizedesre kerekített átlagokon: legalább 0,3 különbség kell a „javult”-hoz vagy a „romlott”-hoz).
+- **Heti edzésmennyiség** – oszlopdiagram, hetenként a percek; a skála legalább két óra, aztán a következő egész óra; a jobb szélső oszlop a mostani hét. Az üres hét üres oszlop (az edzéskiesés is látszik). A kihagyott edzés („Kihagytam”) nem számít bele a percekbe.
+- **Hogyan érezted magad** – vonaldiagram a napi check-in válaszaiból: a halvány pont egy nap válasza (1 rossz … 5 kiváló), a vonal az utolsó 7 nap átlaga (a válasz nélküli nap nem nulla: egyszerűen nincs ott). A mutatókat chipekkel kapcsolod (alapból a fizikai energia és az alvás): a vonalaknak **alakjuk** is van, nem csak színük (● fizikai energia, ■ mentális energia, ▲ hangulat, ◆ alvás), a vonal utolsó pontját az alakja jelöli.
+- **Az edzések nehézsége** – hetenkénti átlag az edzés utáni visszajelzésekből (fizikai ● és mentális ■, 1 könnyű … 5 nagyon nehéz); csak akkor jelenik meg, ha van értékelt edzés.
+- **Adatok szövegesen** – összecsukható lista a hetekről számokkal („11.16. héttől: 3 edzés, 2 óra 45 perc · 1 kihagyva · nehézség 3,5 / 2,0 · energia 4,0 → 2,8”), legújabb elöl.
+- **Üres állapot:** ha nincs sem értékelt edzés, sem check-in válasz az időszakban, egy magyarázó kártya áll a diagramok helyén. Amit nem adtál meg, az „–” vagy „nincs adat”, soha nem 0.
+- **Hozzáférhetőség:** minden diagram egy mondatos leírást kap a képernyőolvasónak (összes edzés és perc; mutatónként a válaszok száma, az átlag és a legutóbbi napok átlaga; a nehézség hetei és átlaga), a szövegtáblázat mindent számmal is megad; a diagramok feliratai a rendszer betűméretét 1,3-szeresig követik (a kép nem tud tovább nőni, a szöveges részek viszont igen); az alakok miatt a jelentés nem csak a színen múlik. Nincs új csomag: a diagramokat saját rajzoló készíti.
+- **Útközben javítva / egyszerűsítve:** a „javult / romlott” ítélet lebegőpontos határán a 3,3 és a 3,0 különbsége 0,3 alatt maradt volna – a program most egész tizedekben számol; a jelmagyarázat 200 %-os betűnél túlcsordult (most törik); a szakaszcímek (pl. „Heti edzésmennyiség”) képernyőolvasós csomópontja összeolvadt a mellette álló magyarázó mondattal („Percek hetenként…”), így az egészet címsorként olvasták fel – most minden cím külön csomópont; a kijelölt mutató-chipen az alakjelet (avatar) a pipa eltakarta (a kirajzolt kép mutatta ki) – az alakjel most a chip feliratában áll, a pipa mellette, így a jel mindig látszik; két felesleges elágazás kikerült (az előző hét átlagánál és a skála alsó határánál: a szándékos elrontások próbája mutatta ki, hogy semmire nem hatottak); a diagramok feliratai (mit, hol, melyik oldalon áll) adatként is előállnak, így a tesztek a szöveget is ellenőrzik, nem csak a hosszát.
+
+**Ellenőrzés:** mag 794 teszt (volt 746), app 2203 (volt 2104); az elemzők és a formázás tiszták Flutter 3.47.9-en és 3.50.0-n. 337 szándékos elrontás (a végső listán mind elbukik; az első menetben 69 átment: 68 tesztelési hiány – a számítási rétegben 12, a rajzolókban 4, az oldalon 52 –, mindre szigorúbb teszt készült, egy egyenértékű volt (a skála alsó határának elágazása): az elágazás kikerült).
+
+**Nem ellenőrzött / ismert korlátok**
+- A diagramok kinézete valódi eszközön (színek, méretek, a feliratok elférése álló és fekvő telefonon, sötét téma): a tesztek a rajzolás hívásait ellenőrzik (hol, mekkora, milyen színű), képet nem néznek, és a tesztbetűtípus minden betűt egyforma dobozként rajzol; a kinézetet a Roboto betűtípussal kirajzolt képeken néztem át (világos és sötét téma, 390 és 900 px széles ablak, 1,0× és 1,6× betűméret) – ez találta meg a kijelölt chipek eltakart alakjelét –, de valódi eszközön nem.
+- A képernyőolvasók (TalkBack, Narrator) tényleges felolvasása a diagramokról.
+- A 0,3-es „javult / romlott” küszöb ízlés kérdése; ritka kitöltésnél a vonal kevés pontból áll, és az átlag néhány napra támaszkodik.
+- A sportonkénti bontás (az adat megvan a számításban) még nincs a felületen; nincs export / megosztás, és fél évnél hosszabb időszak sincs.
+- Az edzések nehézsége csak azokról az edzésekről szól, amelyekre az edzés utáni kártyán válaszoltál.
+
 ## 4. fázis, 4.3/E – gyors felvitel szövegből, részfeladatok, ismétlődő feladatok (E csomag)
 
 **Gyors felvitel: egy sor szövegből esemény vagy feladat** (nem megy el hozzá semmi: a program a saját gépén értelmezi, nincs hálózat, nincs modell)
