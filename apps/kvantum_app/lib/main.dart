@@ -22,7 +22,8 @@ import 'ui/root_shell.dart';
 import 'ui/setup_guide.dart' show setupGuideProvider;
 import 'ui/startup_problem.dart';
 import 'ui/theme.dart';
-import 'update/update_service.dart' show cleanupOldFiles;
+import 'update/update_service.dart'
+    show cleanupOldFiles, cleanupUpdateLeftovers;
 
 void main() {
   // The log and the error hooks exist before anything else can fail. The log
@@ -39,6 +40,8 @@ Future<void> _start(DiagLog log) async {
     // files an earlier self-update renamed out of the way
     cleanupOldFiles(File(Platform.resolvedExecutable).parent);
   }
+  // the package and the unpacked copy an earlier self-update left behind
+  unawaited(_cleanUpdateLeftovers());
   await initializeDateFormatting('hu');
   // Where the database is, whether this build may open it (a newer build's
   // database is left alone), and on Windows the move out of Documents.
@@ -101,6 +104,17 @@ Future<void> _start(DiagLog log) async {
       child: const KvantumApp(),
     ),
   );
+}
+
+/// Clears what an earlier self-update left in the temp folder (SEC-15). It is
+/// never in the way of the start: whatever goes wrong here is left alone.
+Future<void> _cleanUpdateLeftovers() async {
+  try {
+    final tmp = Platform.isAndroid
+        ? (await getTemporaryDirectory()).path
+        : Directory.systemTemp.path;
+    cleanupUpdateLeftovers(Directory(p.join(tmp, 'naptar-update')));
+  } catch (_) {}
 }
 
 Future<void> _repairAutostart(DiagLog log) async {

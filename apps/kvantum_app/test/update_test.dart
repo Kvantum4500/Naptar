@@ -22,7 +22,11 @@ int _assetId(String name) => name.endsWith('.sha256')
     ? 102
     : (name.endsWith('.zip') ? 101 : (name.endsWith('.apk') ? 103 : 104));
 
-Map<String, Object?> release(int build, {List<String>? names}) => {
+Map<String, Object?> release(
+  int build, {
+  List<String>? names,
+  int size = 10,
+}) => {
   'tag_name': 'build-$build',
   'body': 'Új dolgok',
   'assets': [
@@ -37,7 +41,7 @@ Map<String, Object?> release(int build, {List<String>? names}) => {
         'name': n,
         'url':
             'https://api.github.com/repos/o/r/releases/assets/${_assetId(n)}',
-        'size': 10,
+        'size': size,
       },
   ],
 };
@@ -536,7 +540,9 @@ void main() {
             host(
               service((req) async {
                 final path = req.url.path;
-                if (path.endsWith('/releases/latest')) return _json(release(9));
+                if (path.endsWith('/releases/latest')) {
+                  return _json(release(9, size: bytes.length));
+                }
                 if (path.endsWith('/assets/102')) {
                   return http.Response('$sum  naptar-windows-9.zip', 200);
                 }

@@ -8,7 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import '../providers.dart' show repoProvider;
+import '../providers.dart' show appClockProvider, repoProvider;
 import 'update_config.dart';
 import 'update_service.dart';
 import '../diag/diag_log.dart';
@@ -20,14 +20,23 @@ final currentBuildProvider = FutureProvider<int>((ref) async {
   return int.tryParse(info.buildNumber) ?? 0;
 });
 
-final updateServiceProvider = Provider<UpdateService>(
-  (ref) => UpdateService(
-    client: http.Client(),
-    repo: UpdateConfig.repo,
-    token: UpdateConfig.token,
-    platform: currentUpdatePlatform(),
-  ),
+/// What the updater runs with (replaced in tests).
+final updateSettingsProvider = Provider<UpdateSettings>(
+  (ref) => UpdateSettings.fromBuild(),
 );
+
+final updateServiceProvider = Provider<UpdateService>((ref) {
+  final settings = ref.watch(updateSettingsProvider);
+  return UpdateService(
+    client: http.Client(),
+    repo: settings.repo,
+    token: settings.token,
+    platform: currentUpdatePlatform(),
+    publicKeys: settings.publicKeys,
+    requireSignature: settings.requireSignature,
+    log: logUpdate,
+  );
+});
 
 /// Remembered choices of the update dialog (replaceable in tests).
 abstract class UpdatePrefs {
@@ -197,6 +206,8 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         },
       );
       if (mounted) setState(() => _progress = null);
+      // (right before it is handed over: still the file that was verified)
+      await svc.recheck(file);
       final msg = await ref.read(updateInstallerProvider).install(file, a.info);
       if (mounted) setState(() => _message = msg);
     } on HttpException catch (e) {
@@ -224,6 +235,29 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
     }
   }
 
+  /// The note that the update token is about to run out (SEC-4), if it is: an
+  /// icon and words, not a colour alone.
+  Widget? _expiryNote(DateTime? expires) {
+    final text = tokenExpiryWarning(expires, ref.read(appClockProvider)());
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: MediaQuery.textScalerOf(context).scale(20),
+            color: Theme.of(context).colorScheme.error,
+            semanticLabel: 'Figyelmeztetés',
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, key: const Key('update-token-warning'))),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _status;
@@ -244,18 +278,27 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
           SizedBox(width: 14),
-          Text('Frissítés keresése…'),
+          Expanded(child: Text('Frissítés keresése…')),
         ],
       );
     } else {
       switch (s) {
         case UpToDate():
-          content = Text('Naprakész vagy. (Telepített verzió: $_current)');
+          final note = _expiryNote(s.tokenExpires);
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Naprakész vagy. (Telepített verzió: $_current)'),
+              ?note,
+            ],
+          );
           actions = [
             TextButton(onPressed: _check, child: const Text('Újra ellenőriz')),
             ...actions,
           ];
         case UpdateAvailable():
+          final note = _expiryNote(s.tokenExpires);
           content = Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,6 +327,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
                 const SizedBox(height: 12),
                 Text(_message!),
               ],
+              ?note,
               if (Platform.isWindows) ...[
                 const SizedBox(height: 10),
                 const Text(
@@ -312,6 +356,9 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       }
     }
     return AlertDialog(
+      // (large letters and the warning about the key make it longer than a
+      // phone screen: it scrolls)
+      scrollable: true,
       title: const Text('Frissítés'),
       content: SizedBox(
         width: 420,
