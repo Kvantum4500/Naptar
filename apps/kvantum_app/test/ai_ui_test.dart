@@ -14,6 +14,7 @@ import 'package:kvantum_app/ai/assistant_page.dart';
 import 'package:kvantum_app/ai/handbook_page.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/sync_hold.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
 import 'package:kvantum_app/ai/location_service.dart';
 import 'package:kvantum_app/ai/place.dart';
@@ -61,6 +62,30 @@ class GatedGemini extends FakeGemini {
   }
 }
 
+/// A calendar store that makes every unit of work wait at a gate: an approval
+/// is "being carried out" for as long as the test keeps it closed.
+class GatedRepo extends EventRepository {
+  GatedRepo(super.db);
+
+  /// While true, every unit of work waits for [gate].
+  var closed = false;
+
+  /// While true, reading the whole calendar waits for [gate] too.
+  var closedReads = false;
+  final gate = Completer<void>();
+  @override
+  Future<T> atomically<T>(Future<T> Function() action) async {
+    if (closed) await gate.future;
+    return super.atomically(action);
+  }
+
+  @override
+  Future<List<CalEvent>> all() async {
+    if (closedReads) await gate.future;
+    return super.all();
+  }
+}
+
 /// The list of models is slow; closing the connection (the app's "Mégse")
 /// makes the pending call fail, as a real client does.
 class SlowModelsGemini extends FakeGemini {
@@ -100,6 +125,7 @@ void main() {
     LocationProvider? location,
     WeatherService? weatherSvc,
     FakeWallet? wallet,
+    EventRepository Function(AppDatabase db)? repo,
   }) async {
     useSize(tester);
     db = await newDb();
@@ -111,6 +137,7 @@ void main() {
         db,
         extra: [
           apiKeyStoreProvider.overrideWithValue(keys),
+          if (repo != null) repoProvider.overrideWithValue(repo(db)),
           if (io != null) backupIoProvider.overrideWithValue(io),
           if (location != null) locationProvider.overrideWithValue(location),
           if (wallet != null) walletBridgeProvider.overrideWithValue(wallet),
@@ -397,6 +424,133 @@ void main() {
         findsOneWidget,
       );
       expect((await tester.runAsync(() => events.all()))!.length, 1);
+      await shutdown(tester, db);
+    });
+
+    // ---- the file buttons say that they are working
+    Finder buttonOf(String label) => find.ancestor(
+      of: find.text(label),
+      matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+    );
+    bool waiting(WidgetTester tester, String label) =>
+        tester.widget<ButtonStyleButton>(buttonOf(label)).onPressed == null;
+    const fileButtons = [
+      'Mentés fájlba',
+      'Visszaállítás fájlból',
+      'Pénzügyek mentése',
+      'Pénzügyek visszaállítása',
+    ];
+
+    testWidgets('while a restore is read, the four file buttons wait and the '
+        'pressed one spins', (tester) async {
+      late GatedRepo gated;
+      final io = _MemoryIo();
+      await boot(
+        tester,
+        const SettingsPage(),
+        io: io,
+        repo: (db) => gated = GatedRepo(db),
+      );
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('b1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      io.toPick = (await tester.runAsync(() => exportBackup(events)))!;
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      for (final b in fileButtons) {
+        expect(waiting(tester, b), isFalse, reason: '$b is live at rest');
+      }
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      gated.closedReads = true; // the restore will wait for the calendar
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pump();
+      for (final b in fileButtons) {
+        expect(waiting(tester, b), isTrue, reason: '$b waits meanwhile');
+      }
+      expect(
+        find.descendant(
+          of: buttonOf('Visszaállítás fájlból'),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      gated.gate.complete();
+      await tester.pumpAndSettle();
+      for (final b in fileButtons) {
+        expect(waiting(tester, b), isFalse, reason: '$b is live again');
+      }
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(
+        find.textContaining('Visszaállítva: 0 új, 0 frissítve, 1 változatlan'),
+        findsOneWidget,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('while the calendar is saved to a file, the buttons wait', (
+      tester,
+    ) async {
+      late GatedRepo gated;
+      final io = _MemoryIo();
+      await boot(
+        tester,
+        const SettingsPage(),
+        io: io,
+        repo: (db) => gated = GatedRepo(db),
+      );
+      await tester.scrollUntilVisible(
+        find.text('Mentés fájlba'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('Mentés fájlba'));
+      await tester.pumpAndSettle();
+      gated.closedReads = true;
+      await tester.tap(find.text('Mentés fájlba'));
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: buttonOf('Mentés fájlba'),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(waiting(tester, 'Visszaállítás fájlból'), isTrue);
+      gated.gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(io.saved, isNotNull);
+      expect(waiting(tester, 'Mentés fájlba'), isFalse);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a cancelled file choice leaves the buttons alone', (
+      tester,
+    ) async {
+      final io = _MemoryIo(); // toPick stays null: the user cancels
+      await boot(tester, const SettingsPage(), io: io);
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      for (final b in fileButtons) {
+        expect(waiting(tester, b), isFalse);
+      }
       await shutdown(tester, db);
     });
 
@@ -1464,6 +1618,559 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Beállítások'), findsWidgets);
+      await shutdown(tester, db);
+    });
+
+    // ---- an approval is carried out ONCE, against the calendar as it is NOW,
+    // and can be taken back
+
+    FakeGemini mixedScript(List<String> refs) => FakeGemini([
+      for (var i = 0; i < 3; i++)
+        (_) => calls([
+          tool('propose_events', {
+            'summary': 'Csere',
+            'proposals': [
+              item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00'),
+            ],
+            'deletions': [
+              for (final r in refs) {'ref': r, 'reason': 'kérted'},
+            ],
+          }),
+        ]),
+    ]);
+
+    Future<void> askMixed(WidgetTester tester) async {
+      // (the cards are long: a taller window keeps the buttons built)
+      tester.view.physicalSize = const Size(1280, 2600);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField),
+        'Töröld a fogorvost, és tervezz edzést a jövő hétre',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> bootWithAppointment(
+      WidgetTester tester,
+      FakeGemini llm,
+      List<String> refs, {
+      EventRepository Function(AppDatabase db)? repo,
+    }) async {
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k', repo: repo);
+      await tester.runAsync(
+        () =>
+            events.saveLocal(evt('p1', 'Fogorvos', floating(2026, 11, 20, 9))),
+      );
+      refs.add(await refOf(tester, 'Fogorvos'));
+    }
+
+    Future<void> press(WidgetTester tester, String label) async {
+      await tester.ensureVisible(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    bool disabled(WidgetTester tester, String label) =>
+        tester
+            .widget<ButtonStyleButton>(
+              find.ancestor(
+                of: find.text(label),
+                matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+              ),
+            )
+            .onPressed ==
+        null;
+
+    testWidgets('a double tap on "Elfogadom" adds the events once', (
+      tester,
+    ) async {
+      final llm = FakeGemini([
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(
+        find.byType(TextField),
+        'Tervezz edzést a jövő hétre',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      final button = find.text('Elfogadom a kijelölteket (1)');
+      await tester.tap(button);
+      // the second tap lands before the page has been rebuilt: the button
+      // still looks live
+      await tester.tap(button, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.all()))!.length, 1);
+      expect(find.textContaining('1 esemény bekerült'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('while a deletion is carried out its card waits', (
+      tester,
+    ) async {
+      late GatedRepo gated;
+      final refs = <String>[];
+      await bootWithAppointment(
+        tester,
+        deleteScript(refs),
+        refs,
+        repo: (db) => gated = GatedRepo(db),
+      );
+      await ask(tester);
+      await tester.ensureVisible(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      expect(disabled(tester, 'Engedélyezem'), isFalse);
+      gated.closed = true;
+      await tester.tap(find.text('Engedélyezem'));
+      await tester.pump();
+      expect(disabled(tester, 'Engedélyezem'), isTrue);
+      expect(disabled(tester, 'Mégse'), isTrue);
+      gated.gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('1 esemény törölve.'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('while a move is carried out its card waits', (tester) async {
+      late GatedRepo gated;
+      final refs = <String>[];
+      await bootWithAppointment(
+        tester,
+        moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+        refs,
+        repo: (db) => gated = GatedRepo(db),
+      );
+      await ask(tester);
+      await tester.ensureVisible(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      expect(disabled(tester, 'Engedélyezem'), isFalse);
+      gated.closed = true;
+      await tester.tap(find.text('Engedélyezem'));
+      await tester.pump();
+      expect(disabled(tester, 'Engedélyezem'), isTrue);
+      expect(disabled(tester, 'Mégse'), isTrue);
+      gated.gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('1 esemény áthelyezve.'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a double tap on "Engedélyezem" (deletion) counts once', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, deleteScript(refs), refs);
+      await ask(tester);
+      await tester.ensureVisible(find.text('Engedélyezem'));
+      await tester.pumpAndSettle();
+      final button = find.text('Engedélyezem');
+      await tester.tap(button);
+      await tester.tap(button, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('1 esemény törölve.'), findsOneWidget);
+      expect(find.textContaining('Kimaradt'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('while an approval is carried out the page waits for it', (
+      tester,
+    ) async {
+      late GatedRepo gated;
+      final llm = FakeGemini([
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(
+        tester,
+        const AssistantPage(),
+        llm: llm,
+        key: 'k',
+        repo: (db) => gated = GatedRepo(db),
+      );
+      await tester.enterText(
+        find.byType(TextField),
+        'Tervezz edzést a jövő hétre',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      expect(disabled(tester, 'Elfogadom a kijelölteket (1)'), isFalse);
+
+      gated.closed = true; // the approval will wait at the gate
+      await tester.tap(find.text('Elfogadom a kijelölteket (1)'));
+      await tester.pump();
+      // being carried out: the approval, the discard, the checkboxes, the
+      // question box and the quick prompts all wait
+      expect(disabled(tester, 'Elfogadom a kijelölteket (1)'), isTrue);
+      expect(disabled(tester, 'Elvetem'), isTrue);
+      expect(
+        tester
+            .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<ActionChip>(
+              find.widgetWithText(ActionChip, 'Mi lesz holnap?'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<CheckboxListTile>(find.byType(CheckboxListTile))
+            .onChanged,
+        isNull,
+      );
+      // ... and a question typed meanwhile starts nothing
+      final ctl = ref0(tester).read(assistantControllerProvider.notifier);
+      await ctl.ask('Mi lesz holnap?');
+      expect(ref0(tester).read(assistantControllerProvider).busy, isFalse);
+
+      gated.gate.complete();
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.all()))!.length, 1);
+      expect(find.text('Elfogadom a kijelölteket (1)'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'an event deleted while the card waited is not "deleted" again; the page says what was left out',
+      (tester) async {
+        final refs = <String>[];
+        await bootWithAppointment(tester, deleteScript(refs), refs);
+        await ask(tester);
+        await tester.runAsync(() => events.deleteLocal('p1'));
+        await press(tester, 'Engedélyezem');
+        expect(
+          find.textContaining(
+            'Kimaradt, mert közben eltűnt vagy elmozdult: „Fogorvos”',
+          ),
+          findsOneWidget,
+        );
+        expect(find.textContaining('esemény törölve'), findsNothing);
+        // nothing was done, so there is nothing to take back
+        expect(find.text('Visszavonás'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('an event renamed while the card waited is left alone', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, deleteScript(refs), refs);
+      await ask(tester);
+      await tester.runAsync(
+        () async => events.saveLocal(
+          (await events.byId('p1'))!.copyWith(title: 'Fogorvos (lemondva)'),
+        ),
+      );
+      await press(tester, 'Engedélyezem');
+      expect(
+        find.textContaining('Kimaradt, mert közben megváltozott: „Fogorvos”'),
+        findsOneWidget,
+      );
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.title,
+        contains('lemondva'),
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a move does not bring back an event that was deleted meanwhile',
+      (tester) async {
+        final refs = <String>[];
+        await bootWithAppointment(
+          tester,
+          moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+          refs,
+        );
+        // it has been uploaded: deleting it leaves a tombstone until the
+        // deletion is uploaded too
+        await tester.runAsync(
+          () => db.customStatement("UPDATE event_rows SET google_id = 'g1'"),
+        );
+        await ask(tester);
+        await tester.runAsync(() => events.deleteLocal('p1'));
+        await press(tester, 'Engedélyezem');
+        expect(await tester.runAsync(() => events.isTombstone('p1')), isTrue);
+        expect((await tester.runAsync(() => events.all()))!, isEmpty);
+        expect(find.textContaining('Kimaradt'), findsOneWidget);
+        expect(find.textContaining('esemény áthelyezve'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets(
+      'the deletion card shows the user\'s own words, not the model\'s',
+      (tester) async {
+        final refs = <String>[];
+        await bootWithAppointment(tester, deleteScript(refs), refs);
+        await ask(tester);
+        expect(
+          find.textContaining('A kérésed: „töröld a fogorvost”'),
+          findsOneWidget,
+        );
+        expect(find.text('kérted'), findsNothing);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('a long request is cut to three lines on the deletion card', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, deleteScript(refs), refs);
+      await tester.enterText(
+        find.byType(TextField),
+        'töröld a fogorvost ${'nagyon ' * 40}',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      final text = tester.widget<Text>(find.textContaining('A kérésed:'));
+      expect(text.maxLines, 3);
+      expect(text.overflow, TextOverflow.ellipsis);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'accepting the new events keeps the deletion card that came with them',
+      (tester) async {
+        final refs = <String>[];
+        await bootWithAppointment(tester, mixedScript(refs), refs);
+        await askMixed(tester);
+        expect(
+          find.textContaining('Törlésre javasolt események (1)'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Elfogadom a kijelölteket (1)'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1 esemény bekerült'), findsOneWidget);
+        // the deletion still waits for its own decision
+        expect(
+          find.textContaining('Törlésre javasolt események (1)'),
+          findsOneWidget,
+        );
+        expect(find.text('Elfogadom a kijelölteket (1)'), findsNothing);
+        // closing the "bekerült" card closes only that card
+        await tester.tap(find.text('Rendben'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1 esemény bekerült'), findsNothing);
+        expect(
+          find.textContaining('Törlésre javasolt események (1)'),
+          findsOneWidget,
+        );
+        await press(tester, 'Engedélyezem');
+        expect(find.text('1 esemény törölve.'), findsOneWidget);
+        expect((await tester.runAsync(() => events.byId('p1'))), isNull);
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('"Elvetem" keeps the deletion card that came with the plan', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, mixedScript(refs), refs);
+      await askMixed(tester);
+      await tester.tap(find.text('Elvetem'));
+      await tester.pumpAndSettle();
+      expect(find.text('Elfogadom a kijelölteket (1)'), findsNothing);
+      expect(
+        find.textContaining('Törlésre javasolt események (1)'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('megjegyezzem, miért'), findsOneWidget);
+      // the habit questions do not take the deletion card with them
+      await tester.tap(find.text('Nem most'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Törlésre javasolt események (1)'),
+        findsOneWidget,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a new event that clashes with one added meanwhile is left out',
+      (tester) async {
+        final llm = FakeGemini([
+          (_) => plan([
+            item(
+              'Futás',
+              '2026-05-05T18:00:00',
+              '2026-05-05T18:40:00',
+              kind: 'rest',
+            ),
+            item(
+              'Gym',
+              '2026-05-06T18:00:00',
+              '2026-05-06T18:40:00',
+              kind: 'rest',
+            ),
+          ]),
+        ]);
+        await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+        await tester.enterText(
+          find.byType(TextField),
+          'Tervezz edzést a jövő hétre',
+        );
+        await tester.tap(find.byTooltip('Küldés'));
+        await tester.pumpAndSettle();
+        await tester.runAsync(
+          () =>
+              events.saveLocal(evt('x', 'Tárgyalás', floating(2026, 5, 5, 18))),
+        );
+        await tester.tap(find.text('Elfogadom a kijelölteket (2)'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('1 esemény bekerült'), findsOneWidget);
+        expect(
+          find.textContaining(
+            'Kimaradt, mert közben ütközik valamivel: „Futás”',
+          ),
+          findsOneWidget,
+        );
+        final titles = [
+          for (final e in (await tester.runAsync(() => events.all()))!) e.title,
+        ]..sort();
+        expect(titles, ['Gym', 'Tárgyalás']);
+        await shutdown(tester, db);
+      },
+    );
+
+    // ---- "Visszavonás" after an approval
+    testWidgets('"Visszavonás" takes the new events back', (tester) async {
+      final llm = FakeGemini([
+        (_) =>
+            plan([item('Futás', '2026-05-05T18:00:00', '2026-05-05T19:00:00')]),
+      ]);
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await tester.enterText(
+        find.byType(TextField),
+        'Tervezz edzést a jövő hétre',
+      );
+      await tester.tap(find.byTooltip('Küldés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Elfogadom a kijelölteket (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 esemény hozzáadva'), findsOneWidget);
+      expect((await tester.runAsync(() => events.all()))!.length, 1);
+      // while "Visszavonás" is on offer the new event does not go up
+      final added = (await tester.runAsync(() => events.all()))!.single.id;
+      expect(ref0(tester).read(syncHoldProvider).isHeld(added), isTrue);
+
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect((await tester.runAsync(() => events.all()))!, isEmpty);
+      // never uploaded, so nothing is queued either
+      expect((await tester.runAsync(() => events.pending()))!, isEmpty);
+      expect(find.textContaining('1 esemény bekerült'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('"Visszavonás" brings the deleted event back', (tester) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, deleteScript(refs), refs);
+      await ask(tester);
+      await press(tester, 'Engedélyezem');
+      expect(find.text('1 esemény törölve.'), findsOneWidget);
+      expect(find.text('1 esemény törölve'), findsOneWidget); // the bar
+      expect(await tester.runAsync(() => events.byId('p1')), isNull);
+
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.title,
+        'Fogorvos',
+      );
+      expect(find.text('1 esemény törölve.'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('"Visszavonás" puts the moved event back to its time', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(
+        tester,
+        moveScript(refs, '2026-11-20T19:00:00', '2026-11-20T20:00:00'),
+        refs,
+      );
+      await ask(tester);
+      await press(tester, 'Engedélyezem');
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.start,
+        floating(2026, 11, 20, 19),
+      );
+      expect(find.text('1 esemény áthelyezve'), findsOneWidget); // the bar
+
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect(
+        (await tester.runAsync(() => events.byId('p1')))!.start,
+        floating(2026, 11, 20, 9),
+      );
+      expect(find.text('1 esemény áthelyezve.'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'a move of one day of a series is taken back with its exception row',
+      (tester) async {
+        final refs = <String>[];
+        await boot(
+          tester,
+          const AssistantPage(),
+          llm: moveScript(refs, '2026-11-18T19:00:00', '2026-11-18T20:00:00'),
+          key: 'k',
+        );
+        await tester.runAsync(
+          () => events.saveLocal(
+            evt(
+              's1',
+              'Edzés',
+              floating(2026, 11, 18, 9),
+              rrule: 'FREQ=DAILY;COUNT=3',
+            ),
+          ),
+        );
+        refs.add(await refOf(tester, 'Edzés'));
+        await ask(tester);
+        await press(tester, 'Engedélyezem');
+        expect(
+          (await tester.runAsync(() => events.overridesOf('s1')))!.length,
+          1,
+        );
+        await tester.tap(find.text('Visszavonás'));
+        await tester.pumpAndSettle();
+        expect(
+          (await tester.runAsync(() => events.overridesOf('s1')))!,
+          isEmpty,
+        );
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('the deletion goes up only after the bar is gone', (
+      tester,
+    ) async {
+      final refs = <String>[];
+      await bootWithAppointment(tester, deleteScript(refs), refs);
+      await tester.runAsync(
+        () => db.customStatement("UPDATE event_rows SET google_id = 'g1'"),
+      );
+      await ask(tester);
+      await press(tester, 'Engedélyezem');
+      final hold = ref0(tester).read(syncHoldProvider);
+      expect(hold.isHeld('p1'), isTrue); // while "Visszavonás" is on offer
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(hold.isHeld('p1'), isFalse);
       await shutdown(tester, db);
     });
 

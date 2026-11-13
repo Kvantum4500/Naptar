@@ -77,8 +77,13 @@ class SyncState {
     this.mismatch,
     this.parked = 0,
     this.channels = const {},
+    this.upload,
   });
   final bool configured, signedIn, syncing;
+
+  /// How far the uploads of the run that is going on are (null: not uploading
+  /// now). Only the calendar's events report it.
+  final ({int done, int total})? upload;
 
   /// What the last finance mail run did (null when nothing happened).
   final String? financeNote;
@@ -114,6 +119,7 @@ class SyncState {
     Object? mismatch = _unset,
     int? parked,
     Map<String, ChannelStatus>? channels,
+    Object? upload = _unset,
   }) => SyncState(
     configured: configured,
     signedIn: signedIn ?? this.signedIn,
@@ -130,6 +136,10 @@ class SyncState {
         : mismatch as SyncBindingMismatch?,
     parked: parked ?? this.parked,
     channels: channels ?? this.channels,
+    // a run that is over has no upload going on, whichever way it ended
+    upload: identical(upload, _unset)
+        ? (syncing == false ? null : this.upload)
+        : upload as ({int done, int total})?,
   );
 }
 
@@ -255,6 +265,11 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       ref.read(remoteFactoryProvider)(tapped),
       pace: ref.read(syncPaceProvider),
       isHeld: hold.holdsEvent,
+      onProgress: (done, total) {
+        if (ref.mounted && state.syncing) {
+          state = state.copyWith(upload: (done: done, total: total));
+        }
+      },
       log: _log,
     );
     final driveRemote = ref.read(driveFactoryProvider)(tapped);

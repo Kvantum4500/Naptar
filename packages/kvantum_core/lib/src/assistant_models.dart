@@ -375,6 +375,23 @@ String occurrenceRef(Occurrence o) =>
   );
 }
 
+/// Whether [now] is still the occurrence a proposal was made for ([then]): the
+/// same event at the same place of its series, with the same title and times.
+///
+/// A proposal is a snapshot, and the card may sit on the page for hours. Before
+/// it is carried out, the live calendar is compared with the snapshot with
+/// this; whatever has changed since is left alone.
+bool sameOccurrence(Occurrence then, Occurrence now) =>
+    then.eventId == now.eventId &&
+    then.originalStart == now.originalStart &&
+    then.title == now.title &&
+    then.startUtc == now.startUtc &&
+    then.endUtc == now.endUtc &&
+    then.allDay == now.allDay &&
+    then.recurring == now.recurring &&
+    then.isOverride == now.isOverride &&
+    then.isShift == now.isShift;
+
 /// A deletion the model asked for. It only ever becomes a proposal the user
 /// must confirm with a button; nothing is deleted from this alone.
 class DeletionRequest {

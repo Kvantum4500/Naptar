@@ -9,6 +9,7 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/google/google_auth_service.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/remote.dart' show TransientSyncError;
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -92,6 +93,44 @@ void main() {
       addTearDown(c.dispose);
       return c;
     }
+
+    test('while the changes go up the state says how far they are; after the '
+        'run it says nothing', () async {
+      final c = make(FakeAuth());
+      for (final id in ['a', 'b', 'c']) {
+        await EventRepoHelper(db).save(ev(id));
+      }
+      final wire = Completer<void>();
+      remote.upsertGateAt[2] = wire; // the second upload is on the wire
+      final run = c.read(syncControllerProvider.notifier).signIn();
+      while (remote.upsertCalls < 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      final mid = c.read(syncControllerProvider);
+      expect(mid.syncing, isTrue);
+      expect(mid.upload, (done: 1, total: 3));
+      wire.complete();
+      await run;
+      final end = c.read(syncControllerProvider);
+      expect(end.syncing, isFalse);
+      expect(end.upload, isNull);
+      expect(end.pending, 0);
+      await db.close();
+    });
+
+    test('a run that ends in a failure leaves no progress behind', () async {
+      final c = make(FakeAuth());
+      for (final id in ['a', 'b']) {
+        await EventRepoHelper(db).save(ev(id));
+      }
+      remote.failUpsertAt[2] = TransientSyncError('offline');
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.syncing, isFalse);
+      expect(s.upload, isNull);
+      expect(s.error, isNotNull);
+      await db.close();
+    });
 
     test('not configured: nothing happens, no sign-in possible', () async {
       final c = make(FakeAuth(), configured: false);

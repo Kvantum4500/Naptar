@@ -31,6 +31,9 @@ class SettingsPage extends ConsumerStatefulWidget {
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
+/// The four file jobs of the backup section.
+enum _FileJob { exportIcs, importIcs, exportFinance, importFinance }
+
 class _SettingsPageState extends ConsumerState<SettingsPage> {
   final _key = TextEditingController();
   final _base = TextEditingController();
@@ -44,6 +47,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   final _city = TextEditingController();
   var _found = const <Place>[];
   var _locBusy = false;
+
+  /// The file work in progress (a backup being read, restored …): the four
+  /// buttons wait, and the one that was pressed shows a spinner.
+  _FileJob? _fileJob;
 
   @override
   void dispose() {
@@ -232,31 +239,55 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       );
   }
 
+  /// Marks the file work that is going on (null: none). The system's own file
+  /// dialogs and our own questions are the user's turn, not work: they are not
+  /// marked.
+  void _working(_FileJob? job) {
+    if (mounted) setState(() => _fileJob = job);
+  }
+
+  /// The icon of a file button: a small spinner while its own work goes on.
+  Widget _fileIcon(_FileJob job, IconData icon) => _fileJob == job
+      ? const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        )
+      : Icon(icon);
+
   Future<void> _export() async {
     try {
+      _working(_FileJob.exportIcs);
       final text = await exportBackup(ref.read(repoProvider));
       final d = DateTime.now();
       final name =
           'naptar-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.ics';
+      _working(null); // (the save dialog is the system's)
       final ok = await ref.read(backupIoProvider).save(name, text);
       if (ok) _toast('A naptár elmentve.');
     } catch (e, st) {
       ref.read(diagLogProvider).error('ui', 'settings.save_failed', e, st);
       _toast('A mentés nem sikerült: ${errorInfoFor(e).text}', error: true);
+    } finally {
+      _working(null);
     }
   }
 
   Future<void> _exportFinance() async {
     try {
+      _working(_FileJob.exportFinance);
       final text = await ref.read(financeRepoProvider).exportJson();
       final d = DateTime.now();
       final name =
           'penzugyek-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.json';
+      _working(null); // (the save dialog is the system's)
       final ok = await ref.read(backupIoProvider).save(name, text);
       if (ok) _toast('A pénzügyi adatok elmentve.');
     } catch (e, st) {
       ref.read(diagLogProvider).error('ui', 'settings.save_failed', e, st);
       _toast('A mentés nem sikerült: ${errorInfoFor(e).text}', error: true);
+    } finally {
+      _working(null);
     }
   }
 
@@ -264,6 +295,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     try {
       final text = await ref.read(backupIoProvider).pick();
       if (text == null) return;
+      // the file is chosen: from here on it is our work, and it shows
+      _working(_FileJob.importFinance);
+      await WidgetsBinding.instance.endOfFrame;
       final r = await ref.read(financeRepoProvider).importJson(text);
       final any = r.added + r.updated > 0;
       if (!r.recognized) {
@@ -291,6 +325,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         'A visszaállítás nem sikerült: ${errorInfoFor(e).text}',
         error: true,
       );
+    } finally {
+      _working(null);
     }
   }
 
@@ -298,6 +334,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     try {
       final text = await ref.read(backupIoProvider).pick();
       if (text == null) return;
+      // the file is chosen: from here on it is our work, and it shows (one
+      // frame is let through, so the spinner is there before a big file is
+      // read)
+      _working(_FileJob.importIcs);
+      await WidgetsBinding.instance.endOfFrame;
       final repo = ref.read(repoProvider);
       final plan = await previewBackup(repo, text, calendarId: kNaptarCalendar);
       // Events that changed on this device since the file was written are
@@ -305,9 +346,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       var overwrite = false;
       if (plan.changes.isNotEmpty) {
         if (!mounted) return;
+        _working(null); // the question is the user's turn, not work
         final choice = await askImportChoice(context, plan);
         if (choice == null) return;
         overwrite = choice == ImportChoice.all;
+        _working(_FileJob.importIcs);
       }
       final r = await applyBackup(repo, plan, overwrite: overwrite);
       if (r.total > 0) {
@@ -332,6 +375,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         'A visszaállítás nem sikerült: ${errorInfoFor(e).text}',
         error: true,
       );
+    } finally {
+      _working(null);
     }
   }
 
@@ -713,23 +758,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   runSpacing: 8,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: _export,
-                      icon: const Icon(Icons.download),
+                      onPressed: _fileJob == null ? _export : null,
+                      icon: _fileIcon(_FileJob.exportIcs, Icons.download),
                       label: const Text('Mentés fájlba'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _import,
-                      icon: const Icon(Icons.upload_file),
+                      onPressed: _fileJob == null ? _import : null,
+                      icon: _fileIcon(_FileJob.importIcs, Icons.upload_file),
                       label: const Text('Visszaállítás fájlból'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _exportFinance,
-                      icon: const Icon(Icons.account_balance_wallet_outlined),
+                      onPressed: _fileJob == null ? _exportFinance : null,
+                      icon: _fileIcon(
+                        _FileJob.exportFinance,
+                        Icons.account_balance_wallet_outlined,
+                      ),
                       label: const Text('Pénzügyek mentése'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _importFinance,
-                      icon: const Icon(Icons.restore),
+                      onPressed: _fileJob == null ? _importFinance : null,
+                      icon: _fileIcon(_FileJob.importFinance, Icons.restore),
                       label: const Text('Pénzügyek visszaállítása'),
                     ),
                   ],

@@ -1,3 +1,5 @@
+import 'dart:math' show min;
+
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
@@ -74,6 +76,7 @@ class SyncEngine {
     this.maxPushPerRun = 150,
     this.pace = Duration.zero,
     this.isHeld,
+    this.onProgress,
     this._log,
   }) : _uuid = uuid ?? const Uuid();
 
@@ -90,6 +93,13 @@ class SyncEngine {
   /// Pause between two consecutive uploads. Google throttles quick bursts of
   /// writes (tens of events in a few seconds) with a "usage limits" error.
   final Duration pace;
+
+  /// Told how far the uploads of this run are: `(done, total)` before the
+  /// first one and after each one. [total] is the most this run will try (what
+  /// is neither held back nor given up on, up to [maxPushPerRun]); an
+  /// exception whose series is not in Google yet is found out on the way, so
+  /// [done] may stop short of it.
+  final void Function(int done, int total)? onProgress;
 
   /// Whether the queued changes of an event must wait because the user can
   /// still take them back. Such an item is left in the queue untouched.
@@ -307,7 +317,19 @@ class SyncEngine {
 
   Future<void> _push(SyncReport report) async {
     var uploads = 0;
-    for (final item in await repo.pending()) {
+    final queue = await repo.pending();
+    final total = min(
+      maxPushPerRun,
+      queue
+          .where(
+            (i) =>
+                !(isHeld?.call(i.event) ?? false) && i.attempts < maxAttempts,
+          )
+          .length,
+    );
+    var tried = 0;
+    if (total > 0) onProgress?.call(0, total);
+    for (final item in queue) {
       if (isHeld?.call(item.event) ?? false) {
         // the user can still take this back: it stays in the queue as it is
         report.held++;
@@ -386,6 +408,10 @@ class SyncEngine {
           _log?.error('sync', 'push.unexpected', e, st, data);
         }
       }
+      // (a transient error left the loop above: this is an upload that was
+      // tried, whether Google took it or not)
+      tried++;
+      onProgress?.call(min(tried, total), total);
     }
   }
 }

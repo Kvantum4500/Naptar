@@ -38,6 +38,7 @@ void main() {
   walkTests();
   financeContextTests();
   hardeningTests();
+  approvalTests();
   setUpAll(ensureTimeZones);
 
   group('findFreeSlots', () {
@@ -1284,6 +1285,70 @@ void hardeningTests() {
       });
       expect(r.items.length, 20);
       expect(r.problems, isEmpty);
+    });
+  });
+}
+
+void approvalTests() {
+  group('sameOccurrence (a proposal is a snapshot)', () {
+    Occurrence base({
+      String id = 'e',
+      String title = 'Fogorvos',
+      DateTime? start,
+      DateTime? end,
+      DateTime? originalStart,
+      bool allDay = false,
+      bool recurring = false,
+      bool isOverride = false,
+      bool isShift = false,
+      String? colorId,
+      bool aiGenerated = false,
+    }) => Occurrence(
+      eventId: id,
+      title: title,
+      allDay: allDay,
+      tzid: bp,
+      startUtc: resolveWallClock(bp, start ?? floating(2026, 5, 4, 9)),
+      endUtc: resolveWallClock(bp, end ?? floating(2026, 5, 4, 10)),
+      originalStart: originalStart ?? floating(2026, 5, 4, 9),
+      recurring: recurring,
+      isOverride: isOverride,
+      isShift: isShift,
+      colorId: colorId,
+      aiGenerated: aiGenerated,
+    );
+
+    test('the very same occurrence matches', () {
+      expect(sameOccurrence(base(), base()), isTrue);
+    });
+
+    test('anything that matters makes it another occurrence', () {
+      final then = base();
+      final changed = <String, Occurrence>{
+        'event': base(id: 'x'),
+        'place in the series': base(originalStart: floating(2026, 5, 5, 9)),
+        'title': base(title: 'Fogorvos (új)'),
+        'start': base(start: floating(2026, 5, 4, 9, 30)),
+        'end': base(end: floating(2026, 5, 4, 11)),
+        'all-day': base(allDay: true),
+        'recurring': base(recurring: true),
+        'exception row': base(isOverride: true),
+        'shift': base(isShift: true),
+      };
+      for (final e in changed.entries) {
+        expect(
+          sameOccurrence(then, e.value),
+          isFalse,
+          reason: 'a changed ${e.key} must not count as the same',
+        );
+      }
+    });
+
+    test('a colour or an assistant mark is not a reason to hold back', () {
+      expect(
+        sameOccurrence(base(), base(colorId: '5', aiGenerated: true)),
+        isTrue,
+      );
     });
   });
 }

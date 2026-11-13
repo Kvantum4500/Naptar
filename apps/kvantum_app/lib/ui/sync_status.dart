@@ -80,8 +80,14 @@ class SyncStatusButton extends ConsumerWidget {
     final stale =
         s.lastSync != null &&
         DateTime.now().difference(s.lastSync!) > const Duration(minutes: 10);
+    final up = s.upload;
     final (IconData icon, String label, Color color) = s.syncing
-        ? (Icons.sync, 'Szinkronizál…', scheme.primary)
+        ? (
+            Icons.sync,
+            // while the changes go up, how far they are
+            up == null ? 'Szinkronizál…' : 'Feltöltés ${up.done}/${up.total}',
+            scheme.primary,
+          )
         : s.mismatch != null
         ? (Icons.sync_problem, 'Döntés kell', scheme.error)
         : s.error != null
@@ -102,8 +108,16 @@ class SyncStatusButton extends ConsumerWidget {
             scheme.primary,
           );
 
+    // What went wrong is one hover or long press away (it used to be in the
+    // "Részletek" window only): the tooltip carries it.
+    final why = !s.syncing && s.error != null ? _short(s.error!) : null;
+    // A failed or given-up sync is retried from the same place.
+    final retry = s.error != null || s.parked > 0;
+
     return PopupMenuButton<String>(
-      tooltip: compact ? label : 'Szinkron és fiók',
+      tooltip: why != null
+          ? (compact ? '$label: $why' : 'Hiba: $why')
+          : (compact ? label : 'Szinkron és fiók'),
       onSelected: (v) {
         switch (v) {
           case 'sync':
@@ -127,7 +141,7 @@ class SyncStatusButton extends ConsumerWidget {
                     'Utolsó sikeres szinkron: ${s.lastSync == null ? 'még nem volt' : '${fmtDate(s.lastSync!)} ${_hm(s.lastSync!)}'}\n'
                     '${s.nextAttempt == null ? '' : 'Következő automatikus próba: ${_hm(s.nextAttempt!)}\n'}'
                     'Függő módosítás: ${s.pending}\n'
-                    '${s.parked == 0 ? '' : 'Ebből feladva: ${s.parked} (a „Szinkron most” újra megpróbálja)\n'}'
+                    '${s.parked == 0 ? '' : 'Ebből feladva: ${s.parked} (az „Újrapróbálás most” újra megpróbálja)\n'}'
                     'Naptár: Google „Naptar”\n'
                     '${s.mismatch == null ? '' : 'Döntés kell: másik Google-fiók vagy naptár\n'}'
                     '${s.financeNote == null ? '' : '${s.financeNote}\n'}'
@@ -146,7 +160,23 @@ class SyncStatusButton extends ConsumerWidget {
             value: 'decide',
             child: Text('Másik fiók / naptár: döntés kell…'),
           ),
-        const PopupMenuItem(value: 'sync', child: Text('Szinkron most')),
+        if (s.syncing && up != null)
+          PopupMenuItem<String>(
+            enabled: false,
+            child: Text('Feltöltés folyamatban: ${up.done}/${up.total}'),
+          )
+        else if (s.pending > 0)
+          PopupMenuItem<String>(
+            enabled: false,
+            child: Text(
+              '${s.pending} módosítás vár feltöltésre'
+              '${s.parked > 0 ? ' (${s.parked} elakadt)' : ''}',
+            ),
+          ),
+        PopupMenuItem(
+          value: 'sync',
+          child: Text(retry ? 'Újrapróbálás most' : 'Szinkron most'),
+        ),
         const PopupMenuItem(value: 'details', child: Text('Részletek')),
         const PopupMenuItem(value: 'diag', child: Text('Diagnosztika')),
         const PopupMenuItem(
@@ -194,6 +224,13 @@ class SyncStatusButton extends ConsumerWidget {
   }
 
   static String _hm(DateTime t) => fmtTime(t);
+
+  /// One line of at most 160 characters (the cause of an error can be long and
+  /// span several channels).
+  static String _short(String t) {
+    final s = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length > 160 ? '${s.substring(0, 159)}…' : s;
+  }
 
   static void _info(BuildContext context, String title, String body) =>
       showDialog<void>(

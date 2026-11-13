@@ -6,10 +6,10 @@ import 'package:uuid/uuid.dart';
 import '../data/event_repository.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
-import '../ui/delete_ops.dart';
 import '../ui/event_editor.dart' show Scope;
-import '../ui/move_ops.dart';
+import '../ui/undo_service.dart';
 import 'ai_settings.dart';
+import 'approval.dart';
 import 'assistant_service.dart';
 import 'gemini_provider.dart';
 import 'provider_catalog.dart';
@@ -151,14 +151,22 @@ class AssistantState {
     String? status,
     bool clearStatus = false,
     Map<int, Scope>? deleteScopes,
+    int? deletedCount,
+    bool clearDeleted = false,
+    int? movedCount,
+    bool clearMoved = false,
+    String? notice,
+    bool clearNotice = false,
+    bool? askWhy,
+    bool? habitSaved,
   }) => AssistantState(
     deleteScopes: deleteScopes ?? this.deleteScopes,
-    deletedCount: deletedCount,
-    movedCount: movedCount,
-    notice: notice,
+    deletedCount: clearDeleted ? null : (deletedCount ?? this.deletedCount),
+    movedCount: clearMoved ? null : (movedCount ?? this.movedCount),
+    notice: clearNotice ? null : (notice ?? this.notice),
     errorDetail: errorDetail,
-    askWhy: askWhy,
-    habitSaved: habitSaved,
+    askWhy: askWhy ?? this.askWhy,
+    habitSaved: habitSaved ?? this.habitSaved,
     busy: busy ?? this.busy,
     outcome: clearOutcome ? null : (outcome ?? this.outcome),
     error: clearError ? null : (error ?? this.error),
@@ -251,7 +259,11 @@ class AssistantController extends Notifier<AssistantState> {
 
   Future<void> ask(String prompt, {LocalAnswer? context}) async {
     final text = prompt.trim();
-    if (text.isEmpty || state.busy) return;
+    // (a question does not start while an approval is being carried out: the
+    // page would be rebuilt under it)
+    if (text.isEmpty || state.busy || ref.read(assistantApplyingProvider)) {
+      return;
+    }
     final run = ++_run;
     bool live() => run == _run;
     state = AssistantState(busy: true, prompt: text);
@@ -407,137 +419,286 @@ class AssistantController extends Notifier<AssistantState> {
     state = state.copyWith(selected: s);
   }
 
-  /// Creates the selected proposals as real events in the app's own calendar.
-  Future<int> acceptSelected() async {
-    final o = state.outcome;
-    if (o == null) return 0;
-    final repo = ref.read(repoProvider);
-    var n = 0;
-    for (var i = 0; i < o.items.length; i++) {
-      if (!state.selected.contains(i)) continue;
-      final it = o.items[i];
-      await repo.saveLocal(
-        CalEvent(
-          id: const Uuid().v4(),
-          calendarId: kNaptarCalendar,
-          title: it.title,
-          notes: [
-            if (it.taskTitle != null) 'Feladat: ${it.taskTitle}',
-            if (it.reason.isNotEmpty) it.reason,
-          ].join('\n'),
-          start: it.startWall,
-          end: it.endWall,
-          tzid: it.tzid,
-          colorId: aiEventColorId,
-          aiGenerated: true,
-        ),
+  /// Creates the selected proposals as real events in the app's own calendar:
+  /// all in one transaction, with "Visszavonás" on offer afterwards. What went
+  /// stale while the card was waiting (its time is over, it clashes with
+  /// something added meanwhile) is left out and named in the notice.
+  Future<int> acceptSelected(UndoSite site) async {
+    final turn = ref.read(assistantApplyingProvider.notifier);
+    if (!turn.begin()) return 0;
+    try {
+      final o = state.outcome;
+      if (o == null) return 0;
+      // (taken before the first await: the indices belong to THIS list)
+      final chosen = [
+        for (var i = 0; i < o.items.length; i++)
+          if (state.selected.contains(i)) o.items[i],
+      ];
+      if (chosen.isEmpty) return 0;
+      final ids = [for (final _ in chosen) const Uuid().v4()];
+      final doomed = {for (final d in o.deletions) occurrenceRef(d.occurrence)};
+      final now = ref.read(aiClockProvider)();
+      ApplyResult? done;
+      await ref
+          .read(undoServiceProvider)
+          .run(
+            site,
+            newIds: ids,
+            change: () async {
+              done = await applyNew(
+                ref.read(repoProvider),
+                chosen,
+                ids,
+                now: now,
+                doomed: doomed,
+                build: _newEvent,
+              );
+              return done!.changes;
+            },
+            // (not the words of the card on the page: both are on the screen)
+            message: (_) => '${done?.applied ?? 0} esemény hozzáadva',
+            onUndone: () async => _undone(accepted: true),
+          );
+      final r = done ?? const ApplyResult();
+      if (!ref.mounted) return r.applied;
+      ref.read(syncControllerProvider.notifier).requestSync();
+      // built from the LIVE state: whatever the user did meanwhile stays
+      final rest = state.outcome?.withoutItems();
+      final keep =
+          rest != null && (rest.deletions.isNotEmpty || rest.moves.isNotEmpty);
+      state = state.copyWith(
+        outcome: keep ? rest : null,
+        clearOutcome: !keep,
+        selected: const {},
+        acceptedCount: r.applied,
+        clearAccepted: r.applied == 0,
+        notice: _noticeWith(r.skipped),
       );
-      n++;
+      return r.applied;
+    } catch (e, st) {
+      _failed(e, st, 'assistant.accept_failed');
+      return 0;
+    } finally {
+      turn.end();
     }
-    ref.read(syncControllerProvider.notifier).requestSync();
-    state = AssistantState(prompt: state.prompt, acceptedCount: n);
-    return n;
   }
+
+  CalEvent _newEvent(ProposalItem it, String id) => CalEvent(
+    id: id,
+    calendarId: kNaptarCalendar,
+    title: it.title,
+    notes: [
+      if (it.taskTitle != null) 'Feladat: ${it.taskTitle}',
+      if (it.reason.isNotEmpty) it.reason,
+    ].join('\n'),
+    start: it.startWall,
+    end: it.endWall,
+    tzid: it.tzid,
+    colorId: aiEventColorId,
+    aiGenerated: true,
+  );
 
   void setDeleteScope(int index, Scope scope) => state = state.copyWith(
     deleteScopes: {...state.deleteScopes, index: scope},
   );
 
-  /// "Engedélyezem": deletes exactly the events listed on the confirmation card.
-  Future<int> confirmDeletions() async {
-    final o = state.outcome;
-    if (o == null || o.deletions.isEmpty) return 0;
-    final repo = ref.read(repoProvider);
-    var n = 0;
-    for (var i = 0; i < o.deletions.length; i++) {
-      final d = o.deletions[i];
-      final scope = d.occurrence.recurring
-          ? (state.deleteScopes[i] ?? Scope.only)
-          : Scope.only;
-      if (await deleteOccurrence(repo, d.occurrence, scope)) n++;
+  /// "Engedélyezem": deletes exactly the events listed on the confirmation
+  /// card, each as the calendar has it now, in one transaction, with
+  /// "Visszavonás" on offer afterwards.
+  Future<int> confirmDeletions(UndoSite site) async {
+    final turn = ref.read(assistantApplyingProvider.notifier);
+    if (!turn.begin()) return 0;
+    try {
+      final o = state.outcome;
+      if (o == null || o.deletions.isEmpty) return 0;
+      // (taken before the first await: the indices belong to THIS list)
+      final deletions = o.deletions;
+      final scopes = {...state.deleteScopes};
+      ApplyResult? done;
+      await ref
+          .read(undoServiceProvider)
+          .run(
+            site,
+            holdIds: [for (final d in deletions) d.occurrence.eventId],
+            change: () async {
+              done = await applyDeletions(
+                ref.read(repoProvider),
+                deletions,
+                scopes,
+              );
+              return done!.changes;
+            },
+            message: (_) => '${done?.applied ?? 0} esemény törölve',
+            onUndone: () async => _undone(deleted: true),
+          );
+      final r = done ?? const ApplyResult();
+      if (!ref.mounted) return r.applied;
+      ref.read(syncControllerProvider.notifier).requestSync();
+      // built from the LIVE state: whatever the user did meanwhile stays
+      state = state.copyWith(
+        outcome: state.outcome?.withoutDeletions(),
+        deleteScopes: const {},
+        deletedCount: r.applied,
+        clearDeleted: r.applied == 0,
+        notice: _noticeWith(r.skipped),
+      );
+      return r.applied;
+    } catch (e, st) {
+      _failed(e, st, 'assistant.delete_failed');
+      return 0;
+    } finally {
+      turn.end();
     }
-    ref.read(syncControllerProvider.notifier).requestSync();
-    state = AssistantState(
-      outcome: o.withoutDeletions(),
-      selected: state.selected,
-      acceptedCount: state.acceptedCount,
-      prompt: state.prompt,
-      notice: state.notice,
-      movedCount: state.movedCount,
-      deletedCount: n,
-    );
-    return n;
   }
 
   /// "Mégse": nothing is deleted; the rest of the answer stays.
   void declineDeletions() {
     final o = state.outcome;
     if (o == null) return;
-    state = AssistantState(
+    state = state.copyWith(
       outcome: o.withoutDeletions(),
-      selected: state.selected,
-      acceptedCount: state.acceptedCount,
-      prompt: state.prompt,
-      notice: state.notice,
-      movedCount: state.movedCount,
+      deleteScopes: const {},
     );
   }
 
-  /// "Engedélyezem": moves exactly the events listed on the confirmation card.
-  Future<int> confirmMoves() async {
-    final o = state.outcome;
-    if (o == null || o.moves.isEmpty) return 0;
-    final repo = ref.read(repoProvider);
-    var n = 0;
-    for (final m in o.moves) {
-      if (await moveOccurrence(repo, m.occurrence, m.newStart, m.newEnd)) n++;
+  /// "Engedélyezem": moves exactly the events listed on the confirmation
+  /// card, each as the calendar has it now, in one transaction, with
+  /// "Visszavonás" on offer afterwards.
+  Future<int> confirmMoves(UndoSite site) async {
+    final turn = ref.read(assistantApplyingProvider.notifier);
+    if (!turn.begin()) return 0;
+    try {
+      final o = state.outcome;
+      if (o == null || o.moves.isEmpty) return 0;
+      final moves = o.moves;
+      final doomed = {for (final d in o.deletions) occurrenceRef(d.occurrence)};
+      ApplyResult? done;
+      await ref
+          .read(undoServiceProvider)
+          .run(
+            site,
+            holdIds: [for (final m in moves) m.occurrence.eventId],
+            change: () async {
+              done = await applyMoves(
+                ref.read(repoProvider),
+                moves,
+                doomed: doomed,
+              );
+              return done!.changes;
+            },
+            message: (_) => '${done?.applied ?? 0} esemény áthelyezve',
+            onUndone: () async => _undone(moved: true),
+          );
+      final r = done ?? const ApplyResult();
+      if (!ref.mounted) return r.applied;
+      ref.read(syncControllerProvider.notifier).requestSync();
+      // built from the LIVE state: whatever the user did meanwhile stays
+      state = state.copyWith(
+        outcome: state.outcome?.withoutMoves(),
+        movedCount: r.applied,
+        clearMoved: r.applied == 0,
+        notice: _noticeWith(r.skipped),
+      );
+      return r.applied;
+    } catch (e, st) {
+      _failed(e, st, 'assistant.move_failed');
+      return 0;
+    } finally {
+      turn.end();
     }
-    ref.read(syncControllerProvider.notifier).requestSync();
-    state = AssistantState(
-      outcome: o.withoutMoves(),
-      selected: state.selected,
-      acceptedCount: state.acceptedCount,
-      prompt: state.prompt,
-      notice: state.notice,
-      deletedCount: state.deletedCount,
-      deleteScopes: state.deleteScopes,
-      movedCount: n,
-    );
-    return n;
   }
 
   /// "Mégse": nothing is moved; the rest of the answer stays.
   void declineMoves() {
     final o = state.outcome;
     if (o == null) return;
-    state = AssistantState(
-      outcome: o.withoutMoves(),
-      selected: state.selected,
-      acceptedCount: state.acceptedCount,
-      prompt: state.prompt,
-      notice: state.notice,
-      deleteScopes: state.deleteScopes,
-    );
+    state = state.copyWith(outcome: o.withoutMoves());
   }
 
-  void dismiss() => state = const AssistantState();
+  // The "Rendben" of a result card closes THAT card; the others stay.
+  void dismissAccepted() => _settle(state.copyWith(clearAccepted: true));
+  void dismissMoved() => _settle(state.copyWith(clearMoved: true));
+  void dismissDeleted() => _settle(state.copyWith(clearDeleted: true));
+  void dismissHabit() => _settle(state.copyWith(habitSaved: false));
 
   /// "Elvetem": a discarded plan offers to remember why (the user's own
-  /// words; nothing is written without the button).
+  /// words; nothing is written without the button). A deletion or move card
+  /// that came with it stays.
   void discardPlan() {
-    final had = state.outcome?.items.isNotEmpty ?? false;
-    state = AssistantState(askWhy: had, prompt: state.prompt);
+    final o = state.outcome;
+    final had = o?.items.isNotEmpty ?? false;
+    final rest = o?.withoutItems();
+    final keep =
+        rest != null && (rest.deletions.isNotEmpty || rest.moves.isNotEmpty);
+    state = state.copyWith(
+      outcome: keep ? rest : null,
+      clearOutcome: !keep,
+      selected: const {},
+      askWhy: had,
+    );
   }
 
   /// "Megjegyzem": writes the user's sentence to the handbook.
   Future<bool> rememberHabit(String text) async {
     final ok = await ref.read(handbookStoreProvider).appendLearned(text);
-    state = AssistantState(habitSaved: ok, prompt: state.prompt);
+    if (ref.mounted) state = state.copyWith(askWhy: false, habitSaved: ok);
     return ok;
   }
 
   /// "Nem most".
-  void skipHabit() => state = AssistantState(prompt: state.prompt);
+  void skipHabit() => _settle(state.copyWith(askWhy: false));
+
+  /// Shows [s], or the empty page when the card that was just closed was the
+  /// last thing on it (as before, when "Rendben" cleared the page). Anything
+  /// that still asks for a decision, or tells a result, stays.
+  void _settle(AssistantState s) {
+    final o = s.outcome;
+    final pending =
+        o != null &&
+        (o.items.isNotEmpty || o.deletions.isNotEmpty || o.moves.isNotEmpty);
+    final shown =
+        s.acceptedCount != null ||
+        s.movedCount != null ||
+        s.deletedCount != null ||
+        s.habitSaved ||
+        s.askWhy ||
+        s.error != null;
+    state = (s.busy || pending || shown) ? s : AssistantState(prompt: s.prompt);
+  }
+
+  /// "Visszavonás" took an approval back: the card that told its result goes
+  /// (the page is empty again when it was the last thing on it).
+  void _undone({
+    bool accepted = false,
+    bool deleted = false,
+    bool moved = false,
+  }) {
+    if (!ref.mounted) return;
+    _settle(
+      state.copyWith(
+        clearAccepted: accepted,
+        clearDeleted: deleted,
+        clearMoved: moved,
+      ),
+    );
+  }
+
+  /// The notice with what an approval had to leave out added to it.
+  String? _noticeWith(List<Skipped> skipped) {
+    final extra = skippedNotice(skipped);
+    if (extra == null) return state.notice;
+    return state.notice == null ? extra : '${state.notice} $extra';
+  }
+
+  /// An approval failed. It is one transaction, so nothing was half done.
+  void _failed(Object e, StackTrace st, String code) {
+    ref.read(diagLogProvider).error('ui', code, e, st);
+    if (ref.mounted) {
+      state = state.copyWith(
+        notice: 'A művelet nem sikerült, semmi nem változott. Próbáld újra.',
+      );
+    }
+  }
 }
 
 final assistantControllerProvider =

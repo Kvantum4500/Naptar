@@ -8,7 +8,9 @@ import 'package:kvantum_core/kvantum_core.dart'
 import '../ui/day_utils.dart' show defaultTz;
 import '../ui/event_editor.dart' show Scope;
 import '../ui/format.dart';
+import '../ui/undo_service.dart' show UndoSite;
 import 'ai_providers.dart';
+import 'approval.dart' show assistantApplyingProvider;
 import 'assistant_service.dart'
     show AssistantOutcome, PreparedRequest, maxPromptLength;
 import 'llm_provider.dart' show LlmUsage;
@@ -73,6 +75,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   Widget build(BuildContext context) {
     final st = ref.watch(assistantControllerProvider);
     final ctl = ref.read(assistantControllerProvider.notifier);
+    // an approval is being carried out: its buttons (and the question box)
+    // wait, so a second tap cannot do it twice
+    final applying = ref.watch(assistantApplyingProvider);
     final scheme = Theme.of(context).colorScheme;
     final o = st.outcome;
 
@@ -116,7 +121,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send),
-                    onPressed: st.busy ? null : _send,
+                    onPressed: (st.busy || applying) ? null : _send,
                   ),
                 ),
               ),
@@ -128,7 +133,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                   for (final q in _quickPrompts)
                     ActionChip(
                       label: Text(q),
-                      onPressed: st.busy ? null : () => _send(q),
+                      onPressed: (st.busy || applying) ? null : () => _send(q),
                     ),
                 ],
               ),
@@ -216,7 +221,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       'Zöld színnel jelöltük őket, a Google „Naptar” naptárba is felmennek.',
                     ),
                     trailing: TextButton(
-                      onPressed: ctl.dismiss,
+                      onPressed: ctl.dismissAccepted,
                       child: const Text('Rendben'),
                     ),
                   ),
@@ -231,7 +236,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       'Rögzítve a Tanult szokások közé (Beállítások → Kézikönyv).',
                     ),
                     trailing: TextButton(
-                      onPressed: ctl.dismiss,
+                      onPressed: ctl.dismissHabit,
                       child: const Text('Rendben'),
                     ),
                   ),
@@ -243,7 +248,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     leading: const Icon(Icons.event_repeat),
                     title: Text('${st.movedCount} esemény áthelyezve.'),
                     trailing: TextButton(
-                      onPressed: ctl.dismiss,
+                      onPressed: ctl.dismissMoved,
                       child: const Text('Rendben'),
                     ),
                   ),
@@ -255,13 +260,13 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                     leading: const Icon(Icons.delete_outline),
                     title: Text('${st.deletedCount} esemény törölve.'),
                     trailing: TextButton(
-                      onPressed: ctl.dismiss,
+                      onPressed: ctl.dismissDeleted,
                       child: const Text('Rendben'),
                     ),
                   ),
                 ),
               if (o != null) _CostLine(outcome: o),
-              if (o != null) ..._result(context, st, o),
+              if (o != null) ..._result(context, st, o, applying),
             ],
           ),
         ),
@@ -273,6 +278,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     BuildContext context,
     AssistantState st,
     List<dynamic> moves,
+    bool applying,
   ) {
     final ctl = ref.read(assistantControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
@@ -324,12 +330,16 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             Row(
               children: [
                 OutlinedButton(
-                  onPressed: ctl.declineMoves,
+                  onPressed: applying ? null : ctl.declineMoves,
                   child: const Text('Mégse'),
                 ),
                 const SizedBox(width: 10),
                 FilledButton(
-                  onPressed: ctl.confirmMoves,
+                  // (the bar for "Visszavonás" is shown from here: the site is
+                  // taken now, while this page is surely there)
+                  onPressed: applying
+                      ? null
+                      : () => ctl.confirmMoves(UndoSite.of(context)),
                   child: const Text('Engedélyezem'),
                 ),
               ],
@@ -344,6 +354,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     BuildContext context,
     AssistantState st,
     List<dynamic> dels,
+    bool applying,
   ) {
     final ctl = ref.read(assistantControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
@@ -360,11 +371,22 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             ),
             const SizedBox(height: 4),
             const Text('Semmi nem törlődik, amíg nem engedélyezed.'),
+            // What the user asked for, in their own words. (The model's own
+            // reason used to stand under each event: often English, and not the
+            // user's to vouch for.)
+            if (st.prompt.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'A kérésed: „${st.prompt.trim()}”',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontStyle: FontStyle.italic),
+              ),
+            ],
             const SizedBox(height: 8),
             for (var i = 0; i < dels.length; i++) ...[
               () {
                 final occ = dels[i].occurrence as Occurrence;
-                final reason = dels[i].reason as String;
                 final tz = occ.tzid ?? defaultTz;
                 final s = occ.allDay
                     ? occ.startUtc
@@ -382,7 +404,6 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     Text(label),
-                    if (reason.isNotEmpty) Text(reason),
                     if (occ.recurring) ...[
                       const SizedBox(height: 4),
                       const Text('Ismétlődő esemény, mit töröljek?'),
@@ -403,8 +424,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                           ),
                         ],
                         selected: {st.deleteScopes[i] ?? Scope.only},
-                        onSelectionChanged: (v) =>
-                            ctl.setDeleteScope(i, v.first),
+                        onSelectionChanged: applying
+                            ? null
+                            : (v) => ctl.setDeleteScope(i, v.first),
                       ),
                     ],
                     const SizedBox(height: 10),
@@ -415,12 +437,14 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             Row(
               children: [
                 OutlinedButton(
-                  onPressed: ctl.declineDeletions,
+                  onPressed: applying ? null : ctl.declineDeletions,
                   child: const Text('Mégse'),
                 ),
                 const SizedBox(width: 10),
                 FilledButton(
-                  onPressed: ctl.confirmDeletions,
+                  onPressed: applying
+                      ? null
+                      : () => ctl.confirmDeletions(UndoSite.of(context)),
                   child: const Text('Engedélyezem'),
                 ),
               ],
@@ -431,7 +455,12 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     );
   }
 
-  List<Widget> _result(BuildContext context, AssistantState st, dynamic o) {
+  List<Widget> _result(
+    BuildContext context,
+    AssistantState st,
+    dynamic o,
+    bool applying,
+  ) {
     final ctl = ref.read(assistantControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
     String when(dynamic it) {
@@ -465,15 +494,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
           title: Text(q),
         ),
       if ((o.moves as List).isNotEmpty)
-        _moveCard(context, st, o.moves as List<dynamic>),
+        _moveCard(context, st, o.moves as List<dynamic>, applying),
       if ((o.deletions as List).isNotEmpty)
-        _deleteCard(context, st, o.deletions as List<dynamic>),
+        _deleteCard(context, st, o.deletions as List<dynamic>, applying),
       if (o.items.isNotEmpty) ...[
         for (var i = 0; i < o.items.length; i++)
           Card(
             child: CheckboxListTile(
               value: st.selected.contains(i),
-              onChanged: (_) => ctl.toggle(i),
+              onChanged: applying ? null : (_) => ctl.toggle(i),
               title: Text(o.items[i].title as String),
               subtitle: Text(
                 '${o.items[i].taskTitle == null ? '' : 'Feladat: ${o.items[i].taskTitle}\n'}'
@@ -496,15 +525,15 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
         Row(
           children: [
             FilledButton.icon(
-              onPressed: st.selected.isEmpty
+              onPressed: (st.selected.isEmpty || applying)
                   ? null
-                  : () => ctl.acceptSelected(),
+                  : () => ctl.acceptSelected(UndoSite.of(context)),
               icon: const Icon(Icons.event_available),
               label: Text('Elfogadom a kijelölteket (${st.selected.length})'),
             ),
             const SizedBox(width: 10),
             TextButton(
-              onPressed: ctl.discardPlan,
+              onPressed: applying ? null : ctl.discardPlan,
               child: const Text('Elvetem'),
             ),
           ],

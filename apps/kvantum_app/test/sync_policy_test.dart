@@ -263,6 +263,101 @@ void main() {
     );
 
     test(
+      'the uploads say how far they are: (0, n) first, then after each',
+      () async {
+        final seen = <(int, int)>[];
+        engine = SyncEngine(
+          repo,
+          remote,
+          onProgress: (d, t) => seen.add((d, t)),
+        );
+        for (var i = 0; i < 3; i++) {
+          await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
+        }
+        await engine.sync(cal);
+        expect(seen, [(0, 3), (1, 3), (2, 3), (3, 3)]);
+      },
+    );
+
+    test('nothing to upload: no progress at all', () async {
+      final seen = <(int, int)>[];
+      engine = SyncEngine(repo, remote, onProgress: (d, t) => seen.add((d, t)));
+      await engine.sync(cal);
+      expect(seen, isEmpty);
+    });
+
+    test(
+      'the total is what this run will try: the cap, not the whole queue',
+      () async {
+        final seen = <(int, int)>[];
+        engine = SyncEngine(
+          repo,
+          remote,
+          maxPushPerRun: 3,
+          onProgress: (d, t) => seen.add((d, t)),
+        );
+        for (var i = 0; i < 7; i++) {
+          await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
+        }
+        await engine.sync(cal);
+        expect(seen.first, (0, 3));
+        expect(seen.last, (3, 3));
+        expect(seen.every((p) => p.$2 == 3), isTrue);
+      },
+    );
+
+    test('what is held back or given up on is not counted', () async {
+      final seen = <(int, int)>[];
+      engine = SyncEngine(
+        repo,
+        remote,
+        maxAttempts: 1,
+        isHeld: (e) => e.id == 'h',
+        onProgress: (d, t) => seen.add((d, t)),
+      );
+      for (final id in ['h', 'p', 'o']) {
+        await repo.saveLocal(ev(id, id, day: 4 + id.codeUnitAt(0) % 7));
+      }
+      final parked = (await repo.pending()).firstWhere(
+        (i) => i.event.id == 'p',
+      );
+      await repo.markFailed(parked, 'x'); // one try is all it gets
+      await engine.sync(cal);
+      expect(seen, [(0, 1), (1, 1)]);
+    });
+
+    test(
+      'an upload Google refuses has been tried: the count moves on',
+      () async {
+        final seen = <(int, int)>[];
+        engine = SyncEngine(
+          repo,
+          remote,
+          onProgress: (d, t) => seen.add((d, t)),
+        );
+        for (var i = 0; i < 3; i++) {
+          await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
+        }
+        remote.failUpsertAt[2] = ItemRejectedError(400, 'invalid', 'bad item');
+        final r = await engine.sync(cal);
+        expect(r.pushed, 2);
+        expect(seen.last, (3, 3));
+      },
+    );
+
+    test('a run that stops on a limit stops reporting there', () async {
+      final seen = <(int, int)>[];
+      engine = SyncEngine(repo, remote, onProgress: (d, t) => seen.add((d, t)));
+      for (var i = 0; i < 4; i++) {
+        await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
+      }
+      remote.failUpsertAt[3] = limit();
+      final r = await engine.sync(cal);
+      expect(r.stoppedEarly, isNotNull); // the run ended early
+      expect(seen, [(0, 4), (1, 4), (2, 4)]);
+    });
+
+    test(
       'a pause between two uploads, none before the first or after the last',
       () async {
         engine = SyncEngine(

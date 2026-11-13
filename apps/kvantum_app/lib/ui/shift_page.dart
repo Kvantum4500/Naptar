@@ -120,6 +120,8 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
 
   Future<void> _create() async {
     final plan = _plan;
+    // (taken now: the day that is shown may not be changed under the work)
+    final from = _from;
     if (plan.isEmpty) {
       setState(() => _msg = 'A ciklusban nincs egyetlen munkanap sem.');
       return;
@@ -143,7 +145,7 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
         for (final e in all)
           if (e.notes == kShiftMarker &&
               !e.isRecurring &&
-              !e.start.isBefore(_from))
+              !e.start.isBefore(from))
             e.id,
       ];
       final fresh = [
@@ -497,181 +499,212 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
     final plan = _plan;
     return Scaffold(
       appBar: AppBar(title: const Text('Beosztás')),
-      body: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                'Add meg az ismétlődő ciklust, a kezdőnapot és hogy meddig készüljön. Minden műszak külön eseményként kerül a naptárba.',
-                style: Theme.of(context).textTheme.bodyMedium,
+      // While the plan is being made nothing else on the page may be touched
+      // (another day or cycle would change what is being made) and the
+      // keyboard has no business here either; a spinner says why.
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          ExcludeFocus(
+            excluding: _busy,
+            child: AbsorbPointer(absorbing: _busy, child: _form(context, plan)),
+          ),
+          if (_busy) const _Working(),
+        ],
+      ),
+    );
+  }
+
+  Widget _form(BuildContext context, List<PlannedShift> plan) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              'Add meg az ismétlődő ciklust, a kezdőnapot és hogy meddig készüljön. Minden műszak külön eseményként kerül a naptárba.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            Text('Ciklus', style: Theme.of(context).textTheme.titleMedium),
+            for (var i = 0; i < _rows.length; i++)
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButton<ShiftType>(
+                      isExpanded: true,
+                      value: _rows[i].type,
+                      items: [
+                        for (final t in ShiftType.values)
+                          DropdownMenuItem(
+                            value: t,
+                            child: Text(_typeLabels[t]!),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() => _rows[i].type = v!),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Kevesebb nap',
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: _rows[i].days > 1
+                        ? () => setState(() => _rows[i].days--)
+                        : null,
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text(
+                      '${_rows[i].days} nap',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Több nap',
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () => setState(() => _rows[i].days++),
+                  ),
+                  IconButton(
+                    tooltip: 'Lépés törlése',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: _rows.length > 1
+                        ? () => setState(() => _rows.removeAt(i))
+                        : null,
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text('Ciklus', style: Theme.of(context).textTheme.titleMedium),
-              for (var i = 0; i < _rows.length; i++)
-                Row(
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => _rows.add(_Row(ShiftType.off, 1))),
+                icon: const Icon(Icons.add),
+                label: const Text('Lépés hozzáadása'),
+              ),
+            ),
+            const Divider(height: 28),
+            Text('Műszakidők', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            _timeRow(
+              'Éjszakai',
+              _nightStart,
+              _nightEnd,
+              (t) => _nightStart = t,
+              (t) => _nightEnd = t,
+            ),
+            const SizedBox(height: 8),
+            _timeRow(
+              'Nappali',
+              _dayStart,
+              _dayEnd,
+              (t) => _dayStart = t,
+              (t) => _dayEnd = t,
+            ),
+            const Divider(height: 28),
+            Row(
+              children: [
+                const SizedBox(width: 140, child: Text('Kezdőnap')),
+                OutlinedButton(
+                  onPressed: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime(_from.year, _from.month, _from.day),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (d != null) {
+                      setState(
+                        () => _from = DateTime.utc(d.year, d.month, d.day),
+                      );
+                    }
+                  },
+                  child: Text(fmtDateLong(_from)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const SizedBox(width: 140, child: Text('Meddig')),
+                DropdownButton<int>(
+                  value: _months,
+                  items: const [
+                    DropdownMenuItem(value: 3, child: Text('3 hónapig')),
+                    DropdownMenuItem(value: 6, child: Text('6 hónapig')),
+                    DropdownMenuItem(value: 12, child: Text('12 hónapig')),
+                  ],
+                  onChanged: (v) => setState(() => _months = v!),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: DropdownButton<ShiftType>(
-                        isExpanded: true,
-                        value: _rows[i].type,
-                        items: [
-                          for (final t in ShiftType.values)
-                            DropdownMenuItem(
-                              value: t,
-                              child: Text(_typeLabels[t]!),
-                            ),
-                        ],
-                        onChanged: (v) => setState(() => _rows[i].type = v!),
+                    Text(
+                      'Előnézet: ${plan.length} műszak',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    for (final s in plan.take(6))
+                      Text(
+                        '${fmtDate(s.start)} ${fmtTime(s.start)} – ${fmtDate(s.end)} ${fmtTime(s.end)}  ${s.title}',
+                        style: const TextStyle(fontSize: 13),
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Kevesebb nap',
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: _rows[i].days > 1
-                          ? () => setState(() => _rows[i].days--)
-                          : null,
-                    ),
-                    SizedBox(
-                      width: 56,
-                      child: Text(
-                        '${_rows[i].days} nap',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Több nap',
-                      icon: const Icon(Icons.add_circle_outline),
-                      onPressed: () => setState(() => _rows[i].days++),
-                    ),
-                    IconButton(
-                      tooltip: 'Lépés törlése',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: _rows.length > 1
-                          ? () => setState(() => _rows.removeAt(i))
-                          : null,
-                    ),
+                    if (plan.length > 6)
+                      const Text('…', style: TextStyle(fontSize: 13)),
                   ],
                 ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () =>
-                      setState(() => _rows.add(_Row(ShiftType.off, 1))),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Lépés hozzáadása'),
-                ),
               ),
-              const Divider(height: 28),
-              Text(
-                'Műszakidők',
-                style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'A kezdőnaptól kezdve a korábban innen generált műszakokat lecseréli. A kézzel felvett eseményeket nem érinti.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _create,
+              icon: const Icon(Icons.event_repeat),
+              label: const Text('Létrehozás a naptárban'),
+            ),
+            if (_msg != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(_msg!),
               ),
-              const SizedBox(height: 8),
-              _timeRow(
-                'Éjszakai',
-                _nightStart,
-                _nightEnd,
-                (t) => _nightStart = t,
-                (t) => _nightEnd = t,
-              ),
-              const SizedBox(height: 8),
-              _timeRow(
-                'Nappali',
-                _dayStart,
-                _dayEnd,
-                (t) => _dayStart = t,
-                (t) => _dayEnd = t,
-              ),
-              const Divider(height: 28),
-              Row(
-                children: [
-                  const SizedBox(width: 140, child: Text('Kezdőnap')),
-                  OutlinedButton(
-                    onPressed: () async {
-                      final d = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime(
-                          _from.year,
-                          _from.month,
-                          _from.day,
-                        ),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2100),
-                      );
-                      if (d != null) {
-                        setState(
-                          () => _from = DateTime.utc(d.year, d.month, d.day),
-                        );
-                      }
-                    },
-                    child: Text(fmtDateLong(_from)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const SizedBox(width: 140, child: Text('Meddig')),
-                  DropdownButton<int>(
-                    value: _months,
-                    items: const [
-                      DropdownMenuItem(value: 3, child: Text('3 hónapig')),
-                      DropdownMenuItem(value: 6, child: Text('6 hónapig')),
-                      DropdownMenuItem(value: 12, child: Text('12 hónapig')),
-                    ],
-                    onChanged: (v) => setState(() => _months = v!),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Előnézet: ${plan.length} műszak',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      for (final s in plan.take(6))
-                        Text(
-                          '${fmtDate(s.start)} ${fmtTime(s.start)} – ${fmtDate(s.end)} ${fmtTime(s.end)}  ${s.title}',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      if (plan.length > 6)
-                        const Text('…', style: TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'A kezdőnaptól kezdve a korábban innen generált műszakokat lecseréli. A kézzel felvett eseményeket nem érinti.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _busy ? null : _create,
-                icon: const Icon(Icons.event_repeat),
-                label: const Text('Létrehozás a naptárban'),
-              ),
-              if (_msg != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(_msg!),
-                ),
-              const SizedBox(height: 20),
-              _summary(),
-              const SizedBox(height: 12),
-              _upcomingList(),
-            ],
-          ),
+            const SizedBox(height: 20),
+            _summary(),
+            const SizedBox(height: 12),
+            _upcomingList(),
+          ],
         ),
       ),
     );
   }
+}
+
+/// Over the page while the plan is being made.
+class _Working extends StatelessWidget {
+  const _Working();
+
+  @override
+  Widget build(BuildContext context) => Positioned.fill(
+    child: ColoredBox(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(semanticsLabel: 'A beosztás készül'),
+            SizedBox(height: 12),
+            Text('A beosztás készül…'),
+          ],
+        ),
+      ),
+    ),
+  );
 }

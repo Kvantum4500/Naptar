@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +15,20 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 
+/// A store whose reading waits for the test while its gate is set: the page is
+/// "busy" for as long as the test keeps it closed.
+class _GatedRepo extends EventRepository {
+  _GatedRepo(super.db);
+  Completer<void>? gate;
+
+  @override
+  Future<List<CalEvent>> all() async {
+    final g = gate;
+    if (g != null) await g.future;
+    return super.all();
+  }
+}
+
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   setUpAll(() async {
@@ -23,7 +39,11 @@ void main() {
   late AppDatabase db;
   late EventRepository repo;
 
-  Future<void> boot(WidgetTester tester, DateTime day) async {
+  Future<void> boot(
+    WidgetTester tester,
+    DateTime day, {
+    EventRepository Function(AppDatabase db)? pageRepo,
+  }) async {
     useSize(tester, size: const Size(900, 1400));
     db = await newDb();
     repo = EventRepository(db);
@@ -31,7 +51,10 @@ void main() {
       app(
         const ShiftPage(),
         db,
-        extra: [selectedDayProvider.overrideWith(() => _Day(day))],
+        extra: [
+          selectedDayProvider.overrideWith(() => _Day(day)),
+          if (pageRepo != null) repoProvider.overrideWithValue(pageRepo(db)),
+        ],
       ),
     );
     await tester.pumpAndSettle();
@@ -67,6 +90,59 @@ void main() {
     expect(s.first.start, floating(2026, 11, 12, 18));
     expect(s.first.end, floating(2026, 11, 13, 6));
     expect(s.every((e) => e.tzid == 'Europe/Budapest'), isTrue);
+    expect(find.textContaining('műszak létrehozva'), findsOneWidget);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('while the plan is made the page is blocked and says why', (
+    tester,
+  ) async {
+    late _GatedRepo gated;
+    await boot(
+      tester,
+      floating(2026, 11, 12),
+      pageRepo: (db) => gated = _GatedRepo(db),
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    final btn = find.text('Létrehozás a naptárban');
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 5000));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(btn);
+    gated.gate = Completer<void>(); // the work waits for the test
+    await tester.tap(btn);
+    await tester.pump();
+
+    // a spinner with its words, over the page
+    expect(find.text('A beosztás készül…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // nothing underneath answers meanwhile (a changed day or cycle would
+    // change what is being made)
+    expect(
+      find.byWidgetPredicate((w) => w is AbsorbPointer && w.absorbing),
+      findsOneWidget,
+    );
+    await tester.tap(find.textContaining('Kezdőnap'), warnIfMissed: false);
+    await tester.pump();
+    expect(find.byType(DatePickerDialog), findsNothing);
+    // ... and the keyboard cannot reach it either
+    expect(
+      tester.widget<ExcludeFocus>(find.byType(ExcludeFocus).first).excluding,
+      isTrue,
+    );
+
+    gated.gate!.complete();
+    gated.gate = null;
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+    // done: the page is live again
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('A beosztás készül…'), findsNothing);
+    expect(
+      find.byWidgetPredicate((w) => w is AbsorbPointer && w.absorbing),
+      findsNothing,
+    );
     expect(find.textContaining('műszak létrehozva'), findsOneWidget);
     await shutdown(tester, db);
   });

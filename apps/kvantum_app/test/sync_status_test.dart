@@ -43,15 +43,20 @@ SyncState _state({
   int parked = 0,
   DateTime? next,
   String? error,
+  int? pending,
+  bool syncing = false,
+  ({int done, int total})? upload,
 }) => SyncState(
   configured: true,
   signedIn: true,
+  syncing: syncing,
   lastSync: DateTime(2026, 11, 11, 12, 30),
-  pending: parked,
+  pending: pending ?? parked,
   parked: parked,
   nextAttempt: next,
   mismatch: mismatch,
   error: error,
+  upload: upload,
 );
 
 Future<_Ctl> _pump(
@@ -116,6 +121,149 @@ DiagSnapshot _snapshot() => DiagSnapshot(
 
 void main() {
   setUpAll(() => initializeDateFormatting('hu'));
+
+  group('progress and the way to try again (UX-11)', () {
+    Future<String?> tooltipOf(WidgetTester tester) async {
+      final menu = tester.widget<PopupMenuButton<String>>(
+        find.byType(PopupMenuButton<String>),
+      );
+      return menu.tooltip;
+    }
+
+    testWidgets('while the changes go up the label says how far they are', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        _state(syncing: true, upload: (done: 3, total: 12), pending: 12),
+      );
+      expect(find.text('Feltöltés 3/12'), findsOneWidget);
+      expect(find.text('Szinkronizál…'), findsNothing);
+    });
+
+    testWidgets('a run that is not uploading just says that it syncs', (
+      tester,
+    ) async {
+      await _pump(tester, _state(syncing: true));
+      expect(find.text('Szinkronizál…'), findsOneWidget);
+    });
+
+    testWidgets('icon only: the progress is in the tooltip', (tester) async {
+      await _pump(
+        tester,
+        _state(syncing: true, upload: (done: 3, total: 12), pending: 12),
+        compact: true,
+      );
+      expect(await tooltipOf(tester), 'Feltöltés 3/12');
+    });
+
+    testWidgets('with an error the tooltip says what it was', (tester) async {
+      await _pump(
+        tester,
+        _state(
+          error: 'Naptár: a Google korlátozza a kéréseket · Drive: rendben',
+        ),
+      );
+      expect(
+        await tooltipOf(tester),
+        startsWith('Hiba: Naptár: a Google korlátozza'),
+      );
+    });
+
+    testWidgets('a long error is cut to a line', (tester) async {
+      await _pump(tester, _state(error: 'x' * 400));
+      final tip = (await tooltipOf(tester))!;
+      expect(tip.length, lessThan(200));
+      expect(tip, endsWith('…'));
+    });
+
+    testWidgets('without an error the tooltip is the plain one', (
+      tester,
+    ) async {
+      await _pump(tester, _state());
+      expect(await tooltipOf(tester), 'Szinkron és fiók');
+    });
+
+    testWidgets('icon only with an error: label and cause together', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        _state(error: 'Naptár: nincs kapcsolat'),
+        compact: true,
+      );
+      expect(await tooltipOf(tester), 'Hiba: Naptár: nincs kapcsolat');
+    });
+
+    testWidgets('the menu starts with how many changes wait', (tester) async {
+      await _pump(tester, _state(pending: 5));
+      await _openMenu(tester);
+      expect(find.text('5 módosítás vár feltöltésre'), findsOneWidget);
+      // it is a line of information, not a button
+      await tester.tap(find.text('5 módosítás vár feltöltésre'));
+      await tester.pumpAndSettle();
+      expect(find.text('Szinkron most'), findsOneWidget); // menu still open
+    });
+
+    testWidgets('... and how many of them are stuck', (tester) async {
+      await _pump(tester, _state(pending: 5, parked: 2));
+      await _openMenu(tester);
+      expect(
+        find.text('5 módosítás vár feltöltésre (2 elakadt)'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('nothing waits: no such line', (tester) async {
+      await _pump(tester, _state(pending: 0));
+      await _openMenu(tester);
+      expect(find.textContaining('vár feltöltésre'), findsNothing);
+    });
+
+    testWidgets('an open menu during an upload shows the progress too', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        _state(syncing: true, upload: (done: 2, total: 9), pending: 9),
+      );
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Feltöltés folyamatban: 2/9'), findsOneWidget);
+    });
+
+    testWidgets(
+      'with an error "Újrapróbálás most" takes the place of "Szinkron most"',
+      (tester) async {
+        final ctl = await _pump(
+          tester,
+          _state(error: 'Naptár: nincs kapcsolat'),
+        );
+        await _openMenu(tester);
+        expect(find.text('Szinkron most'), findsNothing);
+        await tester.tap(find.text('Újrapróbálás most'));
+        await tester.pumpAndSettle();
+        // the same manual run as ever: it forgets the earlier refusals
+        expect(ctl.calls, ['now-manual']);
+      },
+    );
+
+    testWidgets('with given-up uploads it is "Újrapróbálás most" too', (
+      tester,
+    ) async {
+      await _pump(tester, _state(pending: 2, parked: 2));
+      await _openMenu(tester);
+      expect(find.text('Újrapróbálás most'), findsOneWidget);
+      expect(find.text('Szinkron most'), findsNothing);
+    });
+
+    testWidgets('when all is well it stays "Szinkron most"', (tester) async {
+      await _pump(tester, _state());
+      await _openMenu(tester);
+      expect(find.text('Szinkron most'), findsOneWidget);
+      expect(find.text('Újrapróbálás most'), findsNothing);
+    });
+  });
 
   group('the button', () {
     for (final compact in [false, true]) {

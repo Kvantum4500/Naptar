@@ -232,10 +232,11 @@ class AssistantOutcome {
     int? estimatedTokens,
     bool keepMoves = true,
     bool keepDeletions = true,
+    bool keepItems = true,
   }) => AssistantOutcome(
     text: text,
     summary: summary,
-    items: items,
+    items: keepItems ? items : const [],
     dropped: dropped,
     questions: questions,
     deletions: keepDeletions ? deletions : const [],
@@ -256,6 +257,10 @@ class AssistantOutcome {
 
   AssistantOutcome withoutMoves() => _copy(keepMoves: false);
   AssistantOutcome withoutDeletions() => _copy(keepDeletions: false);
+
+  /// The answer after the new events were accepted or the plan was discarded:
+  /// the cards that ask for a decision of their own (deletions, moves) stay.
+  AssistantOutcome withoutItems() => _copy(keepItems: false);
 }
 
 /// What goes to the model first. The real request and the preview are built by

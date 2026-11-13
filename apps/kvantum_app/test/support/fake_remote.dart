@@ -57,6 +57,10 @@ class FakeRemote implements RemoteCalendar {
   /// Fails the Nth upsert (1-based) with this error instead of storing it.
   final Map<int, Object> failUpsertAt = {};
 
+  /// Makes the Nth upsert (1-based) wait for its completer, after it was
+  /// logged in [pushLog]: an upload that is on the wire.
+  final Map<int, Completer<void>> upsertGateAt = {};
+
   /// Makes every delete fail with this error (the pull still works).
   Object? failDelete;
 
@@ -158,6 +162,8 @@ class FakeRemote implements RemoteCalendar {
     upsertCalls++;
     pushLog.add(('upsert', event.id));
     upsertLinks.add(event.googleId);
+    final gate = upsertGateAt[upsertCalls];
+    if (gate != null) await gate.future;
     final failure = failUpsertAt[upsertCalls];
     if (failure != null) throw failure;
     var existing = appIdToGoogle[event.id] ?? event.googleId;
