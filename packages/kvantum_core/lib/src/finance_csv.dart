@@ -52,6 +52,7 @@ String _source(FinSource s) => switch (s) {
   FinSource.manual => 'kézi',
   FinSource.wallet => 'Wallet',
   FinSource.recurring => 'ismétlődő',
+  FinSource.imported => 'import',
 };
 
 /// The transactions of [txs] from [from] to [to] (both days included; both

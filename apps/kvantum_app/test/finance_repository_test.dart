@@ -65,6 +65,222 @@ void main() {
     });
   });
 
+  group('a bank file', () {
+    FinTx imported(String id, int amount, {String merchant = 'Spar'}) => FinTx(
+      id: id,
+      date: floating(2026, 11, 13),
+      amount: amount,
+      kind: FinKind.expense,
+      categoryId: 'cat-food',
+      merchant: merchant,
+      source: FinSource.imported,
+    );
+
+    test(
+      'every id there is, deleted ones too, and only those of entries',
+      () async {
+        await repo.ensureDefaults();
+        await repo.saveTx(tx('a', 100));
+        await repo.saveTx(tx('b', 200));
+        await repo.deleteTx('b');
+        expect(await repo.allTxIds(), {'a', 'b'});
+        expect(await repo.allTxIds(), isNot(contains('cat-food')));
+      },
+    );
+
+    test('an import is written in one go, with a mark for each row', () async {
+      final marks = await repo.addImported([
+        imported('imp-1', 100),
+        imported('imp-2', 200),
+      ]);
+      expect(marks.map((m) => m.id), ['imp-1', 'imp-2']);
+      // (the stamps are the store's own, in order, as for any entry)
+      expect(marks.map((m) => m.updatedAt), [1000, 1001]);
+      final all = await repo.txs();
+      expect(all.map((x) => x.id).toSet(), {'imp-1', 'imp-2'});
+      expect(all.every((x) => x.source == FinSource.imported), isTrue);
+      for (final m in marks) {
+        expect(all.firstWhere((x) => x.id == m.id).updatedAt, m.updatedAt);
+      }
+      // (it travels to the other devices like any entry)
+      expect(await repo.dirtyCount(), 2);
+    });
+
+    test(
+      'what is in the books already is left alone, deleted or not',
+      () async {
+        await repo.saveTx(tx('imp-1', 999));
+        await repo.saveTx(tx('imp-2', 999));
+        await repo.deleteTx('imp-2');
+        final marks = await repo.addImported([
+          imported('imp-1', 1),
+          imported('imp-2', 2),
+          imported('imp-3', 3),
+          imported('imp-3', 4),
+        ]);
+        expect(marks.map((m) => m.id), ['imp-3']);
+        final all = await repo.txs();
+        expect(all.firstWhere((x) => x.id == 'imp-1').amount, 999);
+        expect(all.firstWhere((x) => x.id == 'imp-3').amount, 3);
+        expect(all.any((x) => x.id == 'imp-2'), isFalse);
+      },
+    );
+
+    test('one sync is asked for, not one for every row', () async {
+      var asked = 0;
+      final counted = FinanceRepository(
+        db,
+        clock: () => t++,
+        onChanged: () => asked++,
+      );
+      await counted.addImported([
+        imported('imp-1', 1),
+        imported('imp-2', 2),
+        imported('imp-3', 3),
+      ]);
+      expect(asked, 1);
+      await counted.addImported([imported('imp-1', 1)]);
+      expect(asked, 1);
+      await counted.addImported(const []);
+      expect(asked, 1);
+    });
+
+    test('an import is taken back, all of it', () async {
+      final marks = await repo.addImported([
+        imported('imp-1', 100),
+        imported('imp-2', 200),
+      ]);
+      expect(await repo.undoImport(marks), isTrue);
+      expect(await repo.txs(), isEmpty);
+      // (the marks of the deletion stay, so the other devices learn of it: it
+      // is a newer stamp than the import had, or they would not take it)
+      expect(await repo.allTxIds(), {'imp-1', 'imp-2'});
+      expect(await repo.dirtyCount(), 2);
+      for (final m in marks) {
+        final row = await (db.select(
+          db.finRows,
+        )..where((r) => r.id.equals(m.id))).getSingle();
+        expect(row.deleted, isTrue);
+        expect(row.updatedAt, greaterThan(m.updatedAt));
+      }
+      // (and the same rows do not come back by importing them again)
+      expect(await repo.addImported([imported('imp-1', 100)]), isEmpty);
+      expect(await repo.txs(), isEmpty);
+    });
+
+    test('...only while every row is as the import left it', () async {
+      final marks = await repo.addImported([
+        imported('imp-1', 100),
+        imported('imp-2', 200),
+        imported('imp-3', 300),
+      ]);
+      final edited = (await repo.txs()).firstWhere((x) => x.id == 'imp-2');
+      await repo.saveTx(edited.copyWith(note: 'átírva'));
+      expect(await repo.undoImport(marks), isFalse);
+      expect(await repo.txs(), hasLength(3));
+    });
+
+    test('an undo asks for one sync, a refused one for none', () async {
+      var asked = 0;
+      final counted = FinanceRepository(
+        db,
+        clock: () => t++,
+        onChanged: () => asked++,
+      );
+      final marks = await counted.addImported([
+        imported('imp-1', 100),
+        imported('imp-2', 200),
+      ]);
+      expect(asked, 1);
+      expect(await counted.undoImport(marks), isTrue);
+      expect(asked, 2);
+      expect(await counted.undoImport(marks), isFalse);
+      expect(await counted.undoImport(const []), isFalse);
+      expect(asked, 2);
+    });
+
+    test('...and not twice, and not what is not there', () async {
+      expect(await repo.undoImport(const []), isFalse);
+      expect(await repo.undoImport([const ImportMark('zz', 1)]), isFalse);
+      final marks = await repo.addImported([imported('imp-1', 100)]);
+      expect(await repo.undoImport(marks), isTrue);
+      expect(await repo.undoImport(marks), isFalse);
+    });
+
+    test('the categories remembered for merchants', () async {
+      await repo.ensureDefaults();
+      await repo.rememberMerchant('Spar Kft.', 'cat-food');
+      final m = await repo.merchantCategories([
+        'Spar Kft.',
+        'SPAR kft',
+        'Lidl',
+        '',
+      ]);
+      expect(m, {'Spar Kft.': 'cat-food', 'SPAR kft': 'cat-food'});
+      // (one that has been deleted is not offered)
+      await repo.setMeta('fin.merchantCat', jsonEncode({'lidl': 'cat-gone'}));
+      expect(await repo.merchantCategories(['Lidl']), isEmpty);
+    });
+
+    test(
+      'the columns chosen for a file are found again by its header',
+      () async {
+        final header = ['Dátum', 'Partner', 'Összeg'];
+        final chosen = BankMapping(
+          columns: {
+            BankField.date: 0,
+            BankField.merchant: 1,
+            BankField.amount: 2,
+          },
+          invertSign: true,
+          dateOrder: DateOrder.ymd,
+        );
+        expect(await repo.bankMapping(header), isNull);
+        await repo.rememberBankMapping(header, chosen);
+        final back = (await repo.bankMapping(header))!;
+        expect(back.columns, chosen.columns);
+        expect(back.invertSign, isTrue);
+        expect(back.dateOrder, DateOrder.ymd);
+        // (spaces and capitals in the words do not make another file)
+        expect(
+          await repo.bankMapping([' dátum', 'PARTNER', 'összeg ']),
+          isNotNull,
+        );
+        // (another file is another file)
+        expect(await repo.bankMapping(['Dátum', 'Összeg']), isNull);
+        expect(await repo.bankMapping(['Összeg', 'Partner', 'Dátum']), isNull);
+        // (and it stays on this device)
+        expect(await repo.dirtyCount(), 0);
+      },
+    );
+
+    test('a damaged memory of columns is none', () async {
+      final header = ['Dátum', 'Összeg'];
+      final key = 'fin.bank.${fingerprint(headerSignature(header))}';
+      await repo.setMeta(key, '{"date": 9}');
+      expect(await repo.bankMapping(header), isNull);
+      await repo.setMeta(key, 'nem json');
+      expect(await repo.bankMapping(header), isNull);
+      await repo.setMeta(key, '{"date": 0, "amount": 1}');
+      expect(await repo.bankMapping(header), isNotNull);
+    });
+
+    test('a file without a header is not remembered', () async {
+      await repo.rememberBankMapping(
+        const [],
+        BankMapping(columns: {BankField.date: 0, BankField.amount: 1}),
+      );
+      expect(await repo.bankMapping(const []), isNull);
+      expect(await repo.meta('fin.bank.${fingerprint('')}'), isNull);
+      // (and what might be there is not read for a file without a header)
+      await repo.setMeta(
+        'fin.bank.${fingerprint(headerSignature(const []))}',
+        '{"date": 0, "amount": 1}',
+      );
+      expect(await repo.bankMapping(const []), isNull);
+    });
+  });
+
   group('categories', () {
     test('defaults are created once and need no mailing', () async {
       await repo.ensureDefaults();

@@ -9,6 +9,7 @@ import '../a11y.dart';
 import '../format.dart';
 import '../text_scale.dart';
 import '../theme.dart';
+import 'bank_import_page.dart';
 import 'finance_editors.dart';
 import 'finance_tabs.dart';
 import 'finance_trend_tab.dart';
@@ -59,6 +60,15 @@ class _FinancePageState extends ConsumerState<FinancePage> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Pénzügyek'),
+          actions: [
+            IconButton(
+              tooltip: 'Bank-kivonat importálása (CSV)',
+              icon: const Icon(Icons.upload_file),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const BankImportPage()),
+              ),
+            ),
+          ],
           bottom: const TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
@@ -457,6 +467,7 @@ class TransactionsTab extends ConsumerWidget {
             switch (t.source) {
               FinSource.wallet => Icons.account_balance_wallet_outlined,
               FinSource.recurring => Icons.event_repeat,
+              FinSource.imported => Icons.account_balance_outlined,
               FinSource.manual => income ? Icons.south_west : Icons.north_east,
             },
             color: income ? statusColorsOf(context).ok : scheme.error,

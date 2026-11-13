@@ -29,6 +29,18 @@ class DeletedRef {
   final int updatedAt;
 }
 
+/// A transaction an import wrote: enough to take the import back
+/// ([FinanceRepository.undoImport]).
+class ImportMark {
+  const ImportMark(this.id, this.updatedAt);
+  final String id;
+
+  /// The stamp the import gave it. An import is taken back only while every
+  /// transaction it wrote still has this stamp: one that was edited since (here
+  /// or on another device) is no longer what the import wrote.
+  final int updatedAt;
+}
+
 /// Local finance store. The database file on the device is the source of
 /// truth; [FinRows.dirty] marks what still has to be mailed to other devices.
 class FinanceRepository {
@@ -511,6 +523,103 @@ class FinanceRepository {
 
   Future<void> rememberRate(String currency, double rate) =>
       setMeta(_rateKey(currency), formatRate(rate));
+
+  // ------------------------------------------------------------ bank import
+
+  /// The ids of every transaction there is, deleted ones included: a row of a
+  /// bank file that was imported once and deleted since is not to come back.
+  Future<Set<String>> allTxIds() async {
+    final rows =
+        await (db.selectOnly(db.finRows)
+              ..addColumns([db.finRows.id])
+              ..where(db.finRows.kind.equals(_kTx)))
+            .get();
+    return {for (final r in rows) r.read(db.finRows.id)!};
+  }
+
+  /// The categories remembered for [merchants] (by [merchantKey]), those that
+  /// still exist: merchant as given to category id.
+  Future<Map<String, String>> merchantCategories(
+    Iterable<String> merchants,
+  ) async {
+    final map = await _merchantMap();
+    final alive = {for (final c in await categories()) c.id};
+    return {
+      for (final m in merchants)
+        if (alive.contains(map[merchantKey(m)])) m: map[merchantKey(m)]!,
+    };
+  }
+
+  /// Adds the transactions of a bank file, all or none. One whose id is in the
+  /// books already (deleted or not) is left alone. Returns what was written,
+  /// to take it back ([undoImport]).
+  Future<List<ImportMark>> addImported(List<FinTx> items) async {
+    final marks = await db.transaction(() async {
+      final known = await allTxIds();
+      final out = <ImportMark>[];
+      for (final t in items) {
+        if (!known.add(t.id)) continue;
+        final x = t.copyWith(updatedAt: await _nextStamp(_kTx, t.id));
+        await _put(_kTx, x.id, x.toJson(), x.updatedAt, false);
+        out.add(ImportMark(x.id, x.updatedAt));
+      }
+      return out;
+    });
+    if (marks.isNotEmpty) onChanged?.call();
+    return marks;
+  }
+
+  /// Takes an import back: marks what it wrote as deleted, all or none, and
+  /// only while every one is still exactly as the import left it. Returns
+  /// whether it did.
+  Future<bool> undoImport(List<ImportMark> marks) async {
+    final done = await db.transaction(() async {
+      if (marks.isEmpty) return false;
+      final rows = <FinRow>[];
+      for (final m in marks) {
+        final row =
+            await (db.select(db.finRows)
+                  ..where((t) => t.kind.equals(_kTx) & t.id.equals(m.id)))
+                .getSingleOrNull();
+        if (row == null || row.updatedAt != m.updatedAt) {
+          return false;
+        }
+        rows.add(row);
+      }
+      for (final row in rows) {
+        final t = _parse(row.json, FinTx.fromJson);
+        if (t == null) continue;
+        final x = t.copyWith(
+          deleted: true,
+          updatedAt: await _nextStamp(_kTx, t.id),
+        );
+        await _put(_kTx, x.id, x.toJson(), x.updatedAt, true);
+      }
+      return true;
+    });
+    if (done) onChanged?.call();
+    return done;
+  }
+
+  static String _bankMapKey(List<String> header) =>
+      'fin.bank.${fingerprint(headerSignature(header))}';
+
+  /// The columns chosen the last time for a file with this header, if they
+  /// still fit it. Stays on this device.
+  Future<BankMapping?> bankMapping(List<String> header) async {
+    final text = await meta(_bankMapKey(header));
+    if (text == null) return null;
+    try {
+      return BankMapping.fromJson(jsonDecode(text), header.length);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Future<void> rememberBankMapping(List<String> header, BankMapping m) =>
+      header.isEmpty
+      ? Future.value()
+      : setMeta(_bankMapKey(header), jsonEncode(m.toJson()));
 
   // ------------------------------------------------------ defaults, repeats
 

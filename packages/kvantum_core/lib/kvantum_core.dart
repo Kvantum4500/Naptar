@@ -2,6 +2,9 @@ library;
 
 export 'src/assistant_context.dart';
 export 'src/assistant_models.dart';
+export 'src/bank_import.dart';
+export 'src/bank_mapping.dart';
+export 'src/csv_parse.dart';
 export 'src/daily_summary.dart';
 export 'src/event.dart';
 export 'src/finance.dart';
@@ -27,6 +30,7 @@ export 'src/shift_pattern.dart';
 export 'src/subscriptions.dart';
 export 'src/sync_record.dart';
 export 'src/task_structure.dart';
+export 'src/text_decode.dart';
 export 'src/text_safety.dart';
 export 'src/time.dart';
 export 'src/weather.dart';

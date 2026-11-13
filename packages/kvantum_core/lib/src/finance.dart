@@ -6,7 +6,7 @@ import 'time.dart';
 /// unit in practice) and are always stored positive; [FinKind] gives the sign.
 enum FinKind { income, expense }
 
-enum FinSource { manual, wallet, recurring }
+enum FinSource { manual, wallet, recurring, imported }
 
 const kUncategorized = 'cat-uncategorized';
 
