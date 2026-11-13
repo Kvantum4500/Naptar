@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../backup/backup_card.dart';
 import '../data/backup_ops.dart';
 import '../data/event_repository.dart' show kNaptarCalendar;
 import '../finance/wallet_settings.dart';
@@ -838,6 +839,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ]),
               section('Google Wallet értesítések', const [WalletSettings()]),
               SettingsGroupHeader('Adatok'),
+              section('Automatikus mentés', const [BackupBody()]),
               section('Mentés és visszaállítás', [
                 const Text(
                   'A naptár egy .ics fájlba menthető, amit bármely naptárprogram megnyit. A visszaállítás csak hozzáad vagy frissít, soha nem töröl.',

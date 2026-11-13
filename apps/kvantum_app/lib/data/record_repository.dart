@@ -162,6 +162,34 @@ class RecordRepository {
     await _put(merged, dirty: !merged.sameAs(remote));
   });
 
+  /// Puts the records of a backup back: a record this device does not have is
+  /// added, one it has is merged field by field (what is newer on the device
+  /// stays; a deleted record stays deleted). Everything that changes is queued
+  /// for upload (Drive may have lost it too). With [dryRun] nothing is
+  /// written: the counts say what a restore would do.
+  Future<({int added, int updated, int same})> restoreRecords(
+    Iterable<SyncRecord> incoming, {
+    bool dryRun = false,
+  }) => db.transaction(() async {
+    var added = 0, updated = 0, same = 0;
+    for (final rec in incoming) {
+      final local = await get(rec.kind, rec.id);
+      if (local == null) {
+        if (!dryRun) await _put(rec, dirty: true);
+        added++;
+        continue;
+      }
+      final merged = local.merge(rec);
+      if (merged.sameAs(local)) {
+        same++;
+        continue;
+      }
+      if (!dryRun) await _put(merged, dirty: true);
+      updated++;
+    }
+    return (added: added, updated: updated, same: same);
+  });
+
   /// Queues a record for upload again (e.g. its Drive file disappeared).
   Future<void> markDirty(String kind, String id) =>
       (db.update(db.recordRows)

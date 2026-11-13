@@ -551,8 +551,10 @@ class FinanceRepository {
   /// A backup made by a NEWER version of the app (its `version` is higher than
   /// [financeBackupVersion]) is not read: it may hold what this version does
   /// not know, and restoring half of it would look like success. `newer` says so.
+  ///
+  /// With [dryRun] nothing is written: the counts say what a restore would do.
   Future<({int added, int updated, int skipped, bool recognized, bool newer})>
-  importJson(String text) async {
+  importJson(String text, {bool dryRun = false}) async {
     Object? root;
     try {
       root = jsonDecode(text);
@@ -594,10 +596,14 @@ class FinanceRepository {
                   ..where((t) => t.kind.equals(rec.kind) & t.id.equals(rec.id)))
                 .getSingleOrNull();
         if (existing == null) {
-          await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          if (!dryRun) {
+            await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          }
           added++;
         } else if (rec.updatedAt > existing.updatedAt) {
-          await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          if (!dryRun) {
+            await _put(rec.kind, rec.id, rec.json, rec.updatedAt, rec.deleted);
+          }
           updated++;
         }
       }

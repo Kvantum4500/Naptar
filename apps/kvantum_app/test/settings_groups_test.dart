@@ -78,7 +78,7 @@ void main() {
     bool settle = true,
   }) async {
     // tall, so that the whole list is built at once
-    useSize(tester, size: const Size(900, 4200));
+    useSize(tester, size: const Size(900, 6400));
     db = await newDb();
     ctl = state == null ? null : _Ctl(state);
     await tester.pumpWidget(

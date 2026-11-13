@@ -430,7 +430,7 @@ void main() {
       expect(card(), findsNothing);
 
       // (Settings is a long page: a tall window shows it all)
-      tester.view.physicalSize = const Size(900, 4200);
+      tester.view.physicalSize = const Size(900, 6400);
       Navigator.of(tester.element(find.byType(HomePage)))
           .push(MaterialPageRoute<void>(builder: (_) => const SettingsPage()));
       await tester.pumpAndSettle();

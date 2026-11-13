@@ -94,6 +94,18 @@ void main() {
       return c;
     }
 
+    test('the Drive folder of the account is there while signed in, and gone '
+        'after signing out (the backup copies are kept in it)', () async {
+      final c = make(FakeAuth());
+      final ctl = c.read(syncControllerProvider.notifier);
+      expect(ctl.driveRemote(), isNull);
+      await ctl.signIn();
+      expect(ctl.driveRemote(), same(drive));
+      await ctl.signOut();
+      expect(ctl.driveRemote(), isNull);
+      await db.close();
+    });
+
     test('while the changes go up the state says how far they are; after the '
         'run it says nothing', () async {
       final c = make(FakeAuth());

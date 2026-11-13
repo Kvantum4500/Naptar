@@ -8,6 +8,9 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'backup/backup_key_store.dart';
+import 'backup/backup_providers.dart';
+import 'backup/backup_store.dart';
 import 'data/db.dart';
 import 'data/startup.dart';
 import 'diag/diag_log.dart';
@@ -80,6 +83,12 @@ Future<void> _start(DiagLog log) async {
         }),
         dbPathProvider.overrideWithValue(start.path),
         diagLogProvider.overrideWithValue(log),
+        // the daily backup, in a folder next to the database
+        backupStoreProvider.overrideWithValue(
+          FileBackupStore(Directory(p.join(p.dirname(start.path), 'backups'))),
+        ),
+        autoBackupRunsProvider.overrideWithValue(true),
+        backupKeyStoreProvider.overrideWithValue(SecureBackupKeyStore()),
         // the first-run guide above the calendar (off in tests)
         setupGuideProvider.overrideWithValue(true),
       ],

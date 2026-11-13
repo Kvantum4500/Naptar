@@ -181,6 +181,7 @@ class _Outcome {
 class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   SyncEngine? _engine;
   DriveSyncEngine? _drive;
+  DriveRemote? _driveRemote;
   FinanceMailbox? _mail;
   SyncResetOps? _reset;
   Timer? _timer, _debounce;
@@ -228,12 +229,17 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     }
   }
 
+  /// The Drive folder of the signed-in account, null when signed out (the
+  /// copies of the backup are kept there).
+  DriveRemote? driveRemote() => _driveRemote;
+
   void _stopEverything() {
     _timer?.cancel();
     _timer = null;
     _debounce?.cancel();
     _engine = null;
     _drive = null;
+    _driveRemote = null;
     _mail = null;
     _reset = null;
   }
@@ -273,6 +279,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       log: _log,
     );
     final driveRemote = ref.read(driveFactoryProvider)(tapped);
+    _driveRemote = driveRemote;
     _drive = DriveSyncEngine(records, driveRemote, log: _log);
     final mail = FinanceMailbox(
       ref.read(financeRepoProvider),

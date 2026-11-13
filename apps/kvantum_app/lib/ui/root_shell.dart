@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ai/assistant_page.dart';
 import '../ai/settings_page.dart';
+import '../backup/backup_providers.dart';
 import '../diag/diag_log.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
@@ -61,6 +64,8 @@ class _RootShellState extends ConsumerState<RootShell>
       _collectWallet();
       // the midnight timer may have stood still while the device slept
       ref.read(todayProvider.notifier).refresh();
+      // an app left open for days still gets its daily backup
+      unawaited(_autoBackup().then((_) => _driveBackup()));
     }
   }
 
@@ -75,6 +80,32 @@ class _RootShellState extends ConsumerState<RootShell>
     } catch (e, st) {
       // upkeep is a convenience; never let it disturb the app
       ref.read(diagLogProvider).error('app', 'housekeeping.failed', e, st);
+    }
+    // (the backup comes after the upkeep, which may have tidied the data)
+    await _autoBackup();
+    await _driveBackup();
+  }
+
+  /// The weekly encrypted copy in Drive (does nothing when it is switched off,
+  /// nobody is signed in, or one is recent enough; it is tried again when the
+  /// login comes and when the app comes back).
+  Future<void> _driveBackup() async {
+    if (!ref.read(autoBackupRunsProvider)) return;
+    try {
+      await ref.read(driveBackupProvider).runIfDue();
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('app', 'drive_backup.failed', e, st);
+    }
+  }
+
+  /// The daily backup of everything on this device (does nothing when one is
+  /// recent enough or it is switched off, and writes down what it did).
+  Future<void> _autoBackup() async {
+    if (!ref.read(autoBackupRunsProvider)) return;
+    try {
+      await ref.read(autoBackupProvider).runIfDue();
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('app', 'backup.failed', e, st);
     }
   }
 
@@ -138,6 +169,13 @@ class _RootShellState extends ConsumerState<RootShell>
 
   @override
   Widget build(BuildContext context) {
+    // the weekly Drive copy needs the login: it waits for it
+    ref.listen<bool>(syncControllerProvider.select((s) => s.signedIn), (
+      was,
+      now,
+    ) {
+      if (now && was != true) unawaited(_driveBackup());
+    });
     final tab = ref.watch(shellTabProvider);
     _opened.add(tab);
     final body = IndexedStack(

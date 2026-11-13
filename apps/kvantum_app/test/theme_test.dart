@@ -250,7 +250,7 @@ void main() {
     });
 
     testWidgets('Settings has the selector, and it works', (tester) async {
-      useSize(tester, size: const Size(900, 4200));
+      useSize(tester, size: const Size(900, 6400));
       db = await newDb();
       await tester.pumpWidget(
         app(
