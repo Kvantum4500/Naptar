@@ -8,6 +8,7 @@ import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
+import 'package:kvantum_app/ui/format.dart';
 import 'package:kvantum_app/ui/home_page.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/ui/theme.dart';
@@ -144,33 +145,36 @@ void main() {
     t('a half-hour block has a one-line title, an hour-long one two', (
       tester,
     ) async {
-      const long = 'Fogorvosi kontroll és fogkő eltávolítás';
-      // (long enough to need two lines in a column of 300 pixels)
-      const longer = '$long a belvárosi rendelőben, nagyon hosszú címmel';
+      // both long enough to need two lines in a column of 300 pixels
+      const half =
+          'Fogorvosi kontroll és fogkő eltávolítás a belvárosi rendelőben';
+      const hour =
+          'Fogorvosi kontroll és fogkő eltávolítás a belvárosi rendelőben II.';
       await show(
         tester,
         const HomePage(),
         seed: () => events.saveAll([
           evt(
             'h',
-            long,
+            half,
             floating(2026, 11, 12, 10),
             len: const Duration(minutes: 30),
           ),
-          evt('k', longer, floating(2026, 11, 12, 12)),
+          evt('k', hour, floating(2026, 11, 12, 12)),
         ]),
       );
       await viewAs(tester, CalView.day);
       // 12-point text at a line height of 1.2
-      expect(tester.getSize(find.text(long)).height, closeTo(12 * 1.2, 1));
+      expect(tester.getSize(find.text(half)).height, closeTo(12 * 1.2, 1));
       expect(
-        tester.getSize(find.text(longer)).height,
+        tester.getSize(find.text(hour)).height,
         closeTo(2 * 12 * 1.2, 1.5),
       );
       await done(tester);
     });
 
     t('a short event is tall enough for one line of its title', (tester) async {
+      final handle = tester.ensureSemantics();
       await show(
         tester,
         const HomePage(),
@@ -185,17 +189,14 @@ void main() {
         ]),
       );
       await viewAs(tester, CalView.day);
-      final block = find.ancestor(
-        of: find.text('Rövid hívás'),
-        matching: find.byType(Material),
+      final block = find.bySemanticsLabel(
+        'Rövid hívás, csütörtök, 2026. november 12., 10:00–10:15',
       );
+      expect(block, findsOneWidget);
       // the title's line (28.8) and the margin: more than 15 minutes' worth of
       // an hour (89.6 / 4 = 22.4)
-      final heights = block
-          .evaluate()
-          .map((e) => (e.renderObject! as RenderBox).size.height)
-          .toList();
-      expect(heights.any((h) => h >= 28.8 + 4), isTrue, reason: '$heights');
+      expect(tester.getSize(block).height, greaterThanOrEqualTo(28.8 + 4));
+      handle.dispose();
       await done(tester);
     });
 
@@ -277,6 +278,7 @@ void main() {
     });
 
     t('a colour bar is as tall as its text at 200 %', (tester) async {
+      final handle = tester.ensureSemantics();
       await show(
         tester,
         const HomePage(),
@@ -292,20 +294,51 @@ void main() {
           ),
         ]),
       );
-      final bar = find.ancestor(
-        of: find.text('Konferencia'),
-        matching: find.byType(Material),
-      );
+      final bar = find.bySemanticsLabel('Konferencia, egész nap');
+      expect(bar, findsOneWidget);
       // an 11-point line of 1.1, doubled, and a margin (the bar was 17 pixels)
-      final heights = [
-        for (final e in bar.evaluate())
-          (e.renderObject! as RenderBox).size.height,
-      ];
       expect(
-        heights.any((h) => h >= 24.2 + 4.9 - 0.1),
-        isTrue,
-        reason: '$heights',
+        tester.getSize(bar).height,
+        greaterThanOrEqualTo(24.2 + 4.9 - 0.1),
       );
+      handle.dispose();
+      await done(tester);
+    });
+
+    t('on a short phone the title of the day panel scrolls, not overflows', (
+      tester,
+    ) async {
+      // 400 pixels high, text at 200 %: the panel under the grid (two fifths
+      // of the page) is shorter than its own title (a date on three lines and
+      // the "no events" line)
+      await show(
+        tester,
+        const HomePage(),
+        size: const Size(360, 400),
+        scale: 2.0,
+      );
+      expect(tester.takeException(), isNull);
+      final noEvents = find.text('Nincs esemény erre a napra.');
+      final hours = find.byType(TimeGrid).last;
+      // the title keeps to half of the panel: the hours are not squeezed out
+      expect(tester.getSize(hours).height, greaterThanOrEqualTo(40));
+      // and the rest of the title is one scroll away
+      expect(
+        tester.getRect(noEvents).bottom,
+        greaterThan(tester.getRect(hours).top),
+      );
+      // (the date is taller than what shows of it: grab its top)
+      await tester.dragFrom(
+        tester.getTopLeft(find.text(fmtDateLong(DateTime(2026, 11, 12)))) +
+            const Offset(20, 10),
+        const Offset(0, -200),
+      );
+      await tester.pump();
+      expect(
+        tester.getRect(noEvents).bottom,
+        lessThanOrEqualTo(tester.getRect(hours).top + 0.5),
+      );
+      expect(tester.takeException(), isNull);
       await done(tester);
     });
 
