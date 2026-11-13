@@ -626,3 +626,16 @@ String formatHuf(int amount) {
   }
   return '${neg ? '-' : ''}$b Ft';
 }
+
+/// A short amount for the side of a chart: 500 -> "500 Ft", 20000 -> "20 e Ft",
+/// 1500000 -> "1,5 M Ft" (at most one decimal), negative with a minus sign.
+String compactHuf(int amount) {
+  final sign = amount < 0 ? '-' : '';
+  final a = amount.abs();
+  if (a < 1000) return '$sign$a Ft';
+  // (tenths of a thousand; 999 950 and more is a million, not "1000 e")
+  if (a < 999950) return '$sign${_tenths((a / 100).round())} e Ft';
+  return '$sign${_tenths((a / 100000).round())} M Ft';
+}
+
+String _tenths(int t) => t % 10 == 0 ? '${t ~/ 10}' : '${t ~/ 10},${t % 10}';

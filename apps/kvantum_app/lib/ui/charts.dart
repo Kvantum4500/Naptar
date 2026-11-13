@@ -10,11 +10,17 @@ import 'package:kvantum_core/kvantum_core.dart' show DayValue;
 // says is also said in words (the semantic label and the table of data under
 // the charts), and no meaning rests on colour alone.
 
+/// The usual margin at the left of a plot (it holds a short label, a number).
+const double defaultPlotLeft = 34;
+
+/// The gap between a label at the left of a bar chart and the plot.
+const double barLabelGap = 4;
+
 /// The rectangle the data is drawn in: the picture of [size] without the
 /// margins that hold the labels.
 Rect plotRect(
   Size size, {
-  double left = 34,
+  double left = defaultPlotLeft,
   double right = 8,
   double top = 10,
   double bottom = 24,
@@ -28,6 +34,40 @@ Rect plotRect(
 /// A round upper end for a scale of minutes: the next full hour (at least
 /// two, so that one short workout does not fill the picture).
 int niceMinutesMax(int largest) => math.max(120, ((largest + 59) ~/ 60) * 60);
+
+/// A round upper end for a scale of forints: 1, 1.5, 2, 3, 4, 5, 6 or 8 times a
+/// power of ten (at least 10 000), the first of them that holds [largest]. The
+/// steps are close enough for the tallest bar to fill at least two thirds of
+/// the picture (with 1, 2 and 5 only it could be half).
+int niceMoneyMax(int largest) {
+  for (var step = 10000; ; step *= 10) {
+    for (final tenths in const [10, 15, 20, 30, 40, 50, 60, 80]) {
+      final top = step * tenths ~/ 10;
+      if (top >= largest) return top;
+    }
+  }
+}
+
+/// How wide [text] is when it is drawn in [style] at the text size [scaler]
+/// gives.
+double labelWidth(String text, TextStyle style, TextScaler scaler) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    textScaler: scaler,
+    maxLines: 1,
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
+/// The margin at the left of a bar chart whose label of the top of the scale is
+/// [labelWidth] wide: room for the label, its gap to the plot and a little air
+/// at the edge of the picture, but never less than the usual margin (a label
+/// of "500 e Ft" is wider than that, and would be cut off at the edge).
+double plotLeftFor(double labelWidth) =>
+    math.max(defaultPlotLeft, labelWidth + barLabelGap + 2);
 
 /// The bars of [values] (0 … [maxValue]) in equal slots across [plot], each
 /// bar [gap] of its slot narrower than the slot and standing on the bottom of
@@ -109,8 +149,8 @@ List<ChartLabel> barLabels(
   required String firstLabel,
   required String lastLabel,
 }) => [
-  ChartLabel(maxLabel, Offset(plot.left - 4, plot.top), right: true),
-  ChartLabel('0', Offset(plot.left - 4, plot.bottom), right: true),
+  ChartLabel(maxLabel, Offset(plot.left - barLabelGap, plot.top), right: true),
+  ChartLabel('0', Offset(plot.left - barLabelGap, plot.bottom), right: true),
   ChartLabel(firstLabel, Offset(plot.left, plot.bottom + 12)),
   ChartLabel(lastLabel, Offset(plot.right, plot.bottom + 12), right: true),
 ];
@@ -207,6 +247,7 @@ class BarChartPainter extends CustomPainter {
     required this.maxLabel,
     required this.firstLabel,
     required this.lastLabel,
+    this.plotLeft = defaultPlotLeft,
   });
 
   final List<double> values;
@@ -219,9 +260,12 @@ class BarChartPainter extends CustomPainter {
   final String firstLabel;
   final String lastLabel;
 
+  /// The margin at the left, for the labels of the scale ([plotLeftFor]).
+  final double plotLeft;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final plot = plotRect(size);
+    final plot = plotRect(size, left: plotLeft);
     final grid = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -261,7 +305,8 @@ class BarChartPainter extends CustomPainter {
       old.textScaler != textScaler ||
       old.maxLabel != maxLabel ||
       old.firstLabel != firstLabel ||
-      old.lastLabel != lastLabel;
+      old.lastLabel != lastLabel ||
+      old.plotLeft != plotLeft;
 }
 
 /// Lines on a scale from [min] to [max] (the answers of a check-in: 1 … 5).
@@ -392,6 +437,7 @@ class BarChart extends StatelessWidget {
     required this.lastLabel,
     required this.semanticLabel,
     this.height = 170,
+    this.color,
   });
 
   final List<double> values;
@@ -402,9 +448,16 @@ class BarChart extends StatelessWidget {
   final String semanticLabel;
   final double height;
 
+  /// The colour of the bars; the primary colour of the theme when null.
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final style = (theme.textTheme.labelSmall ?? const TextStyle()).copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final scaler = _chartScaler(context);
     return Semantics(
       container: true,
       image: true,
@@ -417,14 +470,14 @@ class BarChart extends StatelessWidget {
             painter: BarChartPainter(
               values: values,
               maxValue: maxValue,
-              barColor: theme.colorScheme.primary,
+              barColor: color ?? theme.colorScheme.primary,
               gridColor: theme.colorScheme.outlineVariant,
-              labelStyle: (theme.textTheme.labelSmall ?? const TextStyle())
-                  .copyWith(color: theme.colorScheme.onSurfaceVariant),
-              textScaler: _chartScaler(context),
+              labelStyle: style,
+              textScaler: scaler,
               maxLabel: maxLabel,
               firstLabel: firstLabel,
               lastLabel: lastLabel,
+              plotLeft: plotLeftFor(labelWidth(maxLabel, style, scaler)),
             ),
           ),
         ),

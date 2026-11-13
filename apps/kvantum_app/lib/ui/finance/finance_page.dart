@@ -11,6 +11,7 @@ import '../text_scale.dart';
 import '../theme.dart';
 import 'finance_editors.dart';
 import 'finance_tabs.dart';
+import 'finance_trend_tab.dart';
 
 /// The month the Pénzügyek tab is showing (the 1st, floating).
 class FinMonth extends Notifier<DateTime> {
@@ -54,7 +55,7 @@ class _FinancePageState extends ConsumerState<FinancePage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Pénzügyek'),
@@ -63,6 +64,7 @@ class _FinancePageState extends ConsumerState<FinancePage> {
             tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: 'Áttekintés'),
+              Tab(text: 'Trend'),
               Tab(text: 'Tételek'),
               Tab(text: 'Keretek'),
               Tab(text: 'Ismétlődők'),
@@ -73,6 +75,7 @@ class _FinancePageState extends ConsumerState<FinancePage> {
         body: const TabBarView(
           children: [
             OverviewTab(),
+            TrendTab(),
             TransactionsTab(),
             BudgetsTab(),
             RecurringTab(),

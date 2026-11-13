@@ -39,6 +39,141 @@ void main() {
     });
   });
 
+  group('the top of a scale of forints', () {
+    test(
+      '1, 1.5, 2, 3, 4, 5, 6 or 8 times a power of ten, at least 10 000',
+      () {
+        expect(niceMoneyMax(0), 10000);
+        expect(niceMoneyMax(-5), 10000);
+        expect(niceMoneyMax(9999), 10000);
+        expect(niceMoneyMax(10000), 10000);
+        expect(niceMoneyMax(10001), 15000);
+        expect(niceMoneyMax(15000), 15000);
+        expect(niceMoneyMax(15001), 20000);
+        expect(niceMoneyMax(20000), 20000);
+        expect(niceMoneyMax(20001), 30000);
+        expect(niceMoneyMax(30000), 30000);
+        expect(niceMoneyMax(30001), 40000);
+        expect(niceMoneyMax(40000), 40000);
+        expect(niceMoneyMax(40001), 50000);
+        expect(niceMoneyMax(50000), 50000);
+        expect(niceMoneyMax(50001), 60000);
+        expect(niceMoneyMax(60000), 60000);
+        expect(niceMoneyMax(60001), 80000);
+        expect(niceMoneyMax(80000), 80000);
+        expect(niceMoneyMax(80001), 100000);
+        expect(niceMoneyMax(99999), 100000);
+        expect(niceMoneyMax(100001), 150000);
+        expect(niceMoneyMax(124990), 150000);
+        expect(niceMoneyMax(254098), 300000);
+        expect(niceMoneyMax(300000), 300000);
+        expect(niceMoneyMax(500001), 600000);
+        expect(niceMoneyMax(800001), 1000000);
+        expect(niceMoneyMax(2400000), 3000000);
+        expect(niceMoneyMax(1000000000), 1000000000);
+      },
+    );
+
+    test(
+      'it holds the largest, and the tallest bar fills two thirds of it',
+      () {
+        const steps = {10, 15, 20, 30, 40, 50, 60, 80};
+        var before = 0;
+        for (var v = 10001; v < 20000000; v += 997) {
+          final top = niceMoneyMax(v);
+          expect(top, greaterThanOrEqualTo(v), reason: 'holds $v');
+          expect(v / top, greaterThanOrEqualTo(2 / 3), reason: 'fills for $v');
+          expect(top, greaterThanOrEqualTo(before), reason: 'never smaller');
+          before = top;
+          // (a round number: 10, 15, … 80 times a power of ten)
+          var power = top;
+          while (!steps.contains(power) && power % 10 == 0) {
+            power ~/= 10;
+          }
+          expect(steps.contains(power), isTrue, reason: '$top is round');
+        }
+      },
+    );
+  });
+
+  group('the room for the labels of a bar chart', () {
+    const style = TextStyle(fontSize: 11, color: Colors.black);
+
+    double measured(
+      String text, [
+      TextScaler scaler = TextScaler.noScaling,
+      TextStyle textStyle = style,
+    ]) {
+      final p = TextPainter(
+        text: TextSpan(text: text, style: textStyle),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final w = p.width;
+      p.dispose();
+      return w;
+    }
+
+    test('a label is as wide as it is drawn, in its style and text size', () {
+      expect(
+        labelWidth('500 e Ft', style, TextScaler.noScaling),
+        closeTo(measured('500 e Ft'), 0.01),
+      );
+      expect(
+        labelWidth('500 e Ft', style, TextScaler.noScaling),
+        greaterThan(labelWidth('5', style, TextScaler.noScaling)),
+      );
+      // (the test font is as wide as it is tall: a bigger style, a wider label)
+      expect(
+        labelWidth(
+          '500 e Ft',
+          style.copyWith(fontSize: 17),
+          TextScaler.noScaling,
+        ),
+        closeTo(
+          measured(
+            '500 e Ft',
+            TextScaler.noScaling,
+            style.copyWith(fontSize: 17),
+          ),
+          0.01,
+        ),
+      );
+      expect(
+        labelWidth('500 e Ft', style, const TextScaler.linear(1.3)),
+        closeTo(measured('500 e Ft', const TextScaler.linear(1.3)), 0.01),
+      );
+      expect(
+        labelWidth('500 e Ft', style, const TextScaler.linear(1.3)),
+        greaterThan(labelWidth('500 e Ft', style, TextScaler.noScaling)),
+      );
+    });
+
+    test('the margin holds the label, its gap and a little air', () {
+      expect(barLabelGap, 4);
+      expect(plotLeftFor(50), 56);
+      expect(plotLeftFor(88), 94);
+      expect(plotLeftFor(100.5), 106.5);
+    });
+
+    test('but it is never less than the usual margin', () {
+      expect(defaultPlotLeft, 34);
+      expect(plotLeftFor(0), 34);
+      expect(plotLeftFor(11), 34);
+      expect(plotLeftFor(28), 34);
+      expect(plotLeftFor(28.5), 34.5);
+    });
+
+    test(
+      'the usual margin is the one of a plot that is not told otherwise',
+      () {
+        expect(plotRect(const Size(300, 200)).left, defaultPlotLeft);
+        expect(plotRect(const Size(300, 200), left: 70).left, 70);
+      },
+    );
+  });
+
   group('the bars', () {
     const plot = Rect.fromLTWH(0, 0, 400, 100);
 
@@ -337,6 +472,7 @@ void main() {
       String max = '2 óra',
       String first = '11.02.',
       String last = 'ez a hét',
+      double plotLeft = defaultPlotLeft,
     }) => BarChartPainter(
       values: values ?? [30, 0, 90],
       maxValue: maxValue,
@@ -347,6 +483,7 @@ void main() {
       maxLabel: max,
       firstLabel: first,
       lastLabel: last,
+      plotLeft: plotLeft,
     );
 
     test(
@@ -373,6 +510,7 @@ void main() {
       expect(a.shouldRepaint(bar(max: '3 óra')), isTrue);
       expect(a.shouldRepaint(bar(first: '11.09.')), isTrue);
       expect(a.shouldRepaint(bar(last: 'most')), isTrue);
+      expect(a.shouldRepaint(bar(plotLeft: 50)), isTrue);
     });
 
     LineChartPainter line({
@@ -544,6 +682,7 @@ void main() {
       Color color = blue,
       TextScaler scaler = TextScaler.noScaling,
       TextStyle labelStyle = style,
+      double plotLeft = defaultPlotLeft,
     }) => BarChartPainter(
       values: values,
       maxValue: maxValue,
@@ -554,6 +693,7 @@ void main() {
       maxLabel: '2 óra',
       firstLabel: '11.02.',
       lastLabel: 'ez a hét',
+      plotLeft: plotLeft,
     );
 
     group('bars', () {
@@ -691,6 +831,44 @@ void main() {
           first.left,
           closeTo(barRects(area, [30, 0, 90], 120)[0].left, 0.01),
         );
+      });
+
+      test('the margin at the left is the one it is given', () {
+        final area = plotRect(size, left: 80);
+        final calls = record(bars(plotLeft: 80));
+        final lines = only(calls, #drawLine);
+        expect(lines, hasLength(3));
+        for (final line in lines) {
+          expect((line.positionalArguments[0] as Offset).dx, 80);
+          expect((line.positionalArguments[1] as Offset).dx, area.right);
+        }
+        final rrects = only(calls, #drawRRect);
+        final first = rrects.first.positionalArguments[0] as RRect;
+        expect(
+          first.left,
+          closeTo(barRects(area, [30, 0, 90], 120)[0].left, 0.01),
+        );
+        final texts = only(calls, #drawParagraph);
+        expectText(texts[0], '2 óra', Offset(80 - 4, area.top), right: true);
+        expectText(texts[1], '0', Offset(80 - 4, area.bottom), right: true);
+        expectText(texts[2], '11.02.', Offset(80, area.bottom + 12));
+        expectText(
+          texts[3],
+          'ez a hét',
+          Offset(area.right, area.bottom + 12),
+          right: true,
+        );
+      });
+
+      test('a margin wider than the picture leaves an empty plot, no more', () {
+        final calls = record(bars(plotLeft: 500));
+        for (final line in only(calls, #drawLine)) {
+          expect((line.positionalArguments[0] as Offset).dx, 500);
+          expect((line.positionalArguments[1] as Offset).dx, 500);
+        }
+        for (final bar in only(calls, #drawRRect)) {
+          expect((bar.positionalArguments[0] as RRect).width, 0);
+        }
       });
 
       test('first the grid, then the bars, then the words', () {
@@ -1211,6 +1389,94 @@ void main() {
       expect(painter.to, d(2026, 11, 11));
       expect(painter.firstLabel, '11.01.');
       expect(painter.lastLabel, 'ma');
+    });
+
+    testWidgets('a bar chart can have a colour of its own', (tester) async {
+      await show(
+        tester,
+        const BarChart(
+          values: [1],
+          maxValue: 2,
+          maxLabel: 'a',
+          firstLabel: 'b',
+          lastLabel: 'c',
+          semanticLabel: 'd',
+          color: Colors.red,
+        ),
+      );
+      final painter = paintOf(tester, BarChart).painter! as BarChartPainter;
+      expect(painter.barColor, Colors.red);
+    });
+
+    testWidgets(
+      'a bar chart leaves the room its top label needs, at any size',
+      (tester) async {
+        for (final scale in [1.0, 1.3, 2.0]) {
+          await show(
+            tester,
+            const BarChart(
+              values: [1],
+              maxValue: 2,
+              maxLabel: '1500 e Ft',
+              firstLabel: '2025.12.',
+              lastLabel: 'ez a hónap',
+              semanticLabel: 'd',
+            ),
+            scale: scale,
+          );
+          final picture = find.descendant(
+            of: find.byType(BarChart),
+            matching: find.byType(CustomPaint),
+          );
+          final painter = paintOf(tester, BarChart).painter! as BarChartPainter;
+          final wide = labelWidth(
+            '1500 e Ft',
+            painter.labelStyle,
+            painter.textScaler,
+          );
+          expect(painter.plotLeft, plotLeftFor(wide), reason: 'scale $scale');
+          expect(painter.plotLeft, greaterThan(defaultPlotLeft));
+          // nothing it draws is cut off at an edge of the picture
+          final width = tester.getSize(picture).width;
+          final canvas = TestRecordingCanvas();
+          painter.paint(canvas, tester.getSize(picture));
+          var words = 0;
+          for (final call in canvas.invocations) {
+            if (call.invocation.memberName != #drawParagraph) continue;
+            words++;
+            final paragraph =
+                call.invocation.positionalArguments[0] as ui.Paragraph;
+            final at = call.invocation.positionalArguments[1] as Offset;
+            expect(
+              at.dx,
+              greaterThanOrEqualTo(0),
+              reason: 'left, scale $scale',
+            );
+            expect(
+              at.dx + paragraph.longestLine,
+              lessThanOrEqualTo(width + 0.01),
+              reason: 'right, scale $scale',
+            );
+          }
+          expect(words, 4);
+        }
+      },
+    );
+
+    testWidgets('a short label keeps the usual margin', (tester) async {
+      await show(
+        tester,
+        const BarChart(
+          values: [1],
+          maxValue: 2,
+          maxLabel: 'a',
+          firstLabel: 'b',
+          lastLabel: 'c',
+          semanticLabel: 'd',
+        ),
+      );
+      final painter = paintOf(tester, BarChart).painter! as BarChartPainter;
+      expect(painter.plotLeft, defaultPlotLeft);
     });
 
     testWidgets('the picture is as wide as the room and as tall as asked', (
