@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Release builds need this explicitly (Flutter adds it only for debug). -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Lets the in-app updater hand the downloaded APK to the system installer. -->
@@ -8,6 +9,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Approximate location only: weather for the place the assistant plans in. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- The file-opening plugin (open_filex) asks for access to the user's
+         files, photos, videos and music in its own manifest. This app opens
+         one file only, the downloaded update, from its own cache folder, where
+         the plugin asks for no permission at all (it checks the path first):
+         so none of these is needed, and none is requested (SEC-14). The
+         marker removes them from the merged manifest. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
     <!-- No Google/device backup of the app data: the database holds the finance
          ledger and the secure-storage keys cannot be restored on another phone
          anyway. Recovery goes through the Google account (calendar, Drive) and
