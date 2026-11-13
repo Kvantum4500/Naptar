@@ -31,6 +31,40 @@ void main() {
         categoryId: cat,
       );
 
+  group('the rate of a currency', () {
+    test('the one last used is remembered for each currency', () async {
+      expect(await repo.lastRate('EUR'), isNull);
+      await repo.rememberRate('EUR', 399.5);
+      await repo.rememberRate('USD', 380);
+      expect(await repo.lastRate('EUR'), 399.5);
+      expect(await repo.lastRate('USD'), 380.0);
+      expect(await repo.lastRate('GBP'), isNull);
+      await repo.rememberRate('EUR', 401.2345);
+      expect(await repo.lastRate('EUR'), 401.2345);
+      expect(await repo.lastRate('USD'), 380.0);
+    });
+
+    test('a rate with three decimals comes back as it was', () async {
+      // ("2,512" must not be read as 2512: a rate has decimals of its own)
+      await repo.rememberRate('JPY', 2.512);
+      expect(await repo.lastRate('JPY'), 2.512);
+      await repo.rememberRate('EUR', 399.123);
+      expect(await repo.lastRate('EUR'), 399.123);
+    });
+
+    test('it stays on this device: nothing is mailed for it', () async {
+      await repo.rememberRate('EUR', 399.5);
+      expect(await repo.dirtyCount(), 0);
+    });
+
+    test('a damaged value is no rate', () async {
+      await repo.setMeta('fin.rate.EUR', 'abc');
+      expect(await repo.lastRate('EUR'), isNull);
+      await repo.setMeta('fin.rate.EUR', '-5');
+      expect(await repo.lastRate('EUR'), isNull);
+    });
+  });
+
   group('categories', () {
     test('defaults are created once and need no mailing', () async {
       await repo.ensureDefaults();
@@ -356,6 +390,21 @@ void main() {
         await db2.close();
       },
     );
+
+    test('a transaction in another currency comes back with it', () async {
+      const eur = FinForeign(currency: 'EUR', cents: 1240, rate: 399.5);
+      await repo.saveTx(tx('a', 4954).copyWith(foreign: eur));
+      await repo.saveTx(tx('b', 700));
+      final text = await repo.exportJson();
+      final db2 = await newDb();
+      final repo2 = FinanceRepository(db2, clock: () => 5000);
+      await repo2.importJson(text);
+      final back = {for (final x in await repo2.txs()) x.id: x};
+      expect(back['a']!.foreign, eur);
+      expect(back['a']!.amount, 4954);
+      expect(back['b']!.foreign, isNull);
+      await db2.close();
+    });
 
     test('import never overwrites newer data and never deletes', () async {
       await repo.saveTx(tx('a', 500)); // updatedAt 1000

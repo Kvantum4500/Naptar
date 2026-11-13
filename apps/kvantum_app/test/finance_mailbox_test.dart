@@ -412,6 +412,29 @@ void main() {
   });
 
   test(
+    'a transaction in another currency arrives with what it was paid in',
+    () async {
+      await introduce();
+      const eur = FinForeign(currency: 'EUR', cents: 1240, rate: 399.5);
+      await a.repo.saveTx(
+        FinTx(
+          id: 'fx1',
+          date: floating(2026, 11, 8),
+          amount: 4954,
+          kind: FinKind.expense,
+          merchant: 'Spar Wien',
+          foreign: eur,
+        ),
+      );
+      await a.mail.sync();
+      await b.mail.sync();
+      final got = (await b.repo.txs()).single;
+      expect(got.amount, 4954);
+      expect(got.foreign, eur);
+    },
+  );
+
+  test(
     'generated recurring items are derived on each device, not mailed',
     () async {
       await introduce();

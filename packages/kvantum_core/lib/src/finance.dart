@@ -1,3 +1,4 @@
+import 'finance_currency.dart';
 import 'time.dart';
 
 /// Personal finance model: transactions, categories, budgets, recurring
@@ -50,12 +51,17 @@ class FinTx {
     this.source = FinSource.manual,
     this.updatedAt = 0,
     this.deleted = false,
+    this.foreign,
   });
 
   final String id;
 
   /// Floating date (y/m/d, UTC-flagged).
   final DateTime date;
+
+  /// Whole forints. For a transaction paid in another currency it is what that
+  /// was worth ([foreign] has the rest), so every sum goes on counting in
+  /// forints.
   final int amount;
   final FinKind kind;
   final String categoryId;
@@ -64,6 +70,9 @@ class FinTx {
   final FinSource source;
   final int updatedAt;
   final bool deleted;
+
+  /// What it was paid in, when that was not forints.
+  final FinForeign? foreign;
 
   /// Signed amount: income positive, expense negative.
   int get signed => kind == FinKind.income ? amount : -amount;
@@ -77,6 +86,8 @@ class FinTx {
     String? note,
     int? updatedAt,
     bool? deleted,
+    FinForeign? foreign,
+    bool clearForeign = false,
   }) => FinTx(
     id: id,
     date: date ?? this.date,
@@ -88,6 +99,7 @@ class FinTx {
     source: source,
     updatedAt: updatedAt ?? this.updatedAt,
     deleted: deleted ?? this.deleted,
+    foreign: clearForeign ? null : foreign ?? this.foreign,
   );
 
   Map<String, Object?> toJson() => {
@@ -101,6 +113,7 @@ class FinTx {
     'src': source.name,
     'upd': updatedAt,
     'del': deleted,
+    if (foreign case final f?) 'fx': f.toJson(),
   };
 
   /// Null when the record is unusable (no id, date or a positive amount).
@@ -126,6 +139,7 @@ class FinTx {
       ),
       updatedAt: _int(j['upd']),
       deleted: j['del'] == true,
+      foreign: FinForeign.fromJson(j['fx']),
     );
   }
 }

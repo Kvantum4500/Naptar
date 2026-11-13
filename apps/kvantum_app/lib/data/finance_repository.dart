@@ -498,6 +498,20 @@ class FinanceRepository {
 
   Future<bool> hasTx(String id) => _exists(_kTx, id);
 
+  // ------------------------------------------------------------ currencies
+
+  static String _rateKey(String currency) => 'fin.rate.$currency';
+
+  /// The rate (forints for one unit) last used for [currency], if any: the
+  /// editor offers it for the next transaction in that currency.
+  Future<double?> lastRate(String currency) async {
+    final text = await meta(_rateKey(currency));
+    return text == null ? null : parseRate(text);
+  }
+
+  Future<void> rememberRate(String currency, double rate) =>
+      setMeta(_rateKey(currency), formatRate(rate));
+
   // ------------------------------------------------------ defaults, repeats
 
   Future<bool> _exists(String kind, String id) async =>

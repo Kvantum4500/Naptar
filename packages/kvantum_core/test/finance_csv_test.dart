@@ -13,6 +13,7 @@ FinTx tx(
   String note = '',
   FinSource source = FinSource.manual,
   bool deleted = false,
+  FinForeign? foreign,
 }) => FinTx(
   id: id,
   date: date,
@@ -23,6 +24,7 @@ FinTx tx(
   note: note,
   source: source,
   deleted: deleted,
+  foreign: foreign,
 );
 
 String name(String id) => id == 'cat-food' ? 'Élelmiszer' : id;
@@ -35,10 +37,11 @@ void main() {
       final csv = exportTxCsv(const [], categoryName: name);
       expect(
         csv,
-        '﻿Dátum;Típus;Összeg (Ft);Kategória;Kereskedő;Megjegyzés;Forrás\r\n',
+        '﻿Dátum;Típus;Összeg (Ft);Eredeti összeg;Pénznem;Árfolyam (Ft);'
+        'Kategória;Kereskedő;Megjegyzés;Forrás\r\n',
       );
       expect(csv.startsWith('﻿'), isTrue);
-      expect(finCsvHeader, hasLength(7));
+      expect(finCsvHeader, hasLength(10));
     });
 
     test(
@@ -63,8 +66,8 @@ void main() {
           ),
         ], categoryName: name);
         expect(lines(csv).skip(1).take(2), [
-          '2026-11-03;Kiadás;-4500;Élelmiszer;Spar;hétvégi;Wallet',
-          '2026-11-05;Bevétel;300000;cat-salary;Munkahely;;kézi',
+          '2026-11-03;Kiadás;-4500;;;;Élelmiszer;Spar;hétvégi;Wallet',
+          '2026-11-05;Bevétel;300000;;;;cat-salary;Munkahely;;kézi',
         ]);
         expect(lines(csv).last, '');
       },
@@ -76,6 +79,34 @@ void main() {
       // (an ISO year has four digits, whatever the year is)
       final old = exportTxCsv([tx('a', d(999, 1, 2), 1)], categoryName: name);
       expect(lines(old)[1], startsWith('0999-01-02;'));
+    });
+
+    test('a transaction in another currency: what it was paid in, signed', () {
+      const eur = FinForeign(currency: 'EUR', cents: 1240, rate: 399.5);
+      final csv = exportTxCsv([
+        tx('a', d(2026, 11, 3), 4954, merchant: 'Spar Wien', foreign: eur),
+        tx(
+          'b',
+          d(2026, 11, 4),
+          2000,
+          kind: FinKind.income,
+          merchant: 'Vissza',
+          foreign: const FinForeign(currency: 'USD', cents: 500, rate: 400),
+        ),
+        tx(
+          'c',
+          d(2026, 11, 5),
+          1000,
+          foreign: const FinForeign(currency: 'EUR', cents: 250, rate: 400),
+        ),
+        tx('d', d(2026, 11, 6), 700),
+      ], categoryName: name);
+      expect(lines(csv).skip(1).take(4), [
+        '2026-11-03;Kiadás;-4954;-12,40;EUR;399,5;Élelmiszer;Spar Wien;;kézi',
+        '2026-11-04;Bevétel;2000;5;USD;400;Élelmiszer;Vissza;;kézi',
+        '2026-11-05;Kiadás;-1000;-2,50;EUR;400;Élelmiszer;;;kézi',
+        '2026-11-06;Kiadás;-700;;;;Élelmiszer;;;kézi',
+      ]);
     });
 
     test('where it comes from, in words', () {
@@ -214,7 +245,7 @@ void main() {
       ], categoryName: (id) => id);
       expect(
         lines(csv)[1],
-        '2026-11-03;Kiadás;-100;\'=cmd;"\'=HYPERLINK(""x"")";"a;b";kézi',
+        '2026-11-03;Kiadás;-100;;;;\'=cmd;"\'=HYPERLINK(""x"")";"a;b";kézi',
       );
     });
 

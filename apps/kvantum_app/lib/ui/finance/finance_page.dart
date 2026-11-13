@@ -467,6 +467,7 @@ class TransactionsTab extends ConsumerWidget {
           ),
           subtitle: Text(
             [
+              if (t.foreign != null) foreignLine(t.foreign!),
               if (t.merchant.isNotEmpty) categoryName(cats, t.categoryId),
               if (t.note.isNotEmpty) t.note,
             ].join(' · '),

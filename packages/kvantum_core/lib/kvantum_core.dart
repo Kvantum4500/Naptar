@@ -6,6 +6,7 @@ export 'src/daily_summary.dart';
 export 'src/event.dart';
 export 'src/finance.dart';
 export 'src/finance_csv.dart';
+export 'src/finance_currency.dart';
 export 'src/finance_trends.dart';
 export 'src/free_slots.dart';
 export 'src/handbook.dart';

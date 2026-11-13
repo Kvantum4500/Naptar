@@ -37,6 +37,14 @@ final _amountFormatters = [
   FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')),
 ];
 
+/// An amount in another currency or a rate: digits, a space, a point or a comma.
+final _decimalFormatters = [
+  FilteringTextInputFormatter.allow(RegExp(r'[0-9 .,]')),
+];
+
+// (the value of the "other currency" choice: it is not a code)
+const _otherCurrency = '*';
+
 /// Asks for one amount (e.g. a goal deposit or a budget). Null on cancel; -1
 /// when the optional [clearLabel] button was pressed.
 Future<int?> askAmount(
@@ -191,8 +199,20 @@ class TxEditor extends ConsumerStatefulWidget {
 
 class _TxEditorState extends ConsumerState<TxEditor> {
   late final _amount = TextEditingController(
-    text: widget.existing == null ? '' : '${widget.existing!.amount}',
+    text: switch (widget.existing) {
+      null => '',
+      final t when t.foreign != null => plainCents(t.foreign!.cents),
+      final t => '${t.amount}',
+    },
   );
+  late final _rate = TextEditingController(
+    text: widget.existing?.foreign == null
+        ? ''
+        : formatRate(widget.existing!.foreign!.rate),
+  );
+
+  /// The currency it was paid in; empty for forints.
+  late String _currency = widget.existing?.foreign?.currency ?? '';
   late final _merchant = TextEditingController(
     text: widget.existing?.merchant ?? '',
   );
@@ -202,34 +222,135 @@ class _TxEditorState extends ConsumerState<TxEditor> {
       widget.existing?.date ?? widget.day ?? ref.read(todayProvider);
   late String _cat = widget.existing?.categoryId ?? kUncategorized;
   String? _error;
+  String? _rateError;
 
   @override
   void dispose() {
     _amount.dispose();
+    _rate.dispose();
     _merchant.dispose();
     _note.dispose();
     super.dispose();
   }
 
+  /// The forints a foreign amount is worth as it stands in the fields, or null
+  /// when something is missing.
+  int? get _forints {
+    final cents = parseCents(_amount.text);
+    final rate = parseRate(_rate.text);
+    if (cents == null || cents <= 0 || rate == null) return null;
+    return forintsFor(cents, rate);
+  }
+
+  Future<void> _chooseCurrency(String? choice) async {
+    if (choice == null) return;
+    var next = choice;
+    if (choice == _otherCurrency) {
+      final text = await askText(
+        context,
+        title: 'Másik pénznem',
+        label: 'A pénznem kódja (pl. AUD)',
+      );
+      if (text == null || !mounted) return;
+      final code = normalizeCurrency(text);
+      if (code == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'A pénznem kódja három betű (pl. AUD), a forint nem.',
+            ),
+          ),
+        );
+        return;
+      }
+      next = code;
+    }
+    if (next == _currency) return;
+    final was = _currency;
+    final repo = ref.read(financeRepoProvider);
+    setState(() {
+      _currency = next;
+      _error = null;
+      _rateError = null;
+      if (next.isEmpty) {
+        // back to forints: what it was worth stands in the field
+        final ft = _forints;
+        _amount.text = ft == null ? '' : '$ft';
+        // (the rate of the one left is not the rate of the next)
+        _rate.clear();
+      } else if (was.isEmpty) {
+        // (the rate field is empty while the amount is in forints)
+        _amount.clear();
+      } else {
+        _rate.clear();
+      }
+    });
+    if (next.isNotEmpty) {
+      // the rate last used for it is the first guess
+      final rate = await repo.lastRate(next);
+      if (mounted && _currency == next && _rate.text.isEmpty && rate != null) {
+        setState(() => _rate.text = formatRate(rate));
+      }
+    }
+  }
+
   Future<void> _save() async {
-    final v = parseAmount(_amount.text);
-    if (v == null) {
-      setState(() => _error = 'Adj meg egy pozitív összeget');
-      return;
+    final int amount;
+    FinForeign? foreign;
+    if (_currency.isEmpty) {
+      final v = parseAmount(_amount.text);
+      if (v == null) {
+        setState(() => _error = 'Adj meg egy pozitív összeget');
+        return;
+      }
+      amount = v;
+    } else {
+      final cents = parseCents(_amount.text);
+      final rate = parseRate(_rate.text);
+      if (cents == null || cents <= 0) {
+        setState(() => _error = 'Adj meg egy pozitív összeget');
+        return;
+      }
+      if (rate == null) {
+        setState(() => _rateError = 'Adj meg árfolyamot (pl. 400)');
+        return;
+      }
+      amount = forintsFor(cents, rate);
+      if (amount < 1) {
+        setState(() => _error = 'Forintban ez nem érné el az 1 Ft-ot');
+        return;
+      }
+      if (cents > maxForeignCents || amount > 100000000000) {
+        setState(() => _error = 'Túl nagy összeg');
+        return;
+      }
+      foreign = FinForeign(currency: _currency, cents: cents, rate: rate);
     }
     final repo = ref.read(financeRepoProvider);
     final old = widget.existing;
     final t =
-        (old ?? FinTx(id: repo.newId(), date: _date, amount: v, kind: _kind))
+        (old ??
+                FinTx(
+                  id: repo.newId(),
+                  date: _date,
+                  amount: amount,
+                  kind: _kind,
+                ))
             .copyWith(
               date: _date,
-              amount: v,
+              amount: amount,
               kind: _kind,
               categoryId: _cat,
               merchant: _merchant.text.trim(),
               note: _note.text.trim(),
+              foreign: foreign,
+              clearForeign: foreign == null,
             );
     await repo.saveTx(t);
+    // the next payment in this currency starts from this rate
+    if (foreign != null) {
+      await repo.rememberRate(foreign.currency, foreign.rate);
+    }
     // the next payment at the same merchant gets this category by itself
     if (t.merchant.isNotEmpty && t.categoryId != kUncategorized) {
       await repo.rememberMerchant(t.merchant, t.categoryId);
@@ -254,6 +375,35 @@ class _TxEditorState extends ConsumerState<TxEditor> {
       );
     }
     if (mounted) Navigator.pop(context);
+  }
+
+  Widget _currencyPicker() {
+    final known = commonCurrencies.any((c) => c.$1 == _currency);
+    return InputDecorator(
+      decoration: const InputDecoration(labelText: 'Pénznem'),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          key: const Key('tx-currency'),
+          value: _currency,
+          isExpanded: true,
+          isDense: true,
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Ft – forint')),
+            for (final (code, name) in commonCurrencies)
+              DropdownMenuItem(value: code, child: Text('$code – $name')),
+            // (a code that was typed in: it stays in the list while it is
+            // chosen)
+            if (_currency.isNotEmpty && !known)
+              DropdownMenuItem(value: _currency, child: Text(_currency)),
+            const DropdownMenuItem(
+              value: _otherCurrency,
+              child: Text('Másik pénznem…'),
+            ),
+          ],
+          onChanged: _chooseCurrency,
+        ),
+      ),
+    );
   }
 
   @override
@@ -300,19 +450,49 @@ class _TxEditorState extends ConsumerState<TxEditor> {
                     }),
                   ),
                   const SizedBox(height: 12),
+                  _currencyPicker(),
                   TextField(
                     controller: _amount,
                     autofocus: widget.existing == null,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: _amountFormatters,
+                    keyboardType: _currency.isEmpty
+                        ? TextInputType.number
+                        : const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: _currency.isEmpty
+                        ? _amountFormatters
+                        : _decimalFormatters,
                     decoration: InputDecoration(
-                      labelText: 'Összeg (Ft)',
+                      labelText:
+                          'Összeg (${_currency.isEmpty ? 'Ft' : _currency})',
                       errorText: _error,
                     ),
-                    onChanged: (_) {
-                      if (_error != null) setState(() => _error = null);
-                    },
+                    onChanged: (_) => setState(() => _error = null),
                   ),
+                  if (_currency.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      key: const Key('tx-rate'),
+                      controller: _rate,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: _decimalFormatters,
+                      decoration: InputDecoration(
+                        labelText: 'Árfolyam (Ft / $_currency)',
+                        errorText: _rateError,
+                      ),
+                      onChanged: (_) => setState(() => _rateError = null),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _forints == null
+                            ? 'Add meg az összeget és az árfolyamot.'
+                            : '= ${formatHuf(_forints!)}',
+                        key: const Key('tx-forints'),
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.event),
@@ -372,22 +552,33 @@ class _TxEditorState extends ConsumerState<TxEditor> {
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              if (widget.existing != null)
-                TextButton.icon(
-                  onPressed: _delete,
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text('Törlés'),
+          // (a wrap, not a row: on a narrow phone, and at a large text size,
+          // the three buttons do not fit side by side; as wide as the room
+          // there is, so that they stay at the right)
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (widget.existing != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: TextButton.icon(
+                      onPressed: _delete,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Törlés'),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Mégse'),
                 ),
-              const Spacer(),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Mégse'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: _save, child: const Text('Mentés')),
-            ],
+                FilledButton(onPressed: _save, child: const Text('Mentés')),
+              ],
+            ),
           ),
         ],
       ),

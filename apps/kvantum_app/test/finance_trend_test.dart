@@ -938,8 +938,8 @@ void main() {
         expect(f.title, 'Tételek exportálása');
         expect(f.text, startsWith('﻿Dátum;Típus;Összeg (Ft);'));
         expect(rows(f.text), [
-          '2026-11-03;Kiadás;-50000;Élelmiszer;Spar;;kézi',
-          '2026-11-05;Kiadás;-4990;Előfizetések;Netflix;;Wallet',
+          '2026-11-03;Kiadás;-50000;;;;Élelmiszer;Spar;;kézi',
+          '2026-11-05;Kiadás;-4990;;;;Előfizetések;Netflix;;Wallet',
         ]);
         expect(find.text('A tételek elmentve (CSV).'), findsOneWidget);
         await shutdown(tester, db);
@@ -955,7 +955,7 @@ void main() {
         await pick(tester, 'export-month');
         final f = io.saved.single;
         expect(f.name, 'kvantum-penzugyek-2026-03.csv');
-        expect(rows(f.text), ['2026-03-03;Kiadás;-100;Élelmiszer;;;kézi']);
+        expect(rows(f.text), ['2026-03-03;Kiadás;-100;;;;Élelmiszer;;;kézi']);
         await shutdown(tester, db);
       });
 

@@ -3,16 +3,23 @@
 /// Made for the way Hungarian spreadsheets open a file: the cells are
 /// separated by `;`, the text is UTF-8 with a byte-order mark, the lines end
 /// with CR LF, the date is `2026-11-13`, and the amount is a plain whole
-/// number (an expense is negative).
+/// number (an expense is negative); an amount in another currency has a
+/// decimal comma (`-12,40`), as a Hungarian spreadsheet reads it.
 library;
 
 import 'finance.dart';
+import 'finance_currency.dart';
 
-/// The first line of the file.
+/// The first line of the file. A transaction paid in another currency has what
+/// it was paid in, the currency and the rate in the three cells after the
+/// forints; for one in forints they are empty.
 const finCsvHeader = [
   'Dátum',
   'Típus',
   'Összeg (Ft)',
+  'Eredeti összeg',
+  'Pénznem',
+  'Árfolyam (Ft)',
   'Kategória',
   'Kereskedő',
   'Megjegyzés',
@@ -75,12 +82,19 @@ String exportTxCsv(
     ..write(finCsvHeader.join(';'))
     ..write('\r\n');
   for (final t in list) {
+    final f = t.foreign;
     b
       ..write(
         [
           _date(t.date),
           t.kind == FinKind.income ? 'Bevétel' : 'Kiadás',
           '${t.signed}',
+          // (signed like the forints: an expense is negative)
+          f == null
+              ? ''
+              : plainCents(t.kind == FinKind.income ? f.cents : -f.cents),
+          f?.currency ?? '',
+          f == null ? '' : formatRate(f.rate),
           csvCell(categoryName(t.categoryId)),
           csvCell(t.merchant),
           csvCell(t.note),

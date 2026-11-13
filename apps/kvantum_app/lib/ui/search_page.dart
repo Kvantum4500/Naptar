@@ -381,6 +381,7 @@ class _TxTile extends ConsumerWidget {
       subtitle: Text(
         [
           fmtDate(tx.date),
+          if (tx.foreign != null) foreignLine(tx.foreign!),
           if (tx.merchant.isNotEmpty) cat,
           if (tx.note.isNotEmpty) tx.note,
         ].join(' · '),
