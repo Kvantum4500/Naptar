@@ -2,6 +2,54 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 5. fázis, 2. rész – aláírt frissítés (fokozatosan), a frissítő megerősítése, a frissítő kulcs lejárata, Android-engedélyek
+
+**Új: a frissítés hitelességét aláírás is védheti (te kapcsolod be, fokozatosan), a frissítő sokkal szigorúbban ellenőriz, a program szól, ha a frissítő kulcs lejár, és az Android-app kevesebb engedélyt kér.** A kiadási folyamat (csatornák, aláírás, ellenőrző lépések) egy **külön pull requestben** van (#5, piszkozat): azt te olvasztod be.
+
+**1. Aláírt frissítés – fokozatos Ed25519 (SEC-3)** – útmutató: [`docs/alairt-frissites.md`](docs/alairt-frissites.md)
+- **Mit csinál:** a kiadás minden csomagja mellé egy `<csomag>.sig` fájl kerülhet: a `build-<szám>|<a csomag SHA-256-ja>` szöveg Ed25519-aláírása (az `openssl pkeyutl -sign -rawin` formátuma). Az app a **beépített nyilvános kulccsal** ellenőrzi. A build száma benne van a szövegben, ezért egy régi, sebezhető kiadás nem adható ki újnak a saját aláírásával; a hash köti a fájlhoz.
+- **Három állapot, fokozatosan** (a döntésed szerint): (1) **nincs beépített kulcs** → minden a régi (csak az összeget ellenőrzi); (2) **van kulcs és van `.sig`** → érvényesnek kell lennie, különben a program nem telepít, és a letöltött fájlt törli; (3) **van kulcs, de nincs `.sig`** → telepít (amíg a kötelezővé tételt nem kapcsolod be). **Amíg te kulcsot nem teszel be, semmi nem változik.**
+- **Kötelezővé tétel:** `UPDATE_REQUIRE_SIGNATURE=true` (GitHub-változó). Beépített kulcs nélkül **zárt irányba** hibázik: egyetlen kérés előtt „A frissítés aláírása kötelező, de ebben a buildben nincs beépített kulcs…”, a build-folyamat pedig ilyen beállításnál meg sem épít.
+- **Több kulcs** (`UPDATE_PUBLIC_KEY=régi,új`): kulcscsere úgy, hogy közben a telepített appok frissülnek (az útmutató lépésenként leírja).
+- **A kulcs szövege:** 32 bájtos nyers Ed25519-kulcs base64-ben; az aláírás 64 bájt base64-ben; szóköz, sortörés, standard és URL-biztos írásmód, `=` nélkül is jó. Egy hibás kulcs kimarad, a többi él.
+- **A `.sig` a nagy csomag előtt jön le** (gyors hiba); ha nem tölthető le vagy 4 KB-nál nagyobb, az elutasítás – nem „nincs aláírás”.
+- **A program soha nem látja a titkos kulcsot:** az csak a GitHub titkai között él (`UPDATE_SIGNING_KEY`), a kiadás lépés használja, és a futás végén törli a fájlt. A `.gitignore` a `*.pem` fájlokat is kizárja, hogy a titkos kulcs véletlenül se kerüljön a repóba.
+- **Új függőség:** `ed25519_edwards` 0.3.2 (tiszta Dart, nincs natív rész); `update_signature.dart` (`updateSignatureMessage`, `decodeLenientBase64`, `parseUpdatePublicKeys`, `decodeUpdatePublicKeys`, `verifyUpdateSignature` – sosem dob kivételt).
+- **Összehangolva a kiadási folyamattal:** a tesztek **valódi OpenSSL-lel aláírt** vektorokat használnak (két kulcs, két build), a kiadási lépés által készített `.sig`-et pedig az app ellenőrzése is elfogadta (helyi próbán, eldobható kulccsal).
+
+**2. A frissítő megerősítése (SEC-15)**
+- **A token csak a GitHub API-jának jár:** `https` + ugyanaz a hoszt + ugyanaz a port. Hasonlító hosztnak (`api.github.com.evil.example`, `evilapi.github.com`), más portnak, sima `http`-nek nem megy; titkosítatlan címre mutató letöltés vagy átirányítás **megtagadva** („titkosítatlan”). Az átirányítást a program kézzel követi, legföljebb 5-öt.
+- **Méret:** a csomag deklarált mérete legföljebb **400 MB** (a valódi 15–75 MB); a kiszolgáló jelzett hossza egyezzen a kiadáséval; a letöltés **megszakad**, ha többet kapna a deklaráltnál (a kapcsolatot elengedi, nem olvassa végig); a kapott méret egyezzen a deklaráltal; a félbemaradt letöltést törli. A kis szöveges fájlok (ellenőrző összeg, aláírás) legföljebb 4096 bájtosak.
+- **Újra-hash közvetlenül a telepítés előtt:** a párbeszéd a letöltés és a telepítés között meghívja a `recheck`-et; a letöltéskor ellenőrzött összeget a szolgáltatás memóriában tartja, és ha a fájl azóta változott (vagy nem az, amit a program töltött le), **nem telepít**, és törli. Ha az ellenőrzés meghiúsul, a fájl onnantól nem számít ellenőrzöttnek (egy utólag odatett, azonos tartalmú fájl sem).
+- **Maradékok takarítása:** induláskor (nem blokkolva az indulást) törli a `naptar-update` mappa 24 óránál régebbi tartalmát – az `update.log` marad.
+- **Zip-védelem:** a kicsomagolás elutasítja a 10 000-nél több fájlt vagy a 600 MB-nál nagyobb kibontott méretet (a zip saját, deklarált méreteiből, mielőtt bármit írna).
+- **A párbeszéd 2× betűméretnél is használható:** a „Frissítés keresése…” sor túlcsordult egy keskeny telefonon nagy betűvel (a korábbi kódon is), a párbeszéd tartalma pedig hosszabb lett, mint a képernyő: görgethető, a figyelmeztető ikon a betűvel nő.
+
+**3. A frissítő kulcs lejárata (SEC-4)** – útmutató: [`docs/frissito-kulcs.md`](docs/frissito-kulcs.md)
+- A GitHub a lejáró kulccsal kapott válaszokban megadja a lejárat idejét (`github-authentication-token-expiration` fejléc). A **Frissítés keresése** ablak kiolvassa (több időformátumot is ért), és ha a kulcs **14 napon belül lejár** (vagy lejárt), figyelmeztet, jellel és szöveggel: *„A frissítő kulcs 9 nap múlva lejár; utána az app nem talál új verziót. Új kulcs kell hozzá, és az appot utána egyszer kézzel kell újratelepíteni.”* A napokat az app órájából számolja.
+- Hiányzó vagy érthetetlen fejléc = csend. Az útmutató leírja a csere lépéseit, és hogy a lejárat **előtt** kiadott új build miatt nem kell kézzel telepíteni.
+
+**4. Android-engedélyek (SEC-14)**
+- Az `open_filex` csomag magával hozza a `READ_EXTERNAL_STORAGE` és a `READ_MEDIA_IMAGES` / `VIDEO` / `AUDIO` engedélyt, amelyekre az appnak nincs szüksége (a frissítő APK-ja az app saját gyorsítótár-mappájában van, ott a csomag engedélyt sem kér). A `tools:node="remove"` jelölés mind a négyet kiveszi az összevont manifestből. Egy szöveges teszt (`android_manifest_test.dart`) rögzíti, mit kér az app (internet, csomagtelepítés, értesítés, indítás után, durva helyzet) és mit nem; a letöltési mappa helyét is (ha a letöltés egy megosztott mappába költözne, a teszt szól, hogy az engedélyek visszakellenek).
+- **A `FileProvider` marad** (a telepítés rá épül; Androidot itt nem tudok lefordítani): a döntési napló rögzíti mint maradék kockázatot.
+
+**5. A kiadási folyamat – külön pull request (#5, piszkozat; a `main`-be te olvasztod be)**
+- **Csatornák:** a `main` és a `v*` címkék **stabil** kiadást adnak („latest”), de csak akkor, ha ugyanarra a commitra a CI zöld (legföljebb ~25 percet vár a folyamatban lévőre); **minden más ág előzetes** (pre-release, nem „latest”). Következmény: a munkaági `[build]` kiadások a PR beolvasztása után előzetesek, az appban az „Előzetes verziókat is keressen” kapcsolóval látszanak.
+- **Aláírás:** ha van `UPDATE_SIGNING_KEY` titok, minden csomagra `.sig` készül (a lépés ellenőrzi, hogy a kulcs Ed25519-es, hogy a nyilvános párja az `UPDATE_PUBLIC_KEY`-ben van, és hogy a `.sha256` egyezik); a build a nyilvános kulcsot beépíti. Titok nélkül a lépés kimarad – a folyamat a mostani.
+- **Tanácsadó ellenőrzések** (nem buktatnak, amíg egyszer nem láttam zölden): az APK 16 KB-os oldalhatár-igazítása (`zipalign`), az engedélyek listája és a minSdk / targetSdk a futás összegzésében; a Windows VC++ futtatókörnyezet DLL-jei a kiadási mappában; heti `pub outdated` jelentés; a CI-ban formázás-ellenőrzés, lefedettség-összegzés, `permissions: contents: read`, és a `main` futásait nem szakítja meg egy újabb push.
+- **Nem a feladatágon:** a `.github` a feladatágon változatlan marad (a Build 34 403-as hibája óta), ezért külön ágon (`ci/release-hardening`) van, **build-jelölés nélkül**.
+
+**Döntések:** (1) a bevezetés fokozatos (a tiéd): kulcs híján semmi nem változik; (2) a kötelezővé tétel kulcs nélkül zárt irányba hibázik, és ilyenkor a build sem készül; (3) a `READ_EXTERNAL_STORAGE` is kikerül (a terv meghagyta; a kód elolvasása után kiderült, hogy nem kell); (4) a `FileProvider` marad; (5) a zip-védelem a deklarált méretekre épül, a kicsomagolás memóriahasználatát nem írtam át (a döntési napló rögzíti); (6) 400 MB a csomag, 4 KB az aláírás plafonja; (7) a stabil kiadás a CI-ra vár, legföljebb 25 percig; (8) több kulcs támogatott (kulcscseréhez).
+
+**Ellenőrzés:** app 2627 teszt (volt 2470), mag 1459; az elemzők és a formázás tiszták Flutter 3.47.9-en és 3.50.0-n. Szándékos elrontás: **168** a frissítő kódján (az első menetben 166-ból 156 bukott el; a többi 10: 3 felesleges kód (a base64-olvasó átfedő ágai – törölve), 5 tesztelési hiány (az ellenőrző összeg fájljának kétféle elrendezése, a takarítás pontos időhatára, a konfiguráció kulcs-olvasása és az indításkori takarítás Androidos mappája – mindre új teszt), 1 egyenértékű (a takarítás `followLinks: false` argumentuma: nem rekurzív listázásnál nincs hatása) és 1 érvénytelen elrontás (átírva, elbukik); a végső listán 164 elbukik, a maradék négy közül három a törölt kódra írt, egy egyenértékű); a kiadási folyamat 185 ellenőrzése (YAML-szerkezet, a `run:` blokkok `bash -n`-je, a csatorna- és a CI-kapu-lépés, az aláíró lépés helyi lefuttatása valódi OpenSSL-lel, hamis `gh`-val) átment.
+
+**Nem ellenőrzött / ismert korlátok**
+- **A kiadási folyamat a valódi GitHub-futtatón** (a `gh`, az `apkanalyzer`, a `zipalign`, a PowerShell-lépés, a kiadás-feltöltő action): az Actions 06:13 UTC óta nem indít futást, ezért csak helyben ellenőriztem (lásd fent); a PR-ban lévő lépések a piszkozat első valódi futásán derülnek ki.
+- **Aláírt kiadás valódi frissítésen** (a Windows-csere és az Android-telepítő útja): a kulcs híján nincs mit kipróbálni; a kulcspár és a titok beállítása után az első két aláírt kiadás mutatja meg.
+- **A `github-authentication-token-expiration` fejléc megléte** a te kulcsodnál: élőben még nem láttam.
+- **Az összevont Android-manifest** valódi buildben (az engedélyek tényleges listája): az új tanácsadó lépés a következő buildnél kiírja.
+- A frissítő ablak kinézete a kirajzolt képeken (Roboto, telefon, 1× és 2× betű, világos és sötét) rendben van; valódi eszközön még nem láttam.
+
 ## 4. fázis, 4.5/D-4 – költségkeret-értesítés és bérbecslés a beosztásból (D csomag, negyedik rész)
 
 **Új: két funkció, mindkettő a saját eszközödön él, hálózat nélkül.**
