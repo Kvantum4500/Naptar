@@ -2,6 +2,48 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 3d. fázis – hozzáférhetőség, nagy betű, téma, első indítás (UX-7, UX-8, UX-9)
+
+**Képernyőolvasó (UX-8)**
+- **Hónap:** egy nap egy megálló („csütörtök, 2026. november 12., 3 esemény, ma”; más hónap napjánál „másik hónap”; a kijelölt nap kijelöltként), a cellában lévő események külön megállók („Fogorvos, 14:00–15:00”, „Szabadnap, egész nap”, éjfélen átnyúlónál „tart tovább, 02:00-ig”), a „+N további” hivatkozás egy mondat („5 további esemény, a nap megnyitása”); a napszám és a pöttyök nem külön megállók.
+- **Hét és nap:** a napfejléc („csütörtök, 2026. november 12., ma”), az esemény-blokk és az egésznapos sáv kimondja a napot is („Fogorvos, csütörtök, 2026. november 12., 14:00–15:00”); az óra-feliratok (10:00, 11:00 …) nem megállók. **Napirend:** minden sor egy megálló („Feladat: …, határidő: …”, „Késésben lévő feladat: …”).
+- **Pénzügyek:** egy költségkeret-sor **egy mondat** („Élelmiszer: 3 000 Ft a 10 000 Ft keretből (30%), Maradt: 7 000 Ft”; keret nélküli sor: „Közlekedés: 4 500 Ft, a kiadások 20%-a”), nem öt külön megálló; a bevétel- és kiadás-nyíl szóban is megvan („Bevétel” / „Kiadás”); a folyamatjelzők címkét kaptak („Betöltés”, „A beosztás készül”, „Letöltés” …). A cél sávja kimarad (a mellette álló szöveg ugyanazt mondja).
+- **Szín mellett jel és szó:** a költségkeret-sor ikont és szöveget is kapott („Maradt: …” / „Közel a kerethez – maradt: …” / „Túllépve: …”), nem csak színt.
+
+**Kontraszt (UX-8)**
+- **Új, közös állapotszínek** (`ui/theme.dart`, `StatusColors`): a „rendben” és a „vigyázz” szín világos és sötét témában is **legalább 4,5 : 1** a téma minden felületéhez (a régi sima `Colors.green` 2,6 : 1, a `Colors.orange` 2,1 : 1 volt a világos felületen); a „túllépve” a téma hibaszíne. A 11 kemény szín helyén ezek vannak; számolt kontraszt-teszt őrzi (`contrastRatio`, átlátszó szín esetén a háttérrel keverve).
+- **A halvány szöveg** a téma `onSurfaceVariant` színe (≥ 4,5 : 1); az `outline` (4,27 : 1) már nem szöveg.
+- **Az eseményszín szövegszíne** a jobb kontrasztú (fehér vagy fekete), nem fényesség-küszöb szerint: mind a 12 szín ≥ 4,5 : 1 (a flamingó színen a fehér 2,8 : 1 volt).
+
+**Nagy betű (UX-8)** – a program a rendszer betűméretét követi, **200 %-ig tesztelve** (új `text_scale_test`: 75 jelenet, világos és sötét téma, 360 × 640, 360 × 800 és 1280 × 900 px; a fő oldalak, a szerkesztők és a párbeszédek). A mérés **valódi Roboto betűvel** történik (a tesztek addigi Ahem betűje szélesebb és alacsonyabb, ezért rejtette el éppen a fix magasságok hibáit; ez az 1,0-s betűméretnél is mutatott egy túlcsordulást: egy 45 perces esemény-blokk 3 képpontot lógott). Amit a mérés talált és javítottunk:
+- **Idősáv (hét, nap, a hónap napi panelje):** az óra magassága a betűvel nő (legfeljebb 1,6-szoros), az esemény-blokk tartalmát a sorok *tényleges* magassága dönti el (egy órás blokk: kétsoros cím + idő; 45 perces: két sor; fél órás: egy sor), a legrövidebb blokk is elég magas a cím egy sorához; a napfejléc és az óra-feliratok legfeljebb 1,3-szorosra nőnek (hét oszlop 44 px-en); a keskeny oszlopban (telefonon a hét nézet) az időt a program elhagyja (korábban darabokra tört); az egésznapos sáv legfeljebb a hely felét foglalja és görget; a hónap napi panelének címe legfeljebb a panel felét (görget).
+- **Hónap:** a cella sorai a betűvel nőnek (a napszám saját sort kap, a színes sáv a szöveg magasságát); ha egy rövid cellában nincs hely a pöttyöknek, a napszám után „•” jelzi, hogy van esemény.
+- **Naptár tetején a sávok** (első lépések, napi check-in, edzés utáni kérdés) együtt legfeljebb a képernyő **harmadát** foglalják, és görgethetők (200 %-nál két sáv korábban 276 px-et, a képernyő 35 %-át vitte el).
+- **Alsó sáv:** 1,3-szoros betűtől csak a kijelölt hely felirata látszik (öt felirat nem fér el, „Feladato/k” szétesett); a többit a képernyőolvasó felolvassa, a hosszú nyomás súgót ad.
+- **Pénzügyek:** az összesítő három kártyája egy kártya három sorában, ha az összeg nem fér el az egyben; a keret-soron az összegek a név alá kerülnek, ha nem férnek mellé; a havi ismétlődő tétel és a cél szerkesztőjének sorai, a Beosztás sorai (műszakidők, kezdőnap, „Következő műszakok”), a Beállítások szolgáltató-menüje és kulcs-sora, az asszisztens gombjai és gyors javaslatai (a chip törik, nem vágódik le) – mind alá-, illetve túlcsordulás nélkül.
+- **Szerkesztő:** a „Kezdés” / „Befejezés” címke és a dátum a betű alatt (a címke szó közepén tört, a dátum négy sorba); **napirend:** az idő-oszlop a betűvel szélesedik (a „07:00” darabokra tört).
+
+**Téma (UX-9)**
+- **Rendszer szerint / Világos / Sötét** választó (Beállítások → A program → Téma), a választás megmarad (`themeMode`). A világos és a sötét ugyanaz a téma két fényességben (`appTheme`), az állapotszínekkel együtt.
+
+**Első indítás (UX-7)**
+- **„Első lépések” kártya** a naptár tetején: egyszerre **egy** teendő „x/y” számolással – Belépés a Google-fiókkal (ha a buildben vannak Google-kulcsok), AI-kulcs, Hely (nem kötelező), Emlékeztetők (csak Androidon), Wallet-fizetések (csak Androidon, nem kötelező). Gombok: **Megnyitás** (a belépésnél **Belépés**), **Nem kell** (az adott lépést félreteszi), **Elrejtés** (az egész kártyát). Ha minden kész vagy félretéve, magától eltűnik; a félretétel és az elrejtés megmarad. A kártya **csak megnézi** az állapotot (kulcs van-e, belépve vagy-e, helyszín, emlékeztető-beállítás, Wallet-hozzáférés és -felvétel): nem kér engedélyt és nem nyit meg semmit, amíg nem nyomsz gombot; a Beállításokból visszatérve és az alkalmazásba visszatérve újra megnézi. A Beállítások → A program → **Első lépések újra** gombbal az elrejtett kártya visszahozható. Tesztekben alapból ki van kapcsolva (`setupGuideProvider`), a `main.dart` kapcsolja be.
+
+**Útközben javítva**
+- A hét- és napnézet (és a hónap napi panelje) a *valódi* órát használta a „ma” jelöléséhez és a piros „most” vonalhoz, nem az alkalmazás közös óráját (`appClockProvider`), mint a többi nézet; most azt.
+- Az esemény-blokk tartalma 1,0-s betűmérettel is túlcsordulhatott (45 perces esemény, 3 képpont) – lásd fent.
+
+**Tesztelő eszközök**
+- `test/support/real_fonts.dart`: a Flutter SDK Roboto és MaterialIcons betűjének betöltése tesztben (ha az SDK-ban nincs meg, az érintett tesztek kimaradnak, nem buknak). `KVANTUM_SHOTS=<mappa> flutter test test/text_scale_test.dart` minden jelenetről **képernyőképet** ment (valódi betűvel és ikonokkal), így az ellenőrzés nem csak a túlcsordulás-hibákat nézi.
+
+Tesztek: app 1643 (volt 1448), mag 490 (változatlan), az elemzők és a formázás tiszták; a Flutter 3.47.9-en és a 3.50.0-n is zöld (friss klónon is). 72 szándékos elrontás (a felolvasott szavak, a cella / blokk / sáv / sor megállói, a színek és a téma, az idősáv és a hónap méretei, a nagy betűnél átrendeződő sorok, az első lépések logikája, tárolása és bekötése) – mind elbukik, kivéve egy egyenértékű változatot (az esemény-sáv megállója a hónap cellájában: két `button` jelzésű szemantika-csomópont nem olvad össze, ezért ott a módosítás nem látszik). A próba **négy tesztelési hiányt** hozott felszínre – a fél órás blokk címe, a legrövidebb blokk magassága és a színes sáv magassága nagy betűnél (a mérés a `Material` ősöket nézte, amelyek közt mindig volt elég magas, ezért a rövidre vágott változat is átment) és a napi panel címe alacsony telefonon –; mindegyikre szigorúbb teszt készült (a magasságok most a kisegítő-lehetőségek fáján mért, tényleges megállón), egy első kísérletben nem fordítható változat pedig javítva lett.
+
+**Nem ellenőrizhető itt:** a képernyőolvasók tényleges működése (TalkBack / Narrator – a tesztek a Semantics-fát ellenőrzik, nem a felolvasást); a rendszer betűméret-skálája valódi telefonon (a tesztek 200 %-ig lineáris skálát használnak, az Android 14 nemlineáris skálája kicsit másképp nő); a Roboto-méréstől eltérő betűk (Windowson Segoe UI); a kártya viselkedése valódi Google-belépéssel és valódi Wallet-hozzáféréssel; a kártya megjelenése és az „Első lépések” sáv érzete telefonon.
+
+**Ismert korlát:** a **hét nézet telefonon** 200 %-os betűnél szűk (hét oszlop 44 px-en: az esemény-blokkban csak a cím első betűi látszanak, az idő nem); ott a nap- vagy a napirend nézet ajánlott. Egy 3 napos vagy görgethető hét nézet külön, nagyobb átalakítás.
+
+**Eltérések a tervtől:** a „Hely” és a „Wallet” lépés nem kötelező (a kártya ezt ki is mondja); a lépéseket egyenként mutatja, nem listaként (egy lista telefonon, nagy betűnél az egész képernyőt elvinné); az első indítás kapcsolója a `googleConfigured` helyett saját (`setupGuideProvider`), hogy a Google-kulcs nélküli buildben is látszhasson, és a tesztek ne függjenek a Google-beállítástól; az „Első lépések újra” gomb a terven felüli kiegészítés (az elrejtésnek legyen visszaútja); a betűméret-vizsgálat a tervezett egyszerű túlcsordulás-teszten túl képernyőképekkel is történt.
+
 ## 3c. fázis – keresés, napirend nézet, húzás a lapozáshoz, a Beállítások csoportjai (UX-3, UX-6)
 
 **Keresés (UX-3)**
