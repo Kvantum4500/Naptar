@@ -12,6 +12,7 @@ import 'delete_ops.dart';
 import 'event_editor.dart' show Scope, openEditor;
 import 'format.dart';
 import 'shift_ops.dart';
+import 'shift_pay_card.dart';
 import 'undo_service.dart';
 import '../diag/diag_log.dart';
 import '../sync/error_catalog.dart';
@@ -677,6 +678,15 @@ class _ShiftPageState extends ConsumerState<ShiftPage> {
               ),
             const SizedBox(height: 20),
             _summary(),
+            const SizedBox(height: 12),
+            ShiftPayCard(
+              events: [
+                for (final e in _events)
+                  (title: e.title, notes: e.notes, start: e.start, end: e.end),
+              ],
+              year: _month.year,
+              month: _month.month,
+            ),
             const SizedBox(height: 12),
             _upcomingList(),
           ],

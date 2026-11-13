@@ -548,8 +548,12 @@ List<BudgetStatus> budgetStatus(
 
 // -------------------------------------------------------------- recurring
 
+/// What the id of a transaction made by a recurring rule starts with (a manual
+/// or imported one never does).
+const recurringTxPrefix = 'rec-';
+
 String recurringTxId(String ruleId, int year, int month) =>
-    'rec-$ruleId-$year${month.toString().padLeft(2, '0')}';
+    '$recurringTxPrefix$ruleId-$year${month.toString().padLeft(2, '0')}';
 
 /// The transactions [rules] expect in the given month. Ids are derived from
 /// the rule and the month, so generating twice - or on two devices - gives the

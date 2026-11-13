@@ -416,6 +416,7 @@ final reminderSchedulerProvider = Provider<ReminderScheduler>(
     read: (k) => ref.read(recordRepoProvider).meta(k),
     write: (k, v) => ref.read(recordRepoProvider).setMeta(k, v),
     now: () => ref.read(appClockProvider)(),
+    toastBackend: () => ref.read(toastBackendProvider),
   ),
 );
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 import 'reminders.dart' show PlannedReminder, ReminderScheduler;
@@ -21,6 +22,14 @@ abstract class ToastBackend {
   /// Hands [r] to Windows, to be shown at its time even when the program is
   /// closed. Scheduling an id again does NOT replace the earlier toast.
   Future<void> schedule(PlannedReminder r);
+
+  /// Shows a toast right now (nothing is scheduled; it is not on the pending
+  /// list). Showing an id again replaces the toast with that id.
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+  });
 }
 
 /// [ToastBackend] on the notification plugin (its Windows part: scheduled toast
@@ -78,7 +87,27 @@ class PluginToastBackend implements ToastBackend {
     // (an Android setting; Windows ignores it)
     androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
   );
+
+  @override
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+  }) => _plugin.show(
+    id: id,
+    title: title,
+    body: body,
+    notificationDetails: const NotificationDetails(
+      windows: WindowsNotificationDetails(),
+    ),
+  );
 }
+
+/// The one connection to the Windows notification system, shared by the
+/// reminders and the budget alerts (the program registers with Windows once).
+final toastBackendProvider = Provider<ToastBackend>(
+  (_) => PluginToastBackend(),
+);
 
 /// A scheduler that can hand the system one notification for the user to see,
 /// so that they can find out at once whether the reminders reach them.

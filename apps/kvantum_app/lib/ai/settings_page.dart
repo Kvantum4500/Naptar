@@ -17,6 +17,8 @@ import 'ai_providers.dart';
 import 'location_service.dart';
 import 'place.dart';
 import '../notify/autostart_tile.dart';
+import '../notify/budget_alerts.dart';
+import '../notify/budget_notify.dart' show budgetNotifierProvider;
 import '../notify/reminder_test_button.dart';
 import '../notify/reminders.dart';
 import '../notify/windows_autostart.dart' show autostartProvider;
@@ -407,6 +409,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       }
     }
     await ref.read(reminderSettingsProvider.notifier).change(next);
+  }
+
+  /// Turning the budget alerts on asks for the notification permission first;
+  /// when it is refused nothing is switched on and the user is told why.
+  Future<void> _setBudgetAlerts(bool on) async {
+    final setting = ref.read(budgetAlertsSettingProvider.notifier);
+    if (!on) return setting.disable();
+    if (await setting.enable() == BudgetAlertsStart.denied) {
+      _toast(remindersBlockedHelp(), error: true);
+    }
   }
 
   Future<void> _deleteKey(String provider) async {
@@ -890,6 +902,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   const ReminderTestButton(),
                 ],
               ]),
+              // (only where such notifications can be shown)
+              if (ref.watch(budgetNotifierProvider).supported)
+                section('Költségkeret', [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Értesítés a költségkeretről'),
+                    subtitle: const Text(
+                      'Szól, ha egy kategória eléri a keret 80%-át, és ha '
+                      'túllépi.',
+                    ),
+                    value:
+                        ref.watch(budgetAlertsSettingProvider).value ?? false,
+                    onChanged: _setBudgetAlerts,
+                  ),
+                  Text(
+                    'Helyi értesítés, nem megy el hozzá adat sehová. A tétel '
+                    'felvételekor jön; a Google Wallet-tételeknél akkor, '
+                    'amikor megnyitod a programot (a háttérben a program nem '
+                    'dolgoz fel semmit). Amit az ismétlődő tételek (például '
+                    'a lakbér) okoznak, azt nem jelzi, csak ami fölötte van. '
+                    'A bekapcsoláskor már közeli vagy túllépett kategóriáról '
+                    'nem szól, csak az utána jövő lépésekről.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ]),
               // (the widget is an Android thing: only there is it mentioned)
               if (ref.watch(widgetBridgeProvider).active)
                 section('Főképernyő-widget', [

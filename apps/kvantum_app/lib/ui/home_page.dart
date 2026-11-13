@@ -18,6 +18,7 @@ import 'quick_entry_dialog.dart';
 import 'search_page.dart';
 import 'setup_card.dart';
 import 'shortcuts.dart';
+import '../notify/budget_alerts.dart';
 import '../notify/reminders.dart';
 import '../widget/widget_sync.dart';
 import 'swipe_nav.dart';
@@ -129,6 +130,7 @@ class _Calendar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(reminderSyncProvider); // keeps the device reminders up to date
+    ref.watch(budgetAlertsProvider); // tells when a budget is close or over
     ref.watch(widgetSyncProvider); // and the home-screen widget (Android)
     final view = ref.watch(viewModeProvider);
     final month = ref.watch(visibleMonthProvider);

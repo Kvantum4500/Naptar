@@ -192,7 +192,19 @@ void main() {
     await shutdown(tester, db);
   });
 
+  /// The list of the coming shifts comes after the summary and the pay
+  /// estimate: scroll it into view.
+  Future<void> toList(WidgetTester tester) async {
+    await tester.scrollUntilVisible(
+      find.text('Következő műszakok'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+  }
+
   Future<void> tapFirst(WidgetTester tester, String tooltip) async {
+    await toList(tester);
     final f = find.byTooltip(tooltip).first;
     await tester.ensureVisible(f);
     await tester.pumpAndSettle();
@@ -237,6 +249,7 @@ void main() {
     tester,
   ) async {
     await boot(tester, floating(2026, 11, 12));
+    await toList(tester);
     await tester.tap(find.text('Extra műszak'));
     await tester.pumpAndSettle();
     await tester.tap(
@@ -266,6 +279,7 @@ void main() {
     final first = all0.first;
     final row =
         '${fmtDate(first.start)} ${fmtTime(first.start)}  ${first.title}';
+    await toList(tester);
     expect(find.text(row), findsOneWidget);
     await tapFirst(tester, 'Műszak törlése');
     expect(find.text('Törlöd ezt a műszakot?'), findsNothing);
@@ -348,6 +362,7 @@ void main() {
     await tester.runAsync(
       () => repo.saveLocal(evt('hand', 'Fogorvos', floating(2026, 11, 20, 9))),
     );
+    await toList(tester);
     await tester.tap(find.text('Extra műszak'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mégse'));
