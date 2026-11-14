@@ -168,6 +168,44 @@ void main() {
       });
     });
 
+    test('an occurrence the file says is cancelled is a change', () async {
+      final master = evt(
+        'm',
+        'Edzés',
+        floating(2026, 11, 2, 9),
+        rrule: 'FREQ=DAILY;COUNT=5',
+      );
+      final moved = CalEvent(
+        id: 'o',
+        calendarId: kNaptarCalendar,
+        title: 'Edzés',
+        tzid: bp,
+        start: floating(2026, 11, 3, 18),
+        end: floating(2026, 11, 3, 19),
+        recurringEventId: 'm',
+        originalStart: floating(2026, 11, 3, 9),
+      );
+      await repo.saveAll([master, moved]);
+      // the same file as the device's own, except that the moved occurrence is
+      // cancelled in it (an Outlook file keeps such rows)
+      final text = await exportBackup(repo);
+      final cancelled = text.replaceFirst(
+        'X-NAPTAR-ID:o',
+        'X-NAPTAR-ID:o\r\nSTATUS:CANCELLED',
+      );
+      expect(cancelled, isNot(text));
+      final plan = await previewBackup(
+        repo,
+        cancelled,
+        calendarId: kNaptarCalendar,
+      );
+      expect(plan.changes.map((c) => c.current.id), ['o']);
+      expect(plan.changes.single.incoming.cancelled, isTrue);
+      // and the device's own file shows no change at all
+      final same = await previewBackup(repo, text, calendarId: kNaptarCalendar);
+      expect(same.changes, isEmpty);
+    });
+
     test('junk gives an empty plan and the reasons', () async {
       final plan = await previewBackup(
         repo,

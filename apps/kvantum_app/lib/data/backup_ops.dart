@@ -114,6 +114,7 @@ bool _same(CalEvent a, CalEvent b) =>
     a.aiGenerated == b.aiGenerated &&
     a.recurringEventId == b.recurringEventId &&
     a.originalStart == b.originalStart &&
+    a.cancelled == b.cancelled &&
     a.exdates.length == b.exdates.length &&
     a.exdates.every(b.exdates.contains);
 

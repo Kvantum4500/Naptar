@@ -424,6 +424,76 @@ void main() {
     });
   });
 
+  group('cancelled (STATUS:CANCELLED)', () {
+    late IcsImport r;
+    setUp(() => r = read('outlook_windows_tz.ics'));
+
+    test('a cancelled meeting is left out, and the file says so', () {
+      expect(
+        r.events.map((e) => e.title),
+        isNot(contains('Lemondott megbeszélés')),
+      );
+      expect(r.problems, [
+        allOf(contains('Lemondott megbeszélés'), contains('lemondott')),
+      ]);
+    });
+
+    test('a cancelled occurrence stays as a row that hides that day', () {
+      final master = r.events.firstWhere(
+        (e) =>
+            e.title == 'Heti projekt egyeztetés' && e.recurringEventId == null,
+      );
+      final gone = r.events.singleWhere((e) => e.recurringEventId == master.id);
+      expect(gone.cancelled, isTrue);
+      expect(gone.originalStart, floating(2026, 5, 27, 13));
+      final occ = occurrences(
+        r,
+        master,
+        DateTime.utc(2026, 5),
+        DateTime.utc(2026, 7),
+      );
+      // Wednesdays 6 May .. 24 June are eight; the 20th is an EXDATE, the 27th
+      // is cancelled
+      expect(occ.map((o) => o.originalStart.day), [6, 13, 3, 10, 17, 24]);
+      expect(occ.any((o) => o.isOverride), isFalse);
+    });
+
+    test('a cancelled series is left out as a whole', () {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\nUID:c\r\n'
+        'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+        'DTEND;TZID=Europe/Budapest:20260504T100000\r\n'
+        'RRULE:FREQ=DAILY;COUNT=5\r\nSTATUS:CANCELLED\r\nSUMMARY:Vége\r\n'
+        'END:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      expect(imp.events, isEmpty);
+      expect(imp.problems, [contains('Vége')]);
+    });
+
+    test('the status is read in any case, and CONFIRMED does nothing', () {
+      String one(String status) =>
+          'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:c\r\n'
+          'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+          'DTEND;TZID=Europe/Budapest:20260504T100000\r\n'
+          'STATUS:$status\r\nSUMMARY:Valami\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
+      expect(parseIcs(one('cancelled'), calendarId: 'c').events, isEmpty);
+      expect(parseIcs(one('CONFIRMED'), calendarId: 'c').events.length, 1);
+      expect(parseIcs(one('TENTATIVE'), calendarId: 'c').events.length, 1);
+    });
+
+    test('a cancelled occurrence is written as an EXDATE of its series', () {
+      final text = exportIcs(r.events);
+      final back = parseIcs(text, calendarId: 'c');
+      final master = back.events.firstWhere(
+        (e) =>
+            e.title == 'Heti projekt egyeztetés' && e.recurringEventId == null,
+      );
+      expect(master.exdates, contains(floating(2026, 5, 27, 13)));
+      expect(master.exdates, contains(floating(2026, 5, 20, 13)));
+    });
+  });
+
   group('the zone names', () {
     test('a known IANA name stays, a Windows name becomes one', () {
       expect(ianaZoneOf('Europe/Budapest'), 'Europe/Budapest');

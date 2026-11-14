@@ -263,6 +263,15 @@ CalEvent? _toEvent(
   _Prop? one(String n) => props.where((p) => p.name == n).firstOrNull;
   final title = _unesc(one('SUMMARY')?.value ?? '').trim();
   final label = title.isEmpty ? '(cím nélküli esemény)' : '„$title”';
+  // A cancelled meeting (Outlook and Exchange keep them in the calendar, and a
+  // cancellation message is a file of them) is not an event. A cancelled
+  // OCCURRENCE of a series is kept as the row that hides that day, the way a
+  // cancelled instance of a Google series is.
+  final cancelled = one('STATUS')?.value.trim().toUpperCase() == 'CANCELLED';
+  if (cancelled && one('RECURRENCE-ID') == null) {
+    problems.add('$label: lemondott esemény, kihagytam.');
+    return null;
+  }
   final ds = one('DTSTART');
   if (ds == null) {
     problems.add('$label: nincs kezdési időpont, kihagytam.');
@@ -421,6 +430,7 @@ CalEvent? _toEvent(
     exdates: exdates,
     recurringEventId: rid != null ? uid : null,
     originalStart: recurrenceWall,
+    cancelled: cancelled,
     colorId: one('X-NAPTAR-COLOR')?.value.trim(),
     aiGenerated: one('X-NAPTAR-AI')?.value.trim() == '1',
   );
