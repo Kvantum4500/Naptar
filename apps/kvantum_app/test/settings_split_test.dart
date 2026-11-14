@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ai/ai_providers.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
+import 'package:kvantum_app/ai/settings/settings_toast.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
@@ -232,5 +233,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(io.savedName, 'penzugyek-2030-05-06.json');
     await shutdown(tester, db);
+  });
+
+  testWidgets('a message at the bottom: an error in the colour of errors, '
+      'another one in none', (tester) async {
+    late BuildContext context;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (c) {
+              context = c;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    Color? colour() =>
+        tester.widget<SnackBar>(find.byType(SnackBar)).backgroundColor;
+    showSettingsToast(context, 'Elmentve.');
+    await tester.pump();
+    expect(find.text('Elmentve.'), findsOneWidget);
+    expect(colour(), isNull);
+    showSettingsToast(context, 'Nem sikerült.', error: true);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Elmentve.'),
+      findsNothing,
+      reason: 'one message at a time',
+    );
+    expect(colour(), Theme.of(context).colorScheme.error);
   });
 }

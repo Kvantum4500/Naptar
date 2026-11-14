@@ -151,6 +151,45 @@ void main() {
         expect(plan.changes.map((c) => c.current.id), ['s']);
       });
 
+      test('a rule stored with its RRULE: prefix is the same series', () async {
+        final text = await backupOf([
+          evt(
+            'p',
+            'Edzés',
+            floating(2026, 11, 2, 9),
+            rrule: 'RRULE:FREQ=DAILY;UNTIL=20261106T235959Z',
+          ),
+        ]);
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes, isEmpty);
+        expect(plan.unchanged, 1);
+      });
+
+      test(
+        'so is one the engine refuses: the prefix is not what differs',
+        () async {
+          final text = await backupOf([
+            evt(
+              'q',
+              'Rossz szabály',
+              floating(2026, 11, 2, 9),
+              rrule: 'RRULE:FREQ=SOMETIMES',
+            ),
+          ]);
+          final plan = await previewBackup(
+            repo,
+            text,
+            calendarId: kNaptarCalendar,
+          );
+          expect(plan.changes, isEmpty);
+          expect(plan.unchanged, 1);
+        },
+      );
+
       test('a rule the engine refuses is compared as plain text', () async {
         final bad = evt(
           'x',
@@ -353,6 +392,108 @@ void main() {
         expect(all.single.googleId, 'g-L1', reason: 'the link is kept');
       });
 
+      test('two moved days of one series are two events, not one', () async {
+        await repo.saveLocal(
+          pulled('L1', 'Edzés', 'gid2@google.com', rrule: 'FREQ=DAILY;COUNT=5'),
+        );
+        final plan = await previewBackup(
+          repo,
+          file(
+            vevent(
+                  uid: 'gid2@google.com',
+                  title: 'Edzés',
+                  extra: 'RRULE:FREQ=DAILY;COUNT=5\r\n',
+                ) +
+                vevent(
+                  uid: 'gid2@google.com',
+                  title: 'Edzés (korán)',
+                  start: '20261121T070000',
+                  end: '20261121T080000',
+                  extra:
+                      'RECURRENCE-ID;TZID=Europe/Budapest:20261121T090000\r\n',
+                ) +
+                vevent(
+                  uid: 'gid2@google.com',
+                  title: 'Edzés (későn)',
+                  start: '20261123T190000',
+                  end: '20261123T200000',
+                  extra:
+                      'RECURRENCE-ID;TZID=Europe/Budapest:20261123T090000\r\n',
+                ),
+          ),
+          calendarId: kNaptarCalendar,
+        );
+        expect(
+          {for (final e in plan.fresh) e.id},
+          {'L1#2026-11-21T09:00:00.000Z', 'L1#2026-11-23T09:00:00.000Z'},
+        );
+      });
+
+      test('a moved day is matched with the row of ITS series, not of another '
+          'with the same original day', () async {
+        // two series, each with its moved day from the same original day; the
+        // device lists the row of the other series first
+        await repo.saveAll([
+          pulled('L2', 'Másik', 'gid3@google.com', rrule: 'FREQ=DAILY;COUNT=5'),
+          CalEvent(
+            id: 'X0',
+            calendarId: kNaptarCalendar,
+            title: 'Másik (áthelyezve)',
+            tzid: bp,
+            start: floating(2026, 11, 21, 7),
+            end: floating(2026, 11, 21, 8),
+            recurringEventId: 'L2',
+            originalStart: floating(2026, 11, 21, 9),
+          ),
+          pulled('L1', 'Edzés', 'gid2@google.com', rrule: 'FREQ=DAILY;COUNT=5'),
+          CalEvent(
+            id: 'X1',
+            calendarId: kNaptarCalendar,
+            title: 'Edzés (áthelyezve)',
+            tzid: bp,
+            start: floating(2026, 11, 21, 18),
+            end: floating(2026, 11, 21, 19),
+            recurringEventId: 'L1',
+            originalStart: floating(2026, 11, 21, 9),
+          ),
+        ]);
+        String series(String uid, String title) => vevent(
+          uid: uid,
+          title: title,
+          extra: 'RRULE:FREQ=DAILY;COUNT=5\r\n',
+        );
+        String moved(String uid, String title, String s, String e) => vevent(
+          uid: uid,
+          title: title,
+          start: s,
+          end: e,
+          extra: 'RECURRENCE-ID;TZID=Europe/Budapest:20261121T090000\r\n',
+        );
+        final plan = await previewBackup(
+          repo,
+          file(
+            series('gid2@google.com', 'Edzés') +
+                series('gid3@google.com', 'Másik') +
+                moved(
+                  'gid2@google.com',
+                  'Edzés (áthelyezve)',
+                  '20261121T180000',
+                  '20261121T190000',
+                ) +
+                moved(
+                  'gid3@google.com',
+                  'Másik (áthelyezve)',
+                  '20261121T070000',
+                  '20261121T080000',
+                ),
+          ),
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.fresh, isEmpty);
+        expect(plan.changes, isEmpty);
+        expect(plan.unchanged, 4);
+      });
+
       test('a moved occurrence of its series stays with the series', () async {
         await repo.saveAll([
           pulled('L1', 'Edzés', 'gid2@google.com', rrule: 'FREQ=DAILY;COUNT=5'),
@@ -399,6 +540,11 @@ void main() {
         final fresh = plan.fresh.single;
         expect(fresh.title, 'Edzés (korábban)');
         expect(fresh.recurringEventId, 'L1', reason: 'the device calls it L1');
+        expect(
+          fresh.id,
+          'L1#2026-11-23T09:00:00.000Z',
+          reason: 'a moved day the device does not have is named by its day',
+        );
         await applyBackup(repo, plan, overwrite: false);
         final all = await repo.all();
         expect(all.length, 3);

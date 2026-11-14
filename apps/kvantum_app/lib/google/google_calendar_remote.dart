@@ -480,13 +480,10 @@ ParsedRecurrence _parseRecurrence(
     } else if (line.startsWith('EXDATE')) {
       final colon = line.indexOf(':');
       if (colon < 0) continue;
-      // `VALUE=DATE` is a whole day; `VALUE=DATE-TIME` (which also starts with
-      // those characters) is a time of day: the parameters are compared whole
-      final dateOnly = line
-          .substring(0, colon)
-          .toUpperCase()
-          .split(';')
-          .any((p) => p.trim() == 'VALUE=DATE');
+      // A value of eight digits is a date (a whole day, `VALUE=DATE`); a longer
+      // one is a time (`VALUE=DATE-TIME`, in UTC or in the zone of the event):
+      // the parameter names would add nothing (and `VALUE=DATE-TIME` begins
+      // with the same letters as `VALUE=DATE`).
       for (final raw in line.substring(colon + 1).split(',')) {
         final v = raw.trim();
         if (v.length < 8) continue;
@@ -494,7 +491,7 @@ ParsedRecurrence _parseRecurrence(
             mo = int.tryParse(v.substring(4, 6)),
             d = int.tryParse(v.substring(6, 8));
         if (y == null || mo == null || d == null) continue;
-        if (dateOnly || v.length == 8) {
+        if (v.length == 8) {
           ex.add(floating(y, mo, d));
         } else {
           final h = int.parse(v.substring(9, 11)),
