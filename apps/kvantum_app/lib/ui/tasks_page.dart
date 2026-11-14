@@ -421,7 +421,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
       final records = ref.read(recordRepoProvider);
       await records.edit(kindTask, id, fields);
       // the checklist: what was removed, renamed or ticked, and what is new
-      final base = DateTime.now().millisecondsSinceEpoch;
+      final base = ref.read(appClockProvider)().millisecondsSinceEpoch;
       var added = 0;
       for (final draft in _items) {
         final title = draft.title.trim();

@@ -77,9 +77,11 @@ final aiUsageProvider = FutureProvider.autoDispose<AiUsageDay>((ref) async {
       .usageOf(provider: settings.provider);
 });
 
-/// The clock the assistant plans with (proposals must lie ahead of it).
-/// Tests replace it so their fixed dates stay valid.
-final aiClockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
+/// The clock the assistant plans with (proposals must lie ahead of it): the
+/// clock of the app unless a test gives it one of its own.
+final aiClockProvider = Provider<DateTime Function()>(
+  (ref) => ref.watch(appClockProvider),
+);
 
 /// Colour of events the assistant creates (Google "Sage"): easy to tell apart.
 const aiEventColorId = '2';

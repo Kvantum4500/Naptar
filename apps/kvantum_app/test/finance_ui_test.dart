@@ -28,6 +28,7 @@ void main() {
     WidgetTester tester, {
     Widget? home,
     FakeWallet? wallet,
+    DateTime? clock,
   }) async {
     useSize(tester, size: const Size(900, 1400));
     db = await newDb();
@@ -38,6 +39,7 @@ void main() {
         db,
         extra: [
           if (wallet != null) walletBridgeProvider.overrideWithValue(wallet),
+          if (clock != null) appClockProvider.overrideWithValue(() => clock),
         ],
       ),
     );
@@ -395,6 +397,18 @@ void main() {
     expect(find.text('Nyaralás'), findsOneWidget);
     expect(find.textContaining('(25%)'), findsOneWidget);
     expect((await tester.runAsync(repo.deposits))!.single.amount, 150000);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('the deadline of a goal is asked from three months after now, '
+      'by the clock of the app', (tester) async {
+    await boot(tester, clock: DateTime.utc(2030, 5, 6, 9));
+    await goTo(tester, 'Célok');
+    await tester.tap(find.byTooltip('Új cél'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Határidő (nem kötelező)'));
+    await tester.pumpAndSettle();
+    expect(find.text('2030. augusztus'), findsOneWidget);
     await shutdown(tester, db);
   });
 

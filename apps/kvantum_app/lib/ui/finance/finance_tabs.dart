@@ -787,7 +787,10 @@ class _GoalEditorState extends ConsumerState<_GoalEditor> {
                 final d = await showDatePicker(
                   context: context,
                   initialDate:
-                      _deadline ?? DateTime.now().add(const Duration(days: 90)),
+                      _deadline ??
+                      ref
+                          .read(appClockProvider)()
+                          .add(const Duration(days: 90)),
                   firstDate: DateTime(2000),
                   lastDate: DateTime(2100),
                 );

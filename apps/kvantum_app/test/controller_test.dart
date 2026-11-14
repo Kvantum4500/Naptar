@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/drive/finance_mailbox.dart';
 import 'package:kvantum_app/google/google_auth_service.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/remote.dart' show TransientSyncError;
@@ -78,7 +80,11 @@ void main() {
     late FakeRemote remote;
     late FakeDrive drive;
 
-    ProviderContainer make(FakeAuth auth, {bool configured = true}) {
+    ProviderContainer make(
+      FakeAuth auth, {
+      bool configured = true,
+      DateTime? appNow,
+    }) {
       db = AppDatabase(NativeDatabase.memory());
       remote = FakeRemote();
       drive = FakeDrive();
@@ -89,11 +95,27 @@ void main() {
           authGatewayProvider.overrideWithValue(auth),
           remoteFactoryProvider.overrideWithValue((_) => remote),
           driveFactoryProvider.overrideWithValue((_) => drive),
+          if (appNow != null) appClockProvider.overrideWithValue(() => appNow),
         ],
       );
       addTearDown(c.dispose);
       return c;
     }
+
+    test('the presence note this device leaves on the Drive says the time of '
+        'the app clock', () async {
+      final now = DateTime.utc(2030, 5, 6, 7, 8, 9);
+      final c = make(FakeAuth(), appNow: now);
+      await c.read(syncControllerProvider.notifier).signIn();
+      final note = drive.files.values.singleWhere(
+        (f) => f.name.startsWith(FinanceMailbox.peerPrefix),
+      );
+      expect(
+        (jsonDecode(note.content) as Map)['seen'],
+        now.millisecondsSinceEpoch,
+      );
+      await db.close();
+    });
 
     test('the Drive folder of the account is there while signed in, and gone '
         'after signing out (the backup copies are kept in it)', () async {

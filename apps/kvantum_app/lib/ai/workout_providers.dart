@@ -9,9 +9,10 @@ import 'ai_providers.dart';
 /// How long after the end of a workout the app still asks how it went.
 const workoutAskWindow = Duration(hours: 36);
 
-/// The clock of the questions after a workout (tests replace it).
+/// The clock of the questions after a workout: the clock of the app unless a
+/// test gives it one of its own.
 final workoutClockProvider = Provider<DateTime Function()>(
-  (ref) => DateTime.now,
+  (ref) => ref.watch(appClockProvider),
 );
 
 /// The feedback on workouts, the newest day first.

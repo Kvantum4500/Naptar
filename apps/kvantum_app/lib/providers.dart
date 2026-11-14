@@ -28,6 +28,7 @@ final dbPathProvider = Provider<String?>((_) => null);
 final financeRepoProvider = Provider<FinanceRepository>(
   (ref) => FinanceRepository(
     ref.watch(dbProvider),
+    clock: epochMillisOf(ref.watch(appClockProvider)),
     // a change starts a mail run (debounced; does nothing when signed out)
     onChanged: () => ref.read(syncControllerProvider.notifier).requestSync(),
   ),
@@ -78,8 +79,14 @@ final eventsTickProvider = StreamProvider<int>(
       ),
 );
 
-/// The clock of the app (replaced by tests).
+/// The clock of the app (replaced by tests). The clocks of the assistant, of the
+/// sync and of the workout questions, and the stamps of the stores, follow it.
 final appClockProvider = Provider<DateTime Function()>((_) => DateTime.now);
+
+/// [now] as milliseconds since the epoch: the way the stores that stamp their
+/// records read a clock.
+int Function() epochMillisOf(DateTime Function() now) =>
+    () => now().millisecondsSinceEpoch;
 
 /// Starts the timer that wakes [todayProvider] at midnight (replaced by tests).
 final midnightTimerProvider =
@@ -269,7 +276,10 @@ final housekeepingProvider = Provider<Housekeeping>(
 );
 
 final recordRepoProvider = Provider<RecordRepository>(
-  (ref) => RecordRepository(ref.watch(dbProvider)),
+  (ref) => RecordRepository(
+    ref.watch(dbProvider),
+    clock: epochMillisOf(ref.watch(appClockProvider)),
+  ),
 );
 
 final taskOpsProvider = Provider<TaskOps>(

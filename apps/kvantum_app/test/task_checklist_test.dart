@@ -493,9 +493,17 @@ void main() {
   });
 
   group('the editor', () {
-    Future<void> boot(WidgetTester tester) async {
+    Future<void> boot(WidgetTester tester, {DateTime? clock}) async {
       useSize(tester, size: const Size(900, 1600));
-      await tester.pumpWidget(app(const TasksPage(), db));
+      await tester.pumpWidget(
+        app(
+          const TasksPage(),
+          db,
+          extra: [
+            if (clock != null) appClockProvider.overrideWithValue(() => clock),
+          ],
+        ),
+      );
       await tester.pumpAndSettle();
     }
 
@@ -515,7 +523,8 @@ void main() {
     testWidgets('a new task is saved with the items typed under it', (
       tester,
     ) async {
-      await boot(tester);
+      final clock = DateTime.utc(2030, 5, 6, 7, 8, 9);
+      await boot(tester, clock: clock);
       await tester.tap(find.text('Új feladat'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'Költözés');
@@ -542,6 +551,11 @@ void main() {
         ['Dobozok', 'Autó', 'Takarítás'],
       );
       expect(items.every((i) => !i.done), isTrue);
+      // (the places of the items are counted from the clock of the app)
+      expect(
+        [for (final i in items) i.pos],
+        [for (var n = 0; n < 3; n++) clock.millisecondsSinceEpoch + n],
+      );
       expect(await run(tester, () => records.dirtyCount()), 4);
       await shutdown(tester, db);
     });

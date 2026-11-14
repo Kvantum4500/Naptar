@@ -159,6 +159,16 @@ void main() {
       expect(file.meta.counts['events'], 0);
       expect(file.data.records, isEmpty);
     });
+
+    test(
+      'the calendar of a backup is stamped with the clock it was made by',
+      () async {
+        await seed(a);
+        final svc = a.service(at: DateTime.utc(2030, 5, 6, 7, 8, 9));
+        final file = await svc.open(await svc.create());
+        expect(file.data.calendarIcs, contains('DTSTAMP:20300506T070809Z'));
+      },
+    );
   });
 
   group('what a restore would do', () {

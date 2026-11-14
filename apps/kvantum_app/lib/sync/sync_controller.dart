@@ -54,8 +54,11 @@ final syncSchedulerProvider = Provider<SyncScheduler>(
       (delay, action) => Timer(delay, action),
 );
 
-/// "Now" for the scheduling decisions (replaceable in tests).
-final syncClockProvider = Provider<DateTime Function()>((_) => DateTime.now);
+/// "Now" for the scheduling decisions: the clock of the app unless a test gives
+/// it one of its own.
+final syncClockProvider = Provider<DateTime Function()>(
+  (ref) => ref.watch(appClockProvider),
+);
 
 /// Pause between two uploads of one run.
 final syncPaceProvider = Provider<Duration>(
@@ -296,6 +299,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       ref.read(financeRepoProvider),
       driveRemote,
       deviceId: await records.deviceId(),
+      clock: epochMillisOf(ref.read(appClockProvider)),
       log: _log,
     );
     _mail = mail;

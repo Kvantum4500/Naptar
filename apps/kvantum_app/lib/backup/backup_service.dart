@@ -113,7 +113,7 @@ class BackupService {
       encoded.addAll(all.map((r) => r.encode()));
     }
     final data = BackupData(
-      calendarIcs: exportIcs(evs),
+      calendarIcs: exportIcs(evs, nowUtc: now()),
       financeJson: fin,
       records: encoded,
     );
