@@ -711,4 +711,216 @@ void main() {
       expect(providerById('mistral').reasoningEffort, isNull);
     });
   });
+
+  group('a model that is gone (AI-24)', () {
+    Future<Object?> failure(Future<Object?> call) async {
+      try {
+        await call;
+        return null;
+      } on LlmException catch (e) {
+        return e;
+      }
+    }
+
+    test('model_not_found (OpenAI, Groq) is "gone", not a bad request', () async {
+      final p = openai(
+        (_) async => _json(
+          err(
+            'The model `gpt-9` does not exist or you do not have access to it.',
+            code: 'model_not_found',
+          ),
+          404,
+        ),
+      );
+      await expectLater(
+        p.generate('m', req()),
+        throwsA(
+          isA<LlmModelGone>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('Válassz másik modellt'), contains('gpt-9')),
+          ),
+        ),
+      );
+    });
+
+    test('a decommissioned model (Groq) is gone', () async {
+      final p = openai(
+        (_) async => _json(
+          err(
+            'The model `llama3-70b-8192` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a recommendation on which model to use instead.',
+            code: 'model_decommissioned',
+          ),
+          400,
+        ),
+      );
+      await expectLater(p.generate('m', req()), throwsA(isA<LlmModelGone>()));
+    });
+
+    test(
+      'the words are enough when the service sends no code (OpenRouter)',
+      () async {
+        final p = openai(
+          (_) async => _json(
+            err(
+              'No endpoints found for meta-llama/llama-3.3-70b-instruct:free.',
+            ),
+            404,
+          ),
+        );
+        await expectLater(p.generate('m', req()), throwsA(isA<LlmModelGone>()));
+      },
+    );
+
+    test('a 404 about something else stays a plain bad response', () async {
+      final p = openai((_) async => http.Response('Not Found', 404));
+      final e = await failure(p.generate('m', req()));
+      expect(e, isA<LlmBadResponse>());
+      expect(e, isNot(isA<LlmModelGone>()));
+    });
+
+    test('a rate limit that names the model stays a rate limit', () async {
+      final p = openai(
+        (_) async => _json(
+          err(
+            'Rate limit reached for model `llama-3.3-70b-versatile` on tokens per day (TPD): Limit 100000, Used 99000, Requested 2000. Please try again in 14m.',
+            type: 'tokens',
+            code: 'rate_limit_exceeded',
+          ),
+          429,
+        ),
+      );
+      final e = await failure(p.generate('m', req()));
+      expect(e, isA<LlmRateLimit>().having((r) => r.daily, 'daily', isTrue));
+    });
+
+    test('the key is not in the message', () async {
+      final p = openai(
+        (_) async => _json(
+          err('The model `$secret` does not exist.', code: 'model_not_found'),
+          404,
+        ),
+      );
+      final e = await failure(p.generate('m', req())) as LlmModelGone;
+      expect(e.message, isNot(contains(secret)));
+    });
+
+    test('Gemini: 404 for the model is gone, another 400 is not', () async {
+      GeminiProvider gemini(int status, Map<String, Object?> body) =>
+          GeminiProvider(
+            MockClient((_) async => _json(body, status)),
+            apiKey: 'AIzaSy-SECRET-KEY-123',
+          );
+      final gone = await failure(
+        gemini(404, {
+          'error': {
+            'code': 404,
+            'message': 'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent.',
+            'status': 'NOT_FOUND',
+          },
+        }).generate('m', req()),
+      );
+      expect(gone, isA<LlmModelGone>());
+      final other = await failure(
+        gemini(400, {
+          'error': {
+            'code': 400,
+            'message': 'Request contains an invalid argument.',
+            'status': 'INVALID_ARGUMENT',
+          },
+        }).generate('m', req()),
+      );
+      expect(other, isA<LlmBadResponse>());
+      expect(other, isNot(isA<LlmModelGone>()));
+    });
+  });
+
+  group('fallbackModelsFor: another model of the same provider', () {
+    List<LlmModel> ms(List<String> ids) => [
+      for (final i in ids) LlmModel(i, i),
+    ];
+
+    test('Groq: the preferences in order, never the failed one, no guards or speech', () {
+      final r = fallbackModelsFor(
+        'groq',
+        ms([
+          'llama-3.3-70b-versatile',
+          'llama-3.1-8b-instant',
+          'openai/gpt-oss-120b',
+          'openai/gpt-oss-20b',
+          'whisper-large-v3',
+          'llama-guard-4-12b',
+          'openai/gpt-oss-safeguard-20b',
+        ]),
+        'llama-3.3-70b-versatile',
+      );
+      expect(r, [
+        'openai/gpt-oss-20b',
+        'openai/gpt-oss-120b',
+        'llama-3.1-8b-instant',
+      ]);
+    });
+
+    test('at most three, without duplicates', () {
+      final r = fallbackModelsFor(
+        'groq',
+        ms([
+          'a-llama-1',
+          'b-llama-2',
+          'c-llama-3',
+          'd-llama-4',
+          'llama-3.3-70b-x',
+        ]),
+        'zzz',
+      );
+      expect(r, ['llama-3.3-70b-x', 'd-llama-4', 'c-llama-3']);
+    });
+
+    test('nothing when the failed model is the only one', () {
+      expect(
+        fallbackModelsFor(
+          'groq',
+          ms(['llama-3.3-70b-versatile']),
+          'llama-3.3-70b-versatile',
+        ),
+        isEmpty,
+      );
+      expect(fallbackModelsFor('groq', const [], 'x'), isEmpty);
+    });
+
+    test(
+      'OpenRouter: the free ones the preferences name, not the paid ones',
+      () {
+        final r = fallbackModelsFor(
+          'openrouter',
+          ms([
+            'meta-llama/llama-3.3-70b-instruct:free',
+            'google/gemma-2-9b-it:free',
+            'openai/gpt-4o-mini',
+            'mistralai/mistral-7b-instruct:free',
+          ]),
+          'google/gemma-2-9b-it:free',
+        );
+        expect(r, [
+          'meta-llama/llama-3.3-70b-instruct:free',
+          'mistralai/mistral-7b-instruct:free',
+        ]);
+      },
+    );
+
+    test(
+      'Gemini keeps its own list, an address of the user\'s own has none',
+      () {
+        expect(
+          fallbackModelsFor(
+            'gemini',
+            ms(['gemini-2.5-flash', 'gemini-2.5-flash-lite']),
+            'gemini-2.5-flash',
+          ),
+          ['gemini-2.5-flash-lite'],
+        );
+        expect(fallbackModelsFor('custom', ms(['a', 'b']), 'a'), isEmpty);
+      },
+    );
+  });
 }

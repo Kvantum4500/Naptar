@@ -259,6 +259,13 @@ class LlmBadRequest extends LlmBadResponse {
   final String? param;
 }
 
+/// The service does not know this model (any more): it was withdrawn or
+/// renamed. Nothing is wrong with the key or the request; another model of the
+/// same provider may do.
+class LlmModelGone extends LlmBadResponse {
+  const LlmModelGone(super.message);
+}
+
 /// The request itself is too big for the model or the per-minute window
 /// (HTTP 413, "request too large", "context length"). The numbers are the
 /// service's own, when it gave them.

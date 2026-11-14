@@ -13,7 +13,6 @@ import '../ui/undo_service.dart';
 import 'ai_settings.dart';
 import 'approval.dart';
 import 'assistant_service.dart';
-import 'gemini_provider.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
 import 'location_service.dart';
@@ -339,20 +338,34 @@ class AssistantController extends Notifier<AssistantState> {
       String? notice;
       try {
         outcome = await go(model);
-      } on LlmRateLimit catch (first) {
-        // Switching models only makes sense where one provider has several free
-        // ones (Gemini); billing problems affect every model alike.
-        if (info.id != 'gemini' || !(first.quotaZero || first.daily)) rethrow;
-        // This model has no (more) free quota: try the other flash models once.
+      } on LlmException catch (first) {
+        // Another model of the same provider may do when this one has no (more)
+        // quota (billing problems affect every model alike, and a rate limit
+        // that clears by itself is waited out elsewhere) or is gone altogether.
+        final gone = first is LlmModelGone;
+        final noQuota =
+            first is LlmRateLimit && (first.quotaZero || first.daily);
+        if (!gone && !noQuota) rethrow;
+        // try the provider's other models, once each
         AssistantOutcome? alt;
         String? used;
-        for (final cand in fallbackModels(await provider.listModels(), model)) {
-          status('A(z) $model-hez nincs szabad keret, próbálom ezt: $cand…');
+        for (final cand in fallbackModelsFor(
+          info.id,
+          await provider.listModels(),
+          model,
+        )) {
+          status(
+            gone
+                ? 'A(z) $model nem elérhető, próbálom ezt: $cand…'
+                : 'A(z) $model-hez nincs szabad keret, próbálom ezt: $cand…',
+          );
           try {
             alt = await go(cand);
             used = cand;
             break;
           } on LlmRateLimit {
+            continue;
+          } on LlmModelGone {
             continue;
           }
         }
@@ -360,8 +373,9 @@ class AssistantController extends Notifier<AssistantState> {
         outcome = alt;
         settings = settings.copyWith(model: used);
         await settingsNotifier.change(settings);
-        notice =
-            'Átváltottam a(z) $used modellre, mert a(z) $model-hez nincs szabad ingyenes keret. A Beállításokban átállíthatod.';
+        notice = gone
+            ? 'Átváltottam a(z) $used modellre, mert a(z) $model már nem elérhető. A Beállításokban átállíthatod.'
+            : 'Átváltottam a(z) $used modellre, mert a(z) $model-hez nincs szabad ${info.id == 'gemini' ? 'ingyenes ' : ''}keret. A Beállításokban átállíthatod.';
       }
       if (!live()) return;
       final notes = [?notice, ?outcome.notice];
@@ -398,7 +412,14 @@ class AssistantController extends Notifier<AssistantState> {
         );
       }
     } on LlmException catch (e) {
-      if (live()) state = AssistantState(prompt: text, error: e.message);
+      if (live()) {
+        state = AssistantState(
+          prompt: text,
+          error: e.message,
+          // a model that is gone is changed in the settings
+          errorNeedsSettings: e is LlmModelGone,
+        );
+      }
     } catch (e, st) {
       ref.read(diagLogProvider).error('ai', 'ask.failed', e, st);
       if (live()) {

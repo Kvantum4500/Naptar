@@ -280,6 +280,10 @@ class OpenAiProvider implements LLMProvider {
     r'request too large|maximum context length|context[_ ]length|reduce (the length of )?your (message|prompt)',
     caseSensitive: false,
   );
+  static final _modelGone = RegExp(
+    r'model\b[^.]*\b(does not exist|not found|decommissioned|deprecated|no longer (available|supported))|no endpoints found',
+    caseSensitive: false,
+  );
   static final _refusalWords = RegExp(
     r'unsupported|not supported|does not support|unknown|unrecognized|invalid|only the default|too large|at most|exceed',
     caseSensitive: false,
@@ -352,6 +356,18 @@ class OpenAiProvider implements LLMProvider {
         message.contains('Failed to call a function')) {
       return const LlmToolFailed(
         'A modell nem tudta összeállítani a tervet (hibás eszközhívás). Próbáld újra, vagy válassz másik modellt a Beállításokban.',
+      );
+    }
+    // The model is unknown or has been withdrawn (OpenAI / Groq
+    // `model_not_found`, Groq `model_decommissioned`, OpenRouter "No endpoints
+    // found"): nothing is wrong with the key or the request, another model of
+    // the provider may do.
+    if (code == 'model_not_found' ||
+        code == 'model_decommissioned' ||
+        ((status == 400 || status == 404 || status == 410) &&
+            _modelGone.hasMatch(message))) {
+      return LlmModelGone(
+        'A kiválasztott modell már nem elérhető ennél a szolgáltatónál${safe.isEmpty ? '' : ' ($safe)'}. Válassz másik modellt a Beállításokban.',
       );
     }
     // A short per-minute limit is NOT a billing problem, even when the message

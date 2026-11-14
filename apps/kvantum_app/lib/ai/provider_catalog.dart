@@ -171,6 +171,39 @@ LLMProvider buildProvider(LlmConfig c, http.Client client) {
   );
 }
 
+/// Models that do not chat (guards, speech, embeddings, images…): never a
+/// fallback.
+final _notForChat = RegExp(
+  r'guard|whisper|tts|embed|moderat|transcri|audio|image|realtime|dall-e|rerank|orpheus',
+  caseSensitive: false,
+);
+
+/// Other models of [providerId] worth trying when [failed] has no quota left
+/// or is gone: the ones the provider's own preferences name, best first, never
+/// the failed one, nothing that cannot chat, at most three. Gemini has its own,
+/// subtler list; an address of the user's own has no catalogue to choose from.
+List<String> fallbackModelsFor(
+  String providerId,
+  List<LlmModel> models,
+  String failed,
+) {
+  if (providerId == 'gemini') return fallbackModels(models, failed);
+  if (providerId == 'custom') return const [];
+  final out = <String>[];
+  for (final re in providerById(providerId).modelPrefs) {
+    final hit = [
+      for (final m in models)
+        if (m.id != failed &&
+            re.hasMatch(m.id) &&
+            !_notForChat.hasMatch(m.id) &&
+            !out.contains(m.id))
+          m.id,
+    ]..sort((a, b) => b.compareTo(a));
+    out.addAll(hit);
+  }
+  return out.take(3).toList();
+}
+
 /// The default model from the list a provider returned.
 String? pickModelFor(String providerId, List<LlmModel> models) {
   if (models.isEmpty) return null;

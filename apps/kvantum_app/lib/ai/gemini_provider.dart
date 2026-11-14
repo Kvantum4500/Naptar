@@ -293,6 +293,12 @@ class GeminiProvider implements LLMProvider {
         status: status,
       );
     }
+    // "models/x is not found for API version v1beta ...": the model is gone
+    if (status == 404 || apiStatus == 'NOT_FOUND') {
+      return LlmModelGone(
+        'A Gemini-modell nem található vagy már nem elérhető${message.isEmpty ? '' : ' (${redactSecrets(message, key: apiKey)})'}. Válassz másik modellt a Beállításokban.',
+      );
+    }
     return LlmBadResponse(
       'A Gemini hibát jelzett ($status${message.isEmpty ? '' : ': ${redactSecrets(message, key: apiKey)}'}).',
     );
