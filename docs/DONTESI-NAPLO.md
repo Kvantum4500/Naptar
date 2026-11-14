@@ -71,6 +71,11 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Másik út:** szinkronizált beállítás, törvényi alapértékekkel.
 - **Következmény:** eszközváltásnál újra be kell írni; nincs a mentésben, a Drive-on és az asszisztensnek szánt adatban; a pótlékok összeadódnak, túlóra nincs.
 
+### 2026-11-14 – Egy hibás levél vagy társeszköz nem állítja meg a pénzügyi postaládát; ami nem sikerült, azt nem törli
+- **Miért:** eddig egy levél, amelyet nem lehetett alkalmazni (vagy egy társeszköz, amelyre az írás elbukott), megszakította az egész kört: a többi levél és társeszköz sem kapott semmit, és minden szinkron ugyanott akadt el.
+- **Másik út:** a nem alkalmazható levelet törölni (adatvesztés: a levél a másik eszköz egyetlen példánya); az első hibánál leállni, mint eddig; korlátlanul újrapróbálni (a napló megtelne).
+- **Következmény:** a hálózati hiba és a lejárt bejelentkezés továbbra is az egész kör kudarca (visszalépéssel újrapróbálja); minden más hibánál a levél a Drive-on marad, egy futásban legfeljebb 3 próbát kap (az app újraindításáig utána békén marad), a sikertelen társeszköz állapota és a piszkos jelzők nem változnak, így a következő kör újra küldi. A szinkron-állapot kimondja („Pénzügy: N levelet vagy társeszközt most nem tudtam kezelni; a többit elintéztem, ezt később újra próbálom.”), a napló az okot is tartalmazza (`mail`).
+
 ## Az AI
 
 ### 2026-11-11 – Az AI csak javasol; a szabályokat a kód méri
@@ -102,6 +107,16 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** nincs hálózat, nincs modell, nincs új csomag, és a bizonytalan eredménynél megerősítő előnézet mondja ki, mit vett magától értetődőnek.
 - **Másik út:** modell az értelmezésre; saját beszédfelismerő csomag.
 - **Következmény:** a korpusz ≈ 180 mondat, de a te mondataid mások lehetnek – ezt élőben kell kipróbálni; hangbevitel: Android mikrofon-gomb, Windows Win+H.
+
+### 2026-11-14 – Az éjszakás műszak utáni nappali alvás a műszakból következik, saját szabálykóddal (`shift_sleep`)
+- **Miért:** az alvási sáv (alap 23:00–07:00) rögzített; egy éjszakás műszak után (reggel 6-ig dolgozol) a nappali alvás szabadnak látszott, így az asszisztens oda tett volna edzést vagy „szabad ablakot”.
+- **Másik út:** második, rögzített alvási sáv a beállításokban (a 12 napos ciklusban nem igaz); a meglévő `sleep_window` kódot újrahasználni (akkor a modell és a hibaüzenet nem tudná, miért esik rossz időre a blokk).
+- **Következmény:** éjszakás műszak = nem egésznapos műszak, amely a szokásos alvási sáv legalább felét lefedi (a valós időpontok szerint, falióra szerint, a nyári időszámítást is kiállja; a cím nem számít); az alvás a műszak vége + 1 óra (`shiftSleepDelayMinutes`) kezdettel a sáv hosszáig tart (18:00–06:00 után 07:00–15:00). Saját szabálykód (`shift_sleep`); a szokásos sáv előbbre való (egy blokkra sosem jön mindkettő); az események megosztásának kikapcsolásakor a modell általános mondatot kap. **Ismert hézag:** ilyenkor a `find_free_slots` eszköz üres foglaltságot kap, ezért nem tud a műszak utáni alvásról – a javaslatot viszont az ellenőrző a nem megosztott adaton is elutasítja. A rögzítő tesztek tudatosan frissültek (a műszak utáni oldalon most két szabálysértés van: `shift_sleep` és `shift_rest`).
+
+### 2026-11-14 – Ha a modellnek elfogyott a kerete vagy megszűnt, a szolgáltató következő modelljére vált – kimondva, megjegyezve
+- **Miért:** a Groq, az OpenRouter és társai modellenként adják az ingyenes keretet, és rendszeresen kivonnak modelleket; eddig csak a Gemininél volt tartalék, a többinél a hiba a felhasználónál maradt.
+- **Másik út:** mindig a hiba és a Beállítások; csendes váltás megjegyzés nélkül; számlázási hibánál is váltani (az minden modellre egyformán igaz, értelmetlen).
+- **Következmény:** csak a nulla vagy napi keret és a „modell megszűnt” (`LlmModelGone`: 404, `model_not_found`, `model_decommissioned`, és a szolgáltatók szavai 400 / 404 / 410 állapotnál) vált; a jelöltek a katalógus kedvenc-sorrendjében jönnek (legfeljebb 3, egyszer-egyszer, nem csevegő modellek – guard, whisper, tts … – nélkül); a váltás kimondva és megjegyezve („Átváltottam a(z) X modellre, mert a(z) M-hez nincs szabad keret / már nem elérhető. A Beállításokban átállíthatod.”); az egyéni címnek nincs katalógusa, ott nincs váltás; ha egyik sem jó, az ELSŐ hiba látszik (a megszűnt modellnél „Beállítások” gombbal).
 
 ## Pénzügy
 
@@ -176,6 +191,11 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** a 36 nem nulla `Future.delayed` ≈ 11 s fix alvás volt, és lassú gépen ingadozott; három falióra-mérő állítás gépfüggő volt.
 - **Másik út:** hosszabb várakozás.
 - **Következmény:** `turnUntil` / `pumpUntil` (az eseményhurok fordulói, a hiba csak a kudarc határa), `FakeAsync`, beinjektált szünet (`SyncEngine.pause`) és óra; az `appClockProvider` az egyetlen óra (a szolgáltatók és a tárak ezt követik); az őrző-teszt (`no_real_waits_test`) a visszacsúszást megfogja. Indokolt kivétel: a `Stopwatch` a `pumpUntil` kudarc-határában, a fájl-mtime alapú takarítás tesztjei és az óra-teszt, amely épp a valódi órát mondja ki alapértéknek.
+
+### 2026-11-14 – A szinkront hajtó teszt a feltöltések közti szünetet nullára állítja (a CI találta); őrző-teszt tartja
+- **Miért:** a repó nyilvános lett, az Actions újra futott, és egy tesztet háromszor ugyanúgy bukott: a vezérlő két feltöltés között 200 ms ÓRA-időt vár (`syncPaceProvider`), a teszt viszont az eseményhurok fordulóira (`turnUntil`) vár – lassú gépen a szünet alatt elég forduló telt el, gyorson elfogytak. Heteken át átment, mert a felhős gép lassú volt; a CI sebessége más.
+- **Másik út:** több forduló engedése (a hiba csak elbújna); valós várakozás (a QA-3 döntésével ellentétes).
+- **Következmény:** a `controller_test` a szünetet nullára állítja (a többi szinkront hajtó teszt már így tett); a `no_real_waits_test` új őre megbuktat minden tesztet, amely `.signIn(` / `.syncNow(` hívással szinkront hajt, és nem említi a `syncPaceProvider`-t (a megjegyzések nem számítanak; az őr ideiglenes fájlokon önmagát is kipróbálja). A tanulság: a CI a második szem, más géppel és más sebességgel.
 
 ## Függő (próba, nem döntés)
 

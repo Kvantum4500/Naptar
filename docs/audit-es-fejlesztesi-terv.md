@@ -405,7 +405,7 @@ Tesztek: mag 220 (volt 216), app 540 (volt 469), az elemzők és a formázás ti
 | AI-10 | kész | 413 / „request too large” / context length → `LlmTooLarge`, egyszeri szűkített újrapróbálás (≤ 4 nap, csak események); `tool_use_failed` / `MALFORMED_FUNCTION_CALL` ugyanígy; paramétert nevező 400 → egyszeri (legfeljebb kétszeri) újrapróbálás a paraméter nélkül, modellenként megjegyezve |
 | AI-11 | kész, eltéréssel | 2 újrapróbálás 1,5 s és 4 s múlva; **teljes határidő 90 s**; Mégse gomb, az oldal elhagyása is megszakít. **Eltérés:** a 500 és 529 is újrapróbálandó (a terv 502/503/504-et írt), a „nincs kapcsolat” nem |
 | AI-13 | kész | a katalógus presetjei: hőmérséklet 0,2, válaszkorlát (Groq 2048, a többi 4096), `reasoning_effort` a Groq gpt-oss-hoz; a `tokenBudget` a 2c-ben jön, ahol használjuk |
-| AI-24 | részben | közös HTTP-réteg (`llm_http.dart`: redakció, hibatérkép, JSON-kezelés), kérésenként egy kapcsolat, bezárva. A modell-tartalék lista (más szolgáltatókra) nem készült el. |
+| AI-24 | részben | közös HTTP-réteg (`llm_http.dart`: redakció, hibatérkép, JSON-kezelés), kérésenként egy kapcsolat, bezárva. A modell-tartalék lista (más szolgáltatókra) nem készült el – **pótolva a 6. kör 1. részében**. |
 
 ### 2c (mérés, átláthatóság, adatminimalizálás) – kész, a build után kipróbálandó
 
@@ -431,7 +431,7 @@ Tesztek: mag 335 (volt 226), app 627 (volt 588), az elemzők és a formázás ti
 |---|---|---|
 | AI-5 | kész, **döntéssel** | a nehézség kódból: 60 perctől (a „könnyű / nyújtás / mobilitás / séta” cím mindig könnyű; a modell `hard` jelzése egy szavazat); a műszak-puffer minden ≥ 45 perces edzésre. **Döntés:** check-in nélküli nap = 3/5 feltételezés (`PlanRules.assumedEnergy`) – a régi „check-in nélkül csak könnyű” a 60 perces nehézséggel minden jövő napot kizárt volna; a minimum emelésével visszajön |
 | AI-6 | kész | a naptárban lévő edzések (cím-alapú felismerés, a `kind` megkerülése ellen is) beleszámítanak a heti plafonba és a 48 órába; a lekérdezési ablak az ISO-hetekre és ±2 napra bővült |
-| AI-19 | részben | az alvás intervallum-átfedéssel; a műszakból levezetett alvás (éjszakás műszak után) nem készült el |
+| AI-19 | részben | az alvás intervallum-átfedéssel; a műszakból levezetett alvás (éjszakás műszak után) nem készült el – **pótolva a 6. kör 1. részében** |
 | AI-14 | kész | `scopeFor` v2: ékezet nélkül, tagadás, hamis találatok (költözés, fizetésnap, törölköző, „mozgás”), megnevezett nap szűkíti az ablakot, a kérdés csak az eseményeket kapja, vegyes kérés (`AskScope.plan`). 60 mondatos táblázatos teszt |
 | AI-18 | kész, eltéréssel | előrejelzés-gyorsítótár (3 óra) + az adatbetöltéssel párhuzamos lekérés; **eltérés:** a `get_weather` eszköz nem készült el (a validátor kóddal úgyis ellenőrzi a szabadtéri tételeket, az eszköz minden tervkérésnél további tokeneket költene) |
 | AI-23 | kész | kikapcsolt forrásnál a program rögtön magyarázza, mit kapcsolj be (pénzügyi kérdés kikapcsolt pénzügynél; törlés / áthelyezés kikapcsolt eseményeknél) |
@@ -757,9 +757,24 @@ Tesztek: app 2 705 (volt 2 627), mag 1 553 (volt 1 459), az elemzők és a form�
 | megfigyelések | nyitva | (1) valódi Apple / Outlook / Google export még nem volt kéznél; (2) a Beállítások kártyáinak viselkedése valódi eszközön; (3) a `material_ui`-ra áttérés (csak próba); (4) a lefedettségi eszköz Windowson (Linuxon próbáltam); (5) a legkevésbé fedett fájlok (`main.dart`, `google_auth_service.dart`, `wallet_bridge.dart`, `db.dart` migrációs ága) a rendszerre épülő rész: valódi eszközön próbálhatók |
 | eltérések | – | **Eltérés a tervtől:** (1) a Beállítások-oldal szétbontása három részt emelt ki (két kártyát és a beleegyezés-ablakot; a terv ≈ 590 sort írt, lett 574); (2) a `RetryAfterClient` kérésszámlálója és a Google-lehúzás időablaka nem kapott órát (a számláló / ablak a valódi időt méri); (3) a `DateTime.now()` marad a gyökér-órában, a napló időbélyegében, a frissítő fájlnév-utótagjaiban és a fájl-mtime alapú takarítás tesztjeiben (indokolt) |
 
+## 6. kör, 1. rész (a hiányok pótlása)
+
+### AI-19, REL-26, AI-24 és a CI első hibája – kész, a build után kipróbálandó
+
+Tesztek: app 2 758 (volt 2 705), mag 1 585 (volt 1 553), az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0). Friss klónokon négy időzónában, véletlen sorrendben és terhelés alatt is zöld; a teszt-nevek leltára rendben (egyetlen szándékos átnevezés: a műszak utáni távolság-próba a műszak előtti oldalra került). Szándékos elrontás: **99** (28 az alvás, 25 a postaláda, 39 a modell-tartalék, 7 az őrző-teszt); az első menetben 79 bukott el, 19 tesztelési hiányt mutatott (mind kapott tesztet), 1 egyenértékű volt (felesleges kód, törölve).
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| AI-19 műszakból levezetett alvás | kész | `shiftSleep()` (`rules.dart`): éjszakás műszak = nem egésznapos műszak, amely a szokásos alvási sáv legalább felét lefedi (valós időpontok, falióra szerint); az alvás a műszak vége + `shiftSleepDelayMinutes` (60) kezdettel a sáv hosszáig; `validateProposal` (saját kód: `shift_sleep`, a `sleep_window` előbbre való, általános szöveg a modellnek) és `findFreeSlots` (foglalt, puffer nélkül) is használja. **Ismert hézag:** az események megosztásának kikapcsolásakor a `find_free_slots` eszköz üres foglaltságot kap (az ellenőrző a javaslatot így is elutasítja) |
+| REL-26 levelenkénti hibaelkülönítés | kész | levelenként és társeszközönként külön hibakezelés a `FinanceMailbox`-ban (a hálózati hiba és a lejárt bejelentkezés az egész kört érinti, minden más csak az adott levelet / társat); egy levél legfeljebb 3 próba az app indulásától számítva; a sikertelen társeszköz állapota és a piszkos jelzők nem változnak; a lejárt levelek törlési hibái elkülönítve; `MailReport.failed`, a vezérlő kimondja (csatorna-kód: `partial`) |
+| AI-24 modell-tartalék más szolgáltatókra | kész | `LlmModelGone` (404 / `model_not_found` / `model_decommissioned` / szavak 400-404-410-nél; Gemini 404 / NOT_FOUND); `fallbackModelsFor` (kedvenc-sorrend, legfeljebb 3, nem csevegő modellek nélkül; Gemini a régi listát kapja; egyéni cím nem vált); a vezérlő csak nulla / napi keretnél és megszűnt modellnél vált, a váltást kimondja és megjegyzi; ha egyik sem jó, az ELSŐ hiba látszik |
+| CI-hiba (megfigyelés → javítva) | javítva | a `controller_test` a 200 ms-os valós szünetre épített (a felhős gépen átment, a GitHub-futtatón háromszor elbukott); a szünet nullára állítva, őr a `no_real_waits_test`-ben |
+| Android-fordítási próba | nem készült | a környezet-kérést elutasítottad; a kör csak Dart-kódot érint (a natív részeket a Build 84 lefordította) |
+| megfigyelések | nyitva | (1) a műszak utáni alvás hossza és kezdete (1 óra késés, a sáv hossza) becslés: a saját ciklusodon kell kipróbálni; (2) a `shiftSleepDelayMinutes` nincs a Beállításokban (a szabálykészletben van); (3) a modell-tartalék a szolgáltatók valódi hibaüzenetein nincs kipróbálva (a minták a dokumentált alakot követik) |
+
 ## I. ZÁRÓ ÁTNÉZÉS (a teljes kör vége: 2026-11-14)
 
-A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **77 kész**, **14 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő).
+A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **78 kész**, **13 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő) – a 6. kör 1. része után (a REL-26 „részben”-ből „kész” lett).
 
 **Nem része a körnek (kimondva):** SEC-10 (az OAuth-hatókör szűkítése – élő ellenőrzés kell), a **G** csomag (alkalmazászár, titkosított adatbázis), a **H** csomag (helyi tartalék-tervező), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
 
@@ -809,7 +824,7 @@ A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végreh
 | REL-23 | halasztva | Bootstrap-szinkron O(N²) és mindent-vagy-semmit (a Drive-token csak a … – alacsony súly: a bootstrap-szinkron oldalankénti haladása nem készült |
 | REL-24 | kész | Wallet: a natív sor kiolvasáskor azonnal törlődik , a könyvelés előtt → … |
 | REL-25 | kész | Windows: nincs egypéldányos védelem (második példány ugyanazt az … |
-| REL-26 | részben | Postaláda-apróságok: társ nélkül a rekordok dirty maradnak és … – a verziókapu és a postaláda-kapu kész; a levelenkénti hibaelkülönítés nem |
+| REL-26 | kész | Postaláda-apróságok: társ nélkül a rekordok dirty maradnak és … – a verziókapu és a postaláda-kapu kész; a levelenkénti hibaelkülönítés a 6. kör 1. részében |
 | REL-27 | halasztva | Indítás: a teljes latest_all tz-adatbázis szinkron dekódolása; az … – alacsony súly: a tz-adatbázis szinkron dekódolása és a lusta pénzügyi oldal nem készült |
 | REL-28 | kész | Tesztek: valós idejű várakozások (10 helyen), 28 DateTime.now() a … – 3/C: egy óra, várakozás helyett fordulók, őrző-teszt |
 | AI-1 | kész | Nincs tartalék a 8 k TPM keretben: egy terv-kérés ≈ 5,75 k + max 2 048 … – 2a–2e |
@@ -830,12 +845,12 @@ A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végreh
 | AI-16 | kész | A jóváhagyott változtatás végleges: elfogadáskor nincs újraellenőrzés, … – 2a–2e |
 | AI-17 | kész | Adatminimalizálás: alapból 15 tétel (kereskedő, jegyzet, pontos … – 2a–2e |
 | AI-18 | kész | Időjárás: soros (≤ 8 s várakozás az LLM-hívás előtt), cache nélkül, … – 2a–2e |
-| AI-19 | kész | Statikus alvási sáv vs 12 napos ciklus: az alvás-teszt csak a kezdetet … – 2a–2e |
+| AI-19 | kész | Statikus alvási sáv vs 12 napos ciklus: az alvás-teszt csak a kezdetet … – 2a–2e (a műszakból levezetett alvás: 6. kör 1. rész) |
 | AI-20 | kész | Kézikönyv: ellentmondások (rules.md:17 vs :19; output-format.md:14 vs … – 2a–2e |
 | AI-21 | kész | Minden naptár-esemény címe megy; tervezésnél elég a foglaltság (cím … – 2a–2e |
 | AI-22 | kész | A felhasználói kérés hossza korlátlan; a hely-címke szűretlen – 2a–2e |
 | AI-23 | kész | Kikapcsolt adatforrásnál is elmegy a kérés, csak azért, hogy „nem … – 2a–2e |
-| AI-24 | kész | Szolgáltató-higiénia: duplikált transport-/redakciókód; kérésenként új … – 2a–2e |
+| AI-24 | kész | Szolgáltató-higiénia: duplikált transport-/redakciókód; kérésenként új … – 2a–2e (a más szolgáltatók modell-tartaléka: 6. kör 1. rész) |
 | AI-25 | kész | Csendes csonkolás (slots.take(40) jelző nélkül); a learned.md akár ≈ 2 … – 2a–2e |
 | UX-1 | kész | A fő funkciók (Feladatok, Asszisztens, Beosztás, Beállítások) < 1000 … |
 | UX-2 | kész | Nincs visszavonás sehol (nincs SnackBarAction); a törlés csak … |

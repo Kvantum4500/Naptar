@@ -2,6 +2,40 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 6. kör, 1. rész – műszak utáni alvás, hibatűrő pénzügyi postaláda, modell-tartalék, a CI első hibája
+
+**Új: az asszisztens tudja, hogy éjszakás műszak után nappal alszol; egy hibás pénzügyi levél nem állítja meg a többit; ha a kiválasztott modell kerete elfogyott vagy a modell megszűnt, az asszisztens a szolgáltató másik modelljére vált, és megmondja.** Natív kód (Kotlin, C++, manifest) nem változott; a felület-változás csak új üzenet (lásd lent).
+
+**A repó nyilvános lett, az Actions újra ingyen fut.** A Build 84 (az előző kör utolsó commitja, `650d3ef`) lefordult Androidra és Windowsra is, és kiadás lett belőle ([`build-84`](https://github.com/Kvantum4500/Naptar/releases/tag/build-84)); a CI viszont talált egy tesztet, amely a felhős gépen heteken át átment, a GitHubén elbukott (lásd 4.).
+
+**1. Alvás éjszakás műszak után (AI-19)**
+- **Éjszakás műszak:** nem egésznapos műszak, amely a szokásos alvási sáv (alap 23:00–07:00) legalább felét lefedi – a valós időpontok szerint (a cím nem számít; a nyári időszámítás sem zavarja).
+- **Utána alvás:** a műszak vége + 1 óra (`shiftSleepDelayMinutes`) kezdettel a sáv hosszáig: a 18:00–06:00-s műszak után 07:00–15:00. Ebbe nem tesz edzést az asszisztens (új szabálysértés: `shift_sleep`, saját magyarázattal), és a szabad idősáv-keresés sem kínálja. A szokásos sáv előbbre való: egy blokkra sosem jön mindkét szabálysértés.
+- **Ismert hézag:** ha az események megosztása ki van kapcsolva, a `find_free_slots` eszköz üres foglaltságot kap, tehát nem tud a műszakról; a javaslatot az ellenőrző ilyenkor is elutasítja, általános mondattal.
+- **Tesztek:** `shift_sleep_test.dart` (31); a rögzítő tesztek tudatosan frissültek: a műszak UTÁNI oldalon most két szabálysértés van (`shift_sleep` + `shift_rest`), a tiszta távolság-próbák a műszak ELŐTTI oldalra kerültek.
+
+**2. Egy hibás levél nem állítja meg a pénzügyi postaládát (REL-26)**
+- **Levelenként és társeszközönként külön hibakezelés:** ami nem sikerül (a levelet nem lehet alkalmazni, az írás elbukik, a törlés elutasított), azt az app jelzi és a Drive-on hagyja, a többit elintézi. A hálózati hiba és a lejárt bejelentkezés továbbra is az egész kör kudarca (visszalépéssel újrapróbál).
+- **Egy levél legfeljebb háromszor** kap próbát az app indulásától számítva, utána békén marad (nem tölti a naplót); a sikertelen társeszköz állapota és a piszkos jelzők nem változnak, így a következő kör újra küldi; a lejárt levelek törlési hibái is elkülönítve.
+- **Új üzenet a szinkron-állapotban:** „Pénzügy: N levelet vagy társeszközt most nem tudtam kezelni; a többit elintéztem, ezt később újra próbálom.” (csatorna-kód: `partial`; az elsőként talált probléma adja a kódot: sérült levél előbb, mint sikertelen társeszköz.)
+- **Tesztek:** 12 új postaláda-teszt (köztük az, hogy az átmeneti hiba és a lejárt bejelentkezés nem a levél hibája, és hogy a korai leállás megtartja az addigi kudarcokat), 2 vezérlő-teszt; a `FakeDrive` kampókat kapott (`failReadOf` / `failWriteOf` / `failDeleteOf`).
+
+**3. Modell-tartalék minden szolgáltatónál (AI-24)**
+- **Mikor vált:** ha a kiválasztott modellnek nincs (több) ingyenes kerete (nulla vagy napi), vagy megszűnt (`LlmModelGone`: 404, `model_not_found`, `model_decommissioned`, és a szolgáltatók szavai 400 / 404 / 410 állapotnál; Gemini: 404 / NOT_FOUND). Számlázási hibánál, átmeneti hibánál és egyéni címnél nem.
+- **Mire:** a szolgáltató katalógusának kedvenc-sorrendjében legfeljebb 3 másik csevegő modellre (guard, whisper, tts … nélkül), egyszer-egyszer; a Gemini a saját, korábbi listáját kapja.
+- **Mit mond:** „Átváltottam a(z) X modellre, mert a(z) M-hez nincs szabad [ingyenes ]keret / már nem elérhető. A Beállításokban átállíthatod.” – és megjegyzi a váltást. Ha egyik sem jó, az ELSŐ hiba látszik; megszűnt modellnél „Beállítások” gombbal.
+- **Tesztek:** `model_fallback_test.dart` (10 vezérlő-szintű teszt), a hibatérkép és a katalógus tesztjei a `llm_robustness_test.dart`-ban (a „megszűnt modell” minden jele külön, a nem idetartozó esetek is).
+
+**4. A CI első hibája: a szinkront hajtó teszt valós szünetre épített**
+- **Mi történt:** a vezérlő két feltöltés között 200 ms ÓRA-időt vár (`syncPaceProvider`), a `controller_test` viszont az eseményhurok fordulóira vár: a lassú gépen a szünet alatt elég forduló telt el, a gyorson elfogytak. A GitHub-futtatón háromszor ugyanúgy elbukott.
+- **Javítás:** a teszt a szünetet nullára állítja (a többi szinkront hajtó teszt már így tett). **Őr:** a `no_real_waits_test` megbuktat minden tesztet, amely `.signIn(` / `.syncNow(` hívással szinkront hajt, és nem említi a `syncPaceProvider`-t (az őr ideiglenes fájlokon önmagát is kipróbálja).
+
+**5. Ellenőrzés**
+- **Tesztek:** mag **1 585** (volt 1 553), app **2 758** (volt 2 705); az elemzők és a formázás tiszták.
+- **Mátrix friss klónokon:** Flutter 3.47.9 és 3.50.0 (Dart 3.14.0) – az elemzők, a formázás és az összes teszt zöld; négy időzónában (UTC, Budapest, Los Angeles, Auckland), véletlen sorrendben és négy CPU-terhelés mellett is. **Teszt-nevek leltára:** a kör előtti állapot minden tesztje megvan, egyetlen kivétellel: a `workout_rules_test` egy próbája („8 hours after the shift is fine”) szándékosan átíródott a műszak ELŐTTI oldalra (új név), mert a műszak után most az alvás is tilt; helyette ott van a „after the shift the distance rule and the sleep both apply”.
+- **Szándékos elrontás: 99** (28 az alvás, 25 a postaláda, 39 a modell-tartalék, 7 az őrző-teszt). Az első menetben 79 elbukott, 19 tesztelési hiányt mutatott (mind kapott tesztet, most mind elbukik), 1 egyenértékű volt (felesleges kód: a `fallbackModelsFor` „custom” ága – törölve).
+- **Nem készült el:** az Android-fordítási próba a felhős gépen (a környezet-kérést elutasítottad). Erre most nincs is szükség: a kör csak Dart-kódot érint, a natív részeket a Build 84 lefordította.
+
 ## 5. fázis, 3. rész – valósághű minták, szétbontás, nem időre váró tesztek, egy óra, lefedettségi eszköz, dokumentáció
 
 **Új: a program ismeri a „valódi” naptárfájlok sajátosságait (Outlook zónanevei, lemondott értekezletek, Google-ból exportált fájl), a tesztek már nem az idő múlásától függnek, és ott a dokumentáció (architektúra, döntési napló, verzióemelés).** Felület-változás csak kettő van: a Frissítés ablakban a letöltés sávja sikertelen telepítés után nem marad ott; az import visszajelzése pedig az első figyelmeztetést szó szerint is megmutatja.
