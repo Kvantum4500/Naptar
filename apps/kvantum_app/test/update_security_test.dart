@@ -13,6 +13,7 @@ import 'package:kvantum_app/update/update_config.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_app/update/update_service.dart';
 
+import 'support/turns.dart';
 import 'update_signature_test.dart' show buildA, buildB, keyA, keyB, sigA, sigB;
 
 // The signature tests of update_signature_test.dart use signatures made by
@@ -1594,6 +1595,13 @@ void main() {
 
     final warning = find.byKey(const Key('update-token-warning'));
 
+    /// An install that did not happen leaves the dialog quiet: no bar still
+    /// saying "Letöltés… 37%" beside the message.
+    void expectQuietAfterFailure() {
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.textContaining('Letöltés…'), findsNothing);
+    }
+
     /// Opens the dialog and, if [install], presses the button.
     Future<void> open(
       WidgetTester tester,
@@ -1605,16 +1613,25 @@ void main() {
           cleanup.deleteSync();
         } catch (_) {}
       });
-      await tester.runAsync(() async {
-        await tester.pumpWidget(app);
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
+      await tester.pumpWidget(app);
+      // the check, and later the download (real files), take as long as they
+      // take: the dialog says it is done when its spinner is gone, and for the
+      // install when its button, off while it works, is back
+      await pumpUntil(
+        tester,
+        () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+        what: 'the end of the check',
+      );
       await tester.pumpAndSettle();
       if (!install) return;
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Frissítés most'));
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-      });
+      final button = find.widgetWithText(FilledButton, 'Frissítés most');
+      await tester.tap(button);
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => tester.widget<FilledButton>(button).onPressed != null,
+        what: 'the end of the install',
+      );
       await tester.pumpAndSettle();
     }
 
@@ -1740,6 +1757,7 @@ void main() {
       );
       expect(installed, isEmpty);
       expect(find.textContaining('aláírása nem érvényes'), findsOneWidget);
+      expectQuietAfterFailure();
     });
 
     testWidgets('a missing signature stops it when it is required', (
@@ -1760,6 +1778,7 @@ void main() {
       );
       expect(installed, isEmpty);
       expect(find.textContaining('nincs aláírás'), findsOneWidget);
+      expectQuietAfterFailure();
     });
 
     testWidgets('a missing signature does not, as long as it is not required', (
@@ -1797,6 +1816,7 @@ void main() {
       );
       expect(installed, isEmpty);
       expect(find.textContaining('időközben megváltozott'), findsOneWidget);
+      expectQuietAfterFailure();
     });
   });
 }

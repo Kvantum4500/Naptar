@@ -11,6 +11,8 @@ import 'package:http/testing.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_app/update/update_service.dart';
 
+import 'support/turns.dart';
+
 http.Response _json(Object body, [int status = 200]) => http.Response(
   jsonEncode(body),
   status,
@@ -535,33 +537,42 @@ void main() {
         final bytes = utf8.encode('package-bytes');
         final sum = sha256.convert(bytes).toString();
         final installed = <String>[];
-        await tester.runAsync(() async {
-          await tester.pumpWidget(
-            host(
-              service((req) async {
-                final path = req.url.path;
-                if (path.endsWith('/releases/latest')) {
-                  return _json(release(9, size: bytes.length));
-                }
-                if (path.endsWith('/assets/102')) {
-                  return http.Response('$sum  naptar-windows-9.zip', 200);
-                }
-                if (path.endsWith('/assets/101')) {
-                  return http.Response.bytes(bytes, 200);
-                }
-                return http.Response('', 404);
-              }),
-              installer: _FakeInstaller(installed),
-            ),
-          );
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        });
+        await tester.pumpWidget(
+          host(
+            service((req) async {
+              final path = req.url.path;
+              if (path.endsWith('/releases/latest')) {
+                return _json(release(9, size: bytes.length));
+              }
+              if (path.endsWith('/assets/102')) {
+                return http.Response('$sum  naptar-windows-9.zip', 200);
+              }
+              if (path.endsWith('/assets/101')) {
+                return http.Response.bytes(bytes, 200);
+              }
+              return http.Response('', 404);
+            }),
+            installer: _FakeInstaller(installed),
+          ),
+        );
+        // the check, and later the download (real files), take as long as they
+        // take: the test goes on when the screen says they are done
+        await pumpUntil(
+          tester,
+          () => find
+              .textContaining('Új verzió érhető el: 9')
+              .evaluate()
+              .isNotEmpty,
+          what: 'the news of the new version',
+        );
         await tester.pumpAndSettle();
         expect(find.textContaining('Új verzió érhető el: 9'), findsOneWidget);
-        await tester.runAsync(() async {
-          await tester.tap(find.text('Frissítés most'));
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-        });
+        await tester.tap(find.text('Frissítés most'));
+        await pumpUntil(
+          tester,
+          () => find.text('Kész, újraindítás…').evaluate().isNotEmpty,
+          what: 'the end of the update',
+        );
         await tester.pumpAndSettle();
         expect(installed, ['naptar-windows-9.zip']);
         expect(find.text('Kész, újraindítás…'), findsOneWidget);

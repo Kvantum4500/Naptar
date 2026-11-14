@@ -131,7 +131,7 @@ void main() {
       () async {
         final svc = WeatherService(
           MockClient((_) => Completer<http.Response>().future),
-          timeout: const Duration(milliseconds: 50),
+          timeout: const Duration(milliseconds: 1), // (the call never answers)
         );
         expect(await svc.forecast(bp), isNull);
       },
@@ -205,7 +205,7 @@ void main() {
     test('no answer in time', () async {
       await WeatherService(
         MockClient((_) => Completer<http.Response>().future),
-        timeout: const Duration(milliseconds: 20),
+        timeout: const Duration(milliseconds: 1), // (the call never answers)
         log: log,
       ).forecast(bp);
       expect((await entries()).single.code, 'timeout');

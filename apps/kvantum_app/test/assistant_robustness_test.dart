@@ -13,6 +13,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_llm.dart';
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 /// What the assistant does when things go wrong: server hiccups, the clock,
 /// cancelling, replies cut off by the length cap, references the model got
@@ -271,14 +272,10 @@ void main() {
   });
 
   group('cancelling', () {
-    // Waits until the model call is in flight. It only takes as long as the
-    // preparations (database reads) do; the generous cap is for slow machines.
-    Future<void> waitForCall(GatedLlm llm) async {
-      for (var i = 0; i < 6000 && llm.requests.isEmpty; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
-      expect(llm.requests, isNotEmpty);
-    }
+    // Waits until the model call is in flight: the preparations (database
+    // reads) take some turns of the event loop, nothing else.
+    Future<void> waitForCall(GatedLlm llm) =>
+        turnUntil(() => llm.requests.isNotEmpty, what: 'the call to the model');
 
     test('while the model is thinking: the late answer is dropped', () async {
       final llm = GatedLlm();

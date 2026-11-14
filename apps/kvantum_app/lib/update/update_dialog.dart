@@ -231,7 +231,14 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          // (nothing is being downloaded any more, whichever way it ended: a
+          // bar left at "Letöltés… 37%" beside an error would still look busy)
+          _progress = null;
+        });
+      }
     }
   }
 
