@@ -78,6 +78,29 @@ class ImportResult {
   int get total => added + updated;
 }
 
+/// The rule of [e] in one fixed spelling, so that two spellings of the same
+/// series compare equal. The rule editor writes the limit of a series as the
+/// end of a day (`…T235959Z`); a file carries the UTC instant of the LAST
+/// occurrence, which reads back as the wall-clock time of that occurrence
+/// (`…T090000Z`). The same occurrences, spelled differently: without this the
+/// device's own fresh backup would show its series as "changed". Only used for
+/// comparing, never stored. A rule the recurrence engine refuses cannot be
+/// converted: it is compared as plain text.
+String? _canonicalRule(CalEvent e) {
+  final rule = e.rrule;
+  if (rule == null) return null;
+  final bare = rule.replaceFirst(RegExp('^RRULE:', caseSensitive: false), '');
+  try {
+    return rruleFromGoogle(
+      rruleToGoogle(bare, e.start, e.tzid, allDay: e.allDay),
+      e.tzid,
+      allDay: e.allDay,
+    );
+  } catch (_) {
+    return bare;
+  }
+}
+
 bool _same(CalEvent a, CalEvent b) =>
     a.title == b.title &&
     a.notes == b.notes &&
@@ -86,7 +109,7 @@ bool _same(CalEvent a, CalEvent b) =>
     a.end == b.end &&
     a.tzid == b.tzid &&
     a.allDay == b.allDay &&
-    a.rrule == b.rrule &&
+    _canonicalRule(a) == _canonicalRule(b) &&
     a.colorId == b.colorId &&
     a.aiGenerated == b.aiGenerated &&
     a.recurringEventId == b.recurringEventId &&

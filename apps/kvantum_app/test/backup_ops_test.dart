@@ -51,6 +51,123 @@ void main() {
       );
     });
 
+    group('the same series in another spelling is not a change', () {
+      // The rule editor writes the limit of a series as the end of a day
+      // (…T235959Z). The file carries the UTC instant of the LAST occurrence,
+      // and that reads back as the wall-clock time of that occurrence
+      // (…T090000Z): the same series, spelled differently.
+      test('a backup of the device itself shows no change', () async {
+        final text = await backupOf([
+          evt(
+            's',
+            'Edzés',
+            floating(2026, 11, 2, 9),
+            rrule: 'FREQ=DAILY;UNTIL=20261106T235959Z',
+          ),
+        ]);
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes, isEmpty);
+        expect(plan.unchanged, 1);
+      });
+
+      test('an all-day series is told the same way', () async {
+        final text = await backupOf([
+          evt(
+            'd',
+            'Szabi',
+            floating(2026, 11, 2),
+            allDay: true,
+            len: const Duration(days: 1),
+            rrule: 'FREQ=DAILY;UNTIL=20261106T235959Z',
+          ),
+        ]);
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes, isEmpty);
+        expect(plan.unchanged, 1);
+      });
+
+      test(
+        'a limit that lets the same days through is the same series',
+        () async {
+          final text = await backupOf([
+            evt(
+              's',
+              'Edzés',
+              floating(2026, 11, 2, 9),
+              rrule: 'FREQ=DAILY;UNTIL=20261106T235959Z',
+            ),
+          ]);
+          // the same five days (the last one is the 6th at 09:00), the limit
+          // written as an hour after it
+          await repo.saveLocal(
+            evt(
+              's',
+              'Edzés',
+              floating(2026, 11, 2, 9),
+              rrule: 'FREQ=DAILY;UNTIL=20261106T100000Z',
+            ),
+          );
+          final plan = await previewBackup(
+            repo,
+            text,
+            calendarId: kNaptarCalendar,
+          );
+          expect(plan.changes, isEmpty);
+        },
+      );
+
+      test('a limit that lets other days through IS a change', () async {
+        final text = await backupOf([
+          evt(
+            's',
+            'Edzés',
+            floating(2026, 11, 2, 9),
+            rrule: 'FREQ=DAILY;UNTIL=20261106T235959Z',
+          ),
+        ]);
+        await repo.saveLocal(
+          evt(
+            's',
+            'Edzés',
+            floating(2026, 11, 2, 9),
+            rrule: 'FREQ=DAILY;UNTIL=20261108T235959Z',
+          ),
+        );
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes.map((c) => c.current.id), ['s']);
+      });
+
+      test('a rule the engine refuses is compared as plain text', () async {
+        final bad = evt(
+          'x',
+          'Rossz szabály',
+          floating(2026, 11, 2, 9),
+          rrule: 'FREQ=SOMETIMES;UNTIL=20261106T235959Z',
+        );
+        final text = await backupOf([bad]);
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        // it must not throw; the series cannot be shown to be the same
+        expect(plan.fresh, isEmpty);
+        expect(plan.changes.length + plan.unchanged, 1);
+      });
+    });
+
     test('junk gives an empty plan and the reasons', () async {
       final plan = await previewBackup(
         repo,
