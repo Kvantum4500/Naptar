@@ -62,10 +62,15 @@ void main() {
     return text.substring(open + 1).trim();
   }
 
-  /// "kind: file:line" of every real wait in [files], unless it is allowed.
-  /// [skip] is a file that is not scanned (this one: it names what it looks
-  /// for).
-  List<String> scan(Directory root, {String skip = 'no_real_waits_test.dart'}) {
+  /// "kind: file:line" of every real wait in [files], unless it is allowed
+  /// ([allow], by default [allowed]). [skip] is a file that is not scanned
+  /// (this one: it names what it looks for).
+  List<String> scan(
+    Directory root, {
+    String skip = 'no_real_waits_test.dart',
+    Map<String, String>? allow,
+  }) {
+    final lets = allow ?? allowed;
     final found = <String>[];
     for (final f in root.listSync(recursive: true)) {
       if (f is! File || !f.path.endsWith('.dart')) continue;
@@ -80,7 +85,7 @@ void main() {
             final arg = firstArgument(text, open).replaceAll('const ', '');
             if (arg == 'Duration.zero' || arg == 'Duration()') continue;
           }
-          if (allowed[rel] == e.key) continue;
+          if (lets[rel] == e.key) continue;
           final line = '\n'.allMatches(text.substring(0, m.start)).length + 1;
           found.add('${e.key}: $rel (≈ line $line)');
         }
@@ -150,6 +155,10 @@ Future<void> b() async {
   await Future.delayed(const Duration(milliseconds: 5)); // a real one
 }
 ''');
+      // an exception is for ONE kind of wait in ONE file
+      final lenient = scan(dir, allow: const {'a.dart': 'Stopwatch'});
+      expect(lenient.where((s) => s.contains(': a.dart')), hasLength(5));
+      expect(lenient.where((s) => s.startsWith('Stopwatch:')), isEmpty);
       final found = scan(dir);
       // a.dart: two delays, a sleep, two timers, a stopwatch
       expect(found.where((s) => s.contains(': a.dart')), hasLength(6));

@@ -130,12 +130,12 @@ List<String> reportLines(
 /// What was asked of the tool on the command line.
 class CoverageOptions {
   const CoverageOptions({
-    this.app = true,
-    this.core = true,
-    this.minApp,
-    this.minCore,
-    this.top = 10,
-    this.help = false,
+    required this.app,
+    required this.core,
+    required this.minApp,
+    required this.minCore,
+    required this.top,
+    required this.help,
   });
 
   final bool app;

@@ -50,7 +50,6 @@ final Map<String, String> _windowsByLowerName = {
 /// (`/mozilla.org/20070129_1/Europe/Berlin`).
 String? ianaZoneOf(String tzid) {
   final name = tzid.trim();
-  if (name.isEmpty) return null;
   bool known(String zone) {
     try {
       locationOf(zone);

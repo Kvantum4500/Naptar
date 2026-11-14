@@ -504,6 +504,11 @@ void main() {
       expect(ianaZoneOf('UTC'), 'UTC');
     });
 
+    test('an IANA name of one word that is not a Windows name stays', () {
+      expect(ianaZoneOf('CET'), 'CET');
+      expect(ianaZoneOf('EST5EDT'), 'EST5EDT');
+    });
+
     test(
       'case and spaces around the name do not matter for a Windows name',
       () {
@@ -643,6 +648,8 @@ void main() {
         'FREQ=WEEKLY;BYDAY=SU,MO;WKST=SU',
         'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=MO',
         'FREQ=DAILY;INTERVAL=2;WKST=SU',
+        // (only a WEEKLY rule counts its weeks)
+        'FREQ=MONTHLY;INTERVAL=2;BYDAY=MO,TU;WKST=SU',
       ]) {
         final imp = parseIcs(one('RRULE:$rule\r\n'), calendarId: 'c');
         expect(imp.problems, isEmpty, reason: rule);

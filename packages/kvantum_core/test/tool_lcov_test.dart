@@ -49,6 +49,24 @@ end_of_record
       expect(files.single.hits, {1: 4, 2: 2, 3: 0});
     });
 
+    test(
+      'a line that ran in one record of a file and not in the other ran',
+      () {
+        final files = parseLcov('''
+SF:lib/a.dart
+DA:1,3
+DA:2,0
+end_of_record
+SF:lib/a.dart
+DA:1,0
+DA:2,0
+end_of_record
+''');
+        expect(files.single.hits, {1: 3, 2: 0});
+        expect(files.single.covered, 1);
+      },
+    );
+
     test('a checksum after the count, CRLF line ends and backslash paths', () {
       final files = parseLcov(
         'SF:C:\\work\\lib\\a.dart\r\nDA:1,2,abc123\r\nend_of_record\r\n',
@@ -101,6 +119,8 @@ DA:9,9
       expect(libRelative(r'C:\x\lib\a.dart'), 'lib/a.dart');
       expect(libRelative('/x/mylib/a.dart'), '/x/mylib/a.dart');
       expect(libRelative('test/a_test.dart'), 'test/a_test.dart');
+      // (a path that starts with lib/ is not cut at a later one)
+      expect(libRelative('lib/a/lib/b.dart'), 'lib/a/lib/b.dart');
     });
 
     test('generated code is not code anybody wrote', () {
@@ -187,6 +207,18 @@ DA:9,9
         'mag: 50,0 % (2 / 4 sor, 2 fájl)',
         '      2 hiányzó sor  lib/a.dart (33,3 %)',
       ]);
+    });
+
+    test('the report lists only as many files as it was asked for', () {
+      final lines = reportLines('app', const [
+        FileCoverage('lib/a.dart', {1: 0, 2: 0}),
+        FileCoverage('lib/b.dart', {1: 0}),
+        FileCoverage('lib/c.dart', {1: 0}),
+      ], top: 2);
+      expect(lines, hasLength(3));
+      expect(lines[1], contains('lib/a.dart'));
+      expect(lines[2], contains('lib/b.dart'));
+      expect(lines.join('\n'), isNot(contains('lib/c.dart')));
     });
 
     test('the report without a gap lists no file', () {
