@@ -190,6 +190,28 @@ void main() {
         },
       );
 
+      test('a refused rule that nothing shifts (UTC) is the same without the '
+          'prefix too', () async {
+        // UNTIL together with COUNT is refused by the engine, so the rule is
+        // compared as text; in UTC no limit is moved on the way to the file and
+        // back, so the two texts can be equal at all
+        final text = await backupOf([
+          evt(
+            'u',
+            'UTC-esemény',
+            floating(2026, 11, 2, 9),
+            rrule: 'RRULE:FREQ=DAILY;UNTIL=20261106T235959Z;COUNT=3',
+          ).copyWith(tzid: 'UTC'),
+        ]);
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes, isEmpty);
+        expect(plan.unchanged, 1);
+      });
+
       test('a rule the engine refuses is compared as plain text', () async {
         final bad = evt(
           'x',
