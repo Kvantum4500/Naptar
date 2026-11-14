@@ -174,6 +174,40 @@ _Prop? _parseLine(String line) {
   );
 }
 
+/// A calendar file's bytes as text.
+///
+/// A content line is folded at 75 OCTETS, not letters, so a letter of two or
+/// three bytes (ő, €) can be cut in the middle by a fold: its first byte ends
+/// one line, its last begins the next one. Read as text first, each half
+/// becomes a replacement character and the letter is lost. So when the plain
+/// reading of a calendar shows replacement characters, the lines are joined
+/// BEFORE the bytes become letters (RFC 5545 unfolds octets). Anything else
+/// than a calendar is read as it is.
+String decodeCalendarBytes(List<int> bytes) {
+  final plain = utf8.decode(bytes, allowMalformed: true);
+  if (!plain.contains('\uFFFD') ||
+      !plain.trimLeft().toUpperCase().startsWith('BEGIN:VCALENDAR')) {
+    return plain;
+  }
+  final joined = <int>[];
+  var i = 0;
+  while (i < bytes.length) {
+    final c = bytes[i];
+    // a line break, followed by one space or tab: the fold
+    final crlf = c == 0x0D && i + 2 < bytes.length && bytes[i + 1] == 0x0A;
+    final at = crlf ? i + 2 : (c == 0x0A ? i + 1 : -1);
+    if (at > 0 &&
+        at < bytes.length &&
+        (bytes[at] == 0x20 || bytes[at] == 0x09)) {
+      i = at + 1;
+      continue;
+    }
+    joined.add(c);
+    i++;
+  }
+  return utf8.decode(joined, allowMalformed: true);
+}
+
 class IcsImport {
   const IcsImport(this.events, this.problems);
   final List<CalEvent> events;

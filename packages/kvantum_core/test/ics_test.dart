@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:test/test.dart';
 
@@ -411,6 +413,93 @@ END:VCALENDAR
       expect(imp.events, isEmpty);
       expect(imp.problems.single, contains('túl nagy'));
       expect(parseIcs(text, calendarId: 'c').events, hasLength(1));
+    });
+  });
+
+  group('a line folded between the bytes of one character', () {
+    // RFC 5545 folds a line at 75 OCTETS, so a letter of two or three bytes
+    // can be cut in the middle: "ő" is C5 91, and a fold may stand between.
+    List<int> file(List<int> summary) => [
+      ...utf8.encode(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\n'
+        'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+        'DTEND;TZID=Europe/Budapest:20260504T100000\r\nSUMMARY:',
+      ),
+      ...summary,
+      ...utf8.encode('\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'),
+    ];
+
+    String titleOf(String text) =>
+        parseIcs(text, calendarId: 'c').events.single.title;
+
+    test('is one character again when the bytes are joined first', () {
+      final cut = file([...utf8.encode('F'), 0xC5, 0x0D, 0x0A, 0x20, 0x91]);
+      expect(titleOf(decodeCalendarBytes(cut)), 'Fő');
+      // what reading the text gives: two replacement characters, not a letter
+      expect(titleOf(utf8.decode(cut, allowMalformed: true)), 'F��');
+    });
+
+    test(
+      'a character of three bytes cut twice, a fold with a tab, bare LF',
+      () {
+        // "€" is E2 82 AC
+        final cut = file([
+          ...utf8.encode('A'),
+          0xE2,
+          0x0A,
+          0x09,
+          0x82,
+          0x0D,
+          0x0A,
+          0x20,
+          0xAC,
+          ...utf8.encode('B'),
+        ]);
+        expect(titleOf(decodeCalendarBytes(cut)), 'A€B');
+      },
+    );
+
+    test('a file with nothing cut reads as it always did', () {
+      final whole = file(utf8.encode('Fogorvos, Győr'));
+      expect(decodeCalendarBytes(whole), utf8.decode(whole));
+    });
+
+    test('a really broken byte stays a replacement character', () {
+      final broken = file([
+        ...utf8.encode('A'),
+        0xFF,
+        0x0D,
+        0x0A,
+        0x20,
+        ...utf8.encode('B'),
+      ]);
+      expect(titleOf(decodeCalendarBytes(broken)), 'A�B');
+    });
+
+    test(
+      'only a calendar is unfolded: other files are decoded as they are',
+      () {
+        final json = [
+          ...utf8.encode('{"a":\r\n "bő'),
+          0xFF,
+          ...utf8.encode('"}'),
+        ];
+        expect(
+          decodeCalendarBytes(json),
+          utf8.decode(json, allowMalformed: true),
+        );
+        expect(decodeCalendarBytes(json), contains('\r\n '));
+      },
+    );
+
+    test('a byte order mark in front is no harm', () {
+      final cut = [
+        0xEF,
+        0xBB,
+        0xBF,
+        ...file([0xC5, 0x0D, 0x0A, 0x20, 0x91]),
+      ];
+      expect(titleOf(decodeCalendarBytes(cut)), 'ő');
     });
   });
 

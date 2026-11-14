@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:kvantum_core/kvantum_core.dart';
 
 /// File access for the backup, behind an interface so tests need no dialogs.
 abstract class BackupIo {
@@ -20,7 +21,11 @@ abstract class BackupIo {
 }
 
 class FilePickerBackupIo implements BackupIo {
-  const FilePickerBackupIo();
+  /// [read] lets the user choose a file and gives its bytes (null when
+  /// cancelled); tests replace it, the system's file dialog is not theirs.
+  const FilePickerBackupIo({this.read = _pickedBytes});
+
+  final Future<List<int>?> Function() read;
 
   @override
   Future<bool> save(
@@ -40,13 +45,17 @@ class FilePickerBackupIo implements BackupIo {
 
   @override
   Future<String?> pick() async {
-    final f = await FilePicker.pickFile(
-      dialogTitle: 'Naptár visszaállítása (.ics)',
-    );
-    if (f == null) return null;
-    final bytes = await f.readAsBytes();
-    return utf8.decode(bytes, allowMalformed: true);
+    final bytes = await read();
+    // a calendar is unfolded before its bytes become letters (see below)
+    return bytes == null ? null : decodeCalendarBytes(bytes);
   }
+}
+
+Future<List<int>?> _pickedBytes() async {
+  final f = await FilePicker.pickFile(
+    dialogTitle: 'Naptár visszaállítása (.ics)',
+  );
+  return f == null ? null : await f.readAsBytes();
 }
 
 final backupIoProvider = Provider<BackupIo>(
