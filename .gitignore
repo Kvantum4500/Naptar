@@ -7,3 +7,5 @@ key.properties
 *.jks
 # a private key (the release signing key, see docs/alairt-frissites.md) must never be committed
 *.pem
+# the output of tool/coverage.dart
+coverage/
