@@ -61,7 +61,7 @@ class _ExportImportBodyState extends ConsumerState<ExportImportBody>
     try {
       _working(_FileJob.exportIcs);
       final text = await exportBackup(ref.read(repoProvider));
-      final d = DateTime.now();
+      final d = ref.read(appClockProvider)();
       final name =
           'naptar-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.ics';
       _working(null); // (the save dialog is the system's)
@@ -79,7 +79,7 @@ class _ExportImportBodyState extends ConsumerState<ExportImportBody>
     try {
       _working(_FileJob.exportFinance);
       final text = await ref.read(financeRepoProvider).exportJson();
-      final d = DateTime.now();
+      final d = ref.read(appClockProvider)();
       final name =
           'penzugyek-${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}.json';
       _working(null); // (the save dialog is the system's)

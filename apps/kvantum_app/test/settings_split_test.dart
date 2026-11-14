@@ -38,6 +38,7 @@ class _GatedRepo extends EventRepository {
 
 class _MemoryIo implements BackupIo {
   String? saved;
+  String? savedName;
 
   @override
   Future<bool> save(
@@ -47,6 +48,7 @@ class _MemoryIo implements BackupIo {
     String dialogTitle = 'Naptár mentése',
   }) async {
     saved = text;
+    savedName = fileName;
     return true;
   }
 
@@ -66,7 +68,7 @@ void main() {
   late _MemoryIo io;
 
   /// The page in a window so low that most of the cards are out of the list.
-  Future<void> boot(WidgetTester tester, {String? key}) async {
+  Future<void> boot(WidgetTester tester, {String? key, DateTime? clock}) async {
     useSize(tester, size: const Size(700, 520));
     db = await newDb();
     repo = _GatedRepo(db);
@@ -80,6 +82,7 @@ void main() {
           currentBuildProvider.overrideWith((ref) async => 7),
           repoProvider.overrideWithValue(repo),
           backupIoProvider.overrideWithValue(io),
+          if (clock != null) appClockProvider.overrideWithValue(() => clock),
         ],
       ),
     );
@@ -215,6 +218,19 @@ void main() {
     expect(waiting(tester, 'Mentés fájlba'), isFalse);
     expect(io.saved, isNotNull, reason: 'the job ended where it began');
     expect(find.text('A naptár elmentve.'), findsOneWidget);
+    await shutdown(tester, db);
+  });
+
+  testWidgets('the files of the two backups are named by the date of the app '
+      'clock', (tester) async {
+    await boot(tester, clock: DateTime.utc(2030, 5, 6, 9));
+    await down(tester, find.text('Mentés fájlba'));
+    await tester.tap(find.text('Mentés fájlba'));
+    await tester.pumpAndSettle();
+    expect(io.savedName, 'naptar-2030-05-06.ics');
+    await tester.tap(find.text('Pénzügyek mentése'));
+    await tester.pumpAndSettle();
+    expect(io.savedName, 'penzugyek-2030-05-06.json');
     await shutdown(tester, db);
   });
 }
