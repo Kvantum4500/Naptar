@@ -735,3 +735,131 @@ Tesztek: app 2627 (volt 2470), mag 1459 (változatlan), az elemzők és a formá
 | útközben javítva | javítva | (1) a Frissítés ablak „Frissítés keresése…” sora túlcsordult 2× betűnél keskeny telefonon (a korábbi kódon is): `Expanded`; (2) az ablak tartalma 2× betűnél hosszabb a képernyőnél: görgethető; (3) a figyelmeztető ikon a betűvel nő; (4) a mutációs próba felesleges kódot talált, amely törölve / egyszerűsítve: a base64-olvasó két átfedő ága (a Dart olvassa az URL-biztos írásmódot, és az aláírás hosszát a könyvtár ellenőrzi), a token-dátum redundáns feltételei (egyetlen próbával, hogy a hónap létezik-e), a takarítás felesleges `existsSync` őre (a kivétel úgyis elnyelődik), az órára tett felesleges `.toUtc()`; (5) a `_isApi` nyilvános, táblázatosan tesztelhető függvény lett (`isUpdateApiUrl`) |
 | megfigyelések | nyitva | (1) a kiadási folyamat a valódi GitHub-futtatón (az Actions akadt): `gh`, `apkanalyzer`, `zipalign`, a PowerShell-lépés, a kiadás-feltöltő action; (2) aláírt kiadás valódi frissítésen (Windows-csere, Android-telepítő): a kulcspár és a titok beállítása után az első két aláírt kiadás; (3) a `github-authentication-token-expiration` fejléc megléte a te kulcsodnál; (4) az összevont Android-manifest valódi buildben; (5) a Frissítés ablak kinézete valódi eszközön; (6) a `UPDATE_PUBLIC_KEY` / `UPDATE_REQUIRE_SIGNATURE` define a valódi `flutter build`-ben (a tesztekben nincs define, ezért ott a szöveges őr és egy egyszeri próba fedi) |
 | eltérések | – | **Eltérés a tervtől:** (1) a `READ_EXTERNAL_STORAGE` is kikerül (a terv meghagyta); (2) a zip-védelem deklarált méretekre épül, a memóriahasználat átírása (folyamatos olvasás) nem készült; (3) `UPDATE_REQUIRE_SIGNATURE` kulcs nélkül zárt irányba hibázik, és a workflow ilyenkor a buildet is leállítja; (4) a `maxPackageBytes` a tesztekhez állítható; a titkos kulcsot a program nem látja, nem kéri, nem hozza létre (a kulcspárt te készíted az útmutató szerint) |
+
+
+## 5. fázis, 3. rész (minőség és rend)
+
+### CMP-4/5, QA-2, QA-3, QA-4 helyi része, lint, dokumentáció – kész, a build után kipróbálandó
+
+Tesztek: app 2 705 (volt 2 627), mag 1 553 (volt 1 459), az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0, friss klónon is); a teljes csomag zöld négy időzónában, véletlen sorrendben és terhelés alatt is. Szándékos elrontás: **108** (a végső lista 91 elrontása + 17 utólagos). A végső lista (91): 29 az `.ics`-kezelés és az időzónák magjában, 23 a mentés-előnézetben, a fájl beolvasásában, a szinkron szünetében, az import értesítésében, a hibasávban és a Frissítés ablakban, 10 az őrző-tesztben, 29 a lefedettségi eszközben; ehhez jön 17 az utólagos ellenőrzésben (a Google-lehúzás EXDATE-elágazása 2, az egy óra bekötései 13, a Beállítások kártyáinak keep-alive-ja 2); **a végső kódon, friss másolatokon mind a 108 elbukik.** Az első menetben 95-ből 80 bukott el; a 14 túlélő közül 11 tesztelési hiány volt (mind pótolva: a hétkezdet-figyelmeztetés csak heti szabálynál, az egyszavas IANA-zónanév, az „RRULE:” előtagos szabály, a nem átváltható szabály előtag nélküli visszaesése, az átrakott nap sorának párosítása és új azonosítója, a hibasáv színe, az őrző-teszt kivételének hatóköre, az lcov-összeadás, a „lib/” útvonal, a jelentés fájl-száma), 3 felesleges kód (törölve: az üres zónanév külön ága, a Google-lehúzás EXDATE `VALUE=DATE` paraméter-vizsgálata, a lefedettségi eszköz soha nem használt alapértékei); 1 érvénytelen elrontás (nem fordult) átírva.
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| CMP-5 minták (.ics, Google JSON) | részben | `packages/kvantum_core/test/fixtures/ics/` (Apple-, Outlook-, Google-stílus), `apps/kvantum_app/test/fixtures/google/` (7 JSON); **kézzel írt minták, nem valódi exportok** – a CMP-5 addig „részben”, amíg valódi exportot nem küldesz; a `.gitattributes` (`*.ics -text`) bájtpontosan őrzi a CRLF-et és a BOM-ot |
+| ① ② ②b ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ | kész | ① az `.ics`-mentés sosem dob; ② + ②b a mentés-előnézet kanonikus szabály- és kiesett nap-összevetése; ③ + ⑥ Windows-zónanevek és minden időpont a saját zónájában (`ianaZoneOf`, `windowsZoneNames`); ④ `STATUS:CANCELLED`; ⑤ `EXDATE;VALUE=DATE-TIME`; ⑦ a Google fájlja = az eszköz eseménye (iCalUID); ⑧ az árva átrakott nap önálló esemény; ⑨ az áthajtott többbájtos betű (`decodeCalendarBytes`); mind egy-egy commit, a javítás nélkül bizonyítottan piros teszttel |
+| figyelmeztetések | kész | RDATE, EXRULE, `RANGE=THISANDFUTURE`, WKST ≠ MO több napos kétheti szabálynál, UTC-ben rögzített sorozat; az import értesítése az első problémát szó szerint is mutatja |
+| QA-2 szétbontás | részben | `assistant_service.dart` 1 670 → 708 sor (`part` + privát kiterjesztés, a régi fájl újra-exportál; a sorok halmaza egyezik), `settings_page.dart` 1 187 → 574 sor (két állapotos kártya `AutomaticKeepAlive`-val és a beleegyezés-ablak külön fájlban; `settings_split_test`); nem része: `quick_entry` 1 085, `assistant_page` 921, `bank_import_page` 908, `event_editor` 908 |
+| QA-3 várakozások és órák | kész | 36 valós várakozás (≈ 11 s) → az eseményhurok fordulói / `FakeAsync` / beinjektált szünet és óra; három falióra-állítás kikerült (`SyncEngine.pause`); őrző-teszt (`no_real_waits_test`); egy óra (`appClockProvider`; a szolgáltatók, a tárak bélyege, a mentés `DTSTAMP`-je, a mentés-fájlok neve, a feladat-lista sorrend-alapja, a cél határidő-választója); a „most”-ra támaszkodó tesztek rögzített órán |
+| QA-4 helyi rész | kész | `dart tool/coverage.dart` (+ `tool/lcov.dart`, 28 teszt a magban): app **93,4 %** (13 637 / 14 606 sor, 137 fájl), mag **97,1 %** (3 963 / 4 083 sor, 40 fájl) sorfedettség; a generált kód nem számít; lint: 21 új szabály mindkét csomagban |
+| `material_ui` próba | kész (nem épül be) | külön másolaton a csomag + `dart fix --apply`: 203 javítás 95 fájlban (98 fájl, +134 / −131 sor), a `GlobalMaterialLocalizations` ütközés három fájlban kézzel; Flutter 3.50.0-n a próba idején mind a 2 699 app-teszt zöld volt, 3.47.9-en az elemzés tiszta; a beépítés külön döntésre vár (lásd `docs/verzio-frissites.md`) |
+| dokumentáció | kész | `docs/ARCHITEKTURA.md`, `docs/DONTESI-NAPLO.md`, `docs/verzio-frissites.md`, a README és a CHANGELOG frissítve; ez a záró átnézés |
+| útközben javítva | javítva | (1) a Frissítés ablak „Letöltés… 100%” sávja sikertelen telepítés után az üzenet mellett maradt – most eltűnik (`update_security_test`); (2) a `unawaited_futures` lint egy valódi hibát talált: a `gemini_test` helyi `fail` függvénye eltakarta a teszt-keretrendszerét; (3) a mentés-előnézet az eszköz saját mentését „módosultnak” mutatta (②, ②b) |
+| megfigyelések | nyitva | (1) valódi Apple / Outlook / Google export még nem volt kéznél; (2) a Beállítások kártyáinak viselkedése valódi eszközön; (3) a `material_ui`-ra áttérés (csak próba); (4) a lefedettségi eszköz Windowson (Linuxon próbáltam); (5) a legkevésbé fedett fájlok (`main.dart`, `google_auth_service.dart`, `wallet_bridge.dart`, `db.dart` migrációs ága) a rendszerre épülő rész: valódi eszközön próbálhatók |
+| eltérések | – | **Eltérés a tervtől:** (1) a Beállítások-oldal szétbontása három részt emelt ki (két kártyát és a beleegyezés-ablakot; a terv ≈ 590 sort írt, lett 574); (2) a `RetryAfterClient` kérésszámlálója és a Google-lehúzás időablaka nem kapott órát (a számláló / ablak a valódi időt méri); (3) a `DateTime.now()` marad a gyökér-órában, a napló időbélyegében, a frissítő fájlnév-utótagjaiban és a fájl-mtime alapú takarítás tesztjeiben (indokolt) |
+
+## I. ZÁRÓ ÁTNÉZÉS (a teljes kör vége: 2026-11-14)
+
+A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **77 kész**, **14 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő).
+
+**Nem része a körnek (kimondva):** SEC-10 (az OAuth-hatókör szűkítése – élő ellenőrzés kell), a **G** csomag (alkalmazászár, titkosított adatbázis), a **H** csomag (helyi tartalék-tervező), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
+
+| Azonosító | Állapot | Mi az, és mi lett |
+|---|---|---|
+| SEC-1 | részben | A feature-ági [build] is „latest” kiadás: minden eszköz jóváhagyatlan … – a csatornák (stabil / előzetes) a workflow-PR-ban (#5, piszkozat; a beolvasztás a tiéd); az app „Előzetes verziók” kapcsolója kész; Environment-jóváhagyás, SHA-pin, CODEOWNERS nem készült |
+| SEC-2 | kész | Elavult egyéni URL felülír minden OpenAI-kompatibilis szolgáltatót: a … – 0. fázis |
+| SEC-3 | kész | Frissítés: integritás igen, hitelesség nem (a SHA-256 ugyanabból a … – fokozatos Ed25519; élesítés: kulcspár + titok + változó + a workflow-PR beolvasztása + új build (a tiéd) |
+| SEC-4 | kész | A beégetett UPDATE_TOKEN és Google client secret kinyerhető a … – lejárat-figyelmeztetés + útmutató; a token a binárisban marad (döntés) |
+| SEC-5 | kész | Android Auto Backup: nincs allowBackup/dataExtractionRules → a DB … – 0. fázis |
+| SEC-6 | részben | SQLite titkosítatlan; Windowson Documents\kvantum.sqlite … – a Windows-adatbázis a %LOCALAPPDATA%-ban; a titkosítás (G csomag) kizárva |
+| SEC-7 | kész | Wallet-értesítések nyersen és korlátlan ideig maradnak a … – 0. fázis |
+| SEC-8 | kész | A szabálysértési visszajelzés megkerüli a megosztási kapcsolókat és a … – 0. fázis |
+| SEC-9 | kész | Az AI-alapértelmezések mind BE ; a kézikönyv (profil: sérülések, célok) … – 2c: beleegyező párbeszéd, Kézikönyv-kapcsoló |
+| SEC-10 | halasztva | A calendar hatókör az összes naptárat eléri; a tulajdonos-szerepű, … – élő ellenőrzés kell (`calendar.app.created` naptárlista nélkül); nem része a körnek |
+| SEC-11 | kész | Az egyéni végpont http:// és bármely host lehet; a Gemini hibaszöveg … – 0. fázis |
+| SEC-12 | kész | Modell-jogosultság és injekció-rések: új javaslatok előre kijelöltek; … – 0. fázis |
+| SEC-13 | kész | Saját hiba: isAuthExpired a „failed to obtain access credentials” … – 0. fázis |
+| SEC-14 | kész | open_filex felesleges média-engedélyeket és root-path FileProvidert … – az engedélyek törölve; a FileProvider marad (maradék-kockázat) |
+| SEC-15 | kész | Frissítő finomságok: a token hozzáadása csak host-egyezésen múlik … – zip-védelem deklarált méretekre; a memóriahasználat átírása nem készült |
+| SEC-16 | részben | Drive appData sima JSON, a levelek feladója nincs hitelesítve, az … – óraeltérés-észlelés + max(óra, meglévő + 1); a bejövő bélyeg lefogása nincs (döntés) |
+| SEC-17 | részben | Export fájlok (pénzügyi JSON, .ics) titkosítatlanok, a MIME … – a jelentés `text/plain`, az automatikus mentés jelszavas zip lehet; a kézi export titkosítatlan; zár és FLAG_SECURE: G csomag (kizárva) |
+| SEC-18 | részben | Helyi release-build csendben debug-kulcsra esik vissza ; a flutter … – Flutter-pin kész (PR #4); a CI-kapuk, jogosultságok, release ← tesztek a workflow-PR-ban (#5) |
+| SEC-19 | részben | A .gitignore secrets* mintája a secrets.example.json-t is elrejti, … – a minta és a `secrets.example.json` rendben; a `deviceId` 32 bites marad |
+| REL-1 | kész | Egyetlen nem támogatott/hibás RRULE (pl. WKST=SU – a rrule csomag csak … |
+| REL-2 | kész | Az első alkalommal látott kivétel-példány (Google-felületen … – 1a; élő Google-viselkedés nem ellenőrizve |
+| REL-3 | kész | A Calendar/Drive HTTP-hívásoknak nincs időkorlátja (a … |
+| REL-4 | kész | A teljes újraszinkron (410 után) tükörtörli a helyi, linkelt … |
+| REL-5 | kész | Pénzügyi postaláda: a > 180 napja néma társ a known-ban marad → … |
+| REL-6 | kész | Visszaállított/klónozott DB ugyanazt a deviceId-t használja (a levelek … |
+| REL-7 | kész | Újrapróbálás: a quotaExceeded/calendarUsageLimitsExceeded … |
+| REL-8 | kész | Lekérdezési költség: idle ciklus ≥ 5 hívás/perc (≈ 7 200/nap), a … – adaptív ütemezés; háttér-szinkron nincs |
+| REL-9 | kész | Utolsó-író-nyer eszközórákkal: óraeltérés vagy jövőbeli bélyeg tartósan … |
+| REL-10 | kész | A lehúzás nem hibaizolált: törölt Naptar-naptár → percenként Instance … |
+| REL-11 | kész | events.update (PUT) törli a Google-oldali mezőket (emlékeztetők, … |
+| REL-12 | részben | A távoli törlés elnyeli a fel nem töltött helyi szerkesztést; az … – a szerkesztő mentése egészében érvényes (nincs mezőszintű összefésülés); a kapcsolat megmarad, a távoli törlés nem viszi el a függő szerkesztést |
+| REL-13 | kész | .ics import/export: az import felülírja az újabb helyi módosítást; az … |
+| REL-14 | kész | A többlépéses írások nem tranzakciósak (műszak-generálás ≈ 90 külön … |
+| REL-15 | kész | Olvas-módosít-ír versenyek: edit vs applyRemote, saveTx vs … |
+| REL-16 | kész | Nincs formátum-verziókapu: a v:1 íródik, de nem olvasódik; az újabb … |
+| REL-17 | kész | A migráció nem tranzakciós (a onUpgrade közvetlenül hívódik ), romboló … |
+| REL-18 | kész | Korlátlan növekedés és hiányzó indexek: a tombstone-ok sosem … |
+| REL-19 | kész | Emlékeztetők: minden esemény-/check-in stream-emisszióra cancelAll + ≤ … – különbség-alapú ütemezés, Windowson is; pontos riasztás (USE_EXACT_ALARM) kimarad |
+| REL-20 | kész | expand() minden tickre minden sorozatot az elejétől járja, … |
+| REL-21 | kész | Időzóna: a kijelzés Europe/Budapesthez kötött, a „ma” az eszköz … |
+| REL-22 | kész | Nincs összeomlás-/hibarögzítés (FlutterError.onError/runZonedGuarded … |
+| REL-23 | halasztva | Bootstrap-szinkron O(N²) és mindent-vagy-semmit (a Drive-token csak a … – alacsony súly: a bootstrap-szinkron oldalankénti haladása nem készült |
+| REL-24 | kész | Wallet: a natív sor kiolvasáskor azonnal törlődik , a könyvelés előtt → … |
+| REL-25 | kész | Windows: nincs egypéldányos védelem (második példány ugyanazt az … |
+| REL-26 | részben | Postaláda-apróságok: társ nélkül a rekordok dirty maradnak és … – a verziókapu és a postaláda-kapu kész; a levelenkénti hibaelkülönítés nem |
+| REL-27 | halasztva | Indítás: a teljes latest_all tz-adatbázis szinkron dekódolása; az … – alacsony súly: a tz-adatbázis szinkron dekódolása és a lusta pénzügyi oldal nem készült |
+| REL-28 | kész | Tesztek: valós idejű várakozások (10 helyen), 28 DateTime.now() a … – 3/C: egy óra, várakozás helyett fordulók, őrző-teszt |
+| AI-1 | kész | Nincs tartalék a 8 k TPM keretben: egy terv-kérés ≈ 5,75 k + max 2 048 … – 2a–2e |
+| AI-2 | kész | A fix rész a terv-kérés 72 %-a; ugyanazok a szabályok 2–3×: korlátok … – 2a–2e |
+| AI-3 | kész | A javítási kör mindent újraküld, és a hibás ref/deletions/moves … – 2a–2e |
+| AI-4 | kész | Csonka tool-hívás (finish_reason=length) „argumentum nélküli”-vá válik … – 2a–2e |
+| AI-5 | kész | A hard a modell állítása; jövőbeli napra hard:true mindig elutasított … – 2a–2e |
+| AI-6 | kész | A heti plafon és a 48 órás szabály csak az adott javaslat blokkjait … – 2a–2e |
+| AI-7 | kész | A javaslatok száma/horizontja korlátlan, mind előre kijelölt: egy … – 2a–2e |
+| AI-8 | kész | Cache-ellenes sorrend: perc-pontos „MAI IDŐ” a rendszerprompt ≈ 96. … – 2a–2e |
+| AI-9 | kész | A usage (prompt/output token, finishReason) parse-olva, de eldobva; a … – 2a–2e |
+| AI-10 | kész | 413 / „Request too large” / tool_use_failed / paraméter-400 nincs … – 2a–2e |
+| AI-11 | kész | Nincs újrapróbálás hálózati/5xx hibára, nincs globális határidő, Mégse … – 2a–2e |
+| AI-12 | kész | Hiba: a várakozási állapot („Limit miatt várok N másodpercet…”) sosem … – 2a–2e |
+| AI-13 | kész | Fix temperature 0.4 minden szolgáltatónál (egyes OpenAI-modellek … – 2a–2e |
+| AI-14 | kész | scopeFor törékeny: ékezet nélküli szavak, tagadás („ne töröld”), vegyes … – 2a–2e |
+| AI-15 | kész | A törlés/áthelyezés akkor is feldolgozódik, ha a felhasználó nem kért … – 2a–2e |
+| AI-16 | kész | A jóváhagyott változtatás végleges: elfogadáskor nincs újraellenőrzés, … – 2a–2e |
+| AI-17 | kész | Adatminimalizálás: alapból 15 tétel (kereskedő, jegyzet, pontos … – 2a–2e |
+| AI-18 | kész | Időjárás: soros (≤ 8 s várakozás az LLM-hívás előtt), cache nélkül, … – 2a–2e |
+| AI-19 | kész | Statikus alvási sáv vs 12 napos ciklus: az alvás-teszt csak a kezdetet … – 2a–2e |
+| AI-20 | kész | Kézikönyv: ellentmondások (rules.md:17 vs :19; output-format.md:14 vs … – 2a–2e |
+| AI-21 | kész | Minden naptár-esemény címe megy; tervezésnél elég a foglaltság (cím … – 2a–2e |
+| AI-22 | kész | A felhasználói kérés hossza korlátlan; a hely-címke szűretlen – 2a–2e |
+| AI-23 | kész | Kikapcsolt adatforrásnál is elmegy a kérés, csak azért, hogy „nem … – 2a–2e |
+| AI-24 | kész | Szolgáltató-higiénia: duplikált transport-/redakciókód; kérésenként új … – 2a–2e |
+| AI-25 | kész | Csendes csonkolás (slots.take(40) jelző nélkül); a learned.md akár ≈ 2 … – 2a–2e |
+| UX-1 | kész | A fő funkciók (Feladatok, Asszisztens, Beosztás, Beállítások) < 1000 … |
+| UX-2 | kész | Nincs visszavonás sehol (nincs SnackBarAction); a törlés csak … |
+| UX-3 | kész | Nincs keresés, nincs napirend/lista nézet („következő 14 nap”), nincs … – keresés, napirend, húzás; a húzással áthelyezés nincs (döntés) |
+| UX-4 | kész | Billentyűparancs csak a szerkesztőben (Ctrl+S, Esc) ; Windowson nincs N … |
+| UX-5 | kész | Hibaüzenetek: angol osztály-dumpok (REL-22); fejlesztői szöveg a … |
+| UX-6 | kész | A Beállítások egyetlen hosszú oldal (≈ 720 sor: AI, pénzügy, Wallet, … |
+| UX-7 | kész | Nincs első indítási vezetés: belépés, API-kulcs, hely, … |
+| UX-8 | kész | Hozzáférhetőség: a hónaprács és az időrács szinte Semantics nélkül … |
+| UX-9 | kész | Téma: csak rendszerkövetés, fix indigó; 11 kemény Colors.green/orange |
+| UX-10 | kész | Windows ablak: induló 1280×720, minimális méret nincs beállítva … |
+| UX-11 | kész | A hosszú műveletek (műszak-generálás ≈ 90 elem feltöltése) nem mutatnak … |
+| UX-12 | nem cél | Kemény magyar szövegek, nincs l10n (ARB) – személyes, magyar appnál … – kemény magyar szövegek, nincs l10n |
+| UX-13 | info | Jó: eseményszerkesztő (megerősítés, ismétlődés-szerkesztő, 24 órás idő, … – jó, megtartandó |
+| CMP-1 | kész | Flutter stable rögzítetlen a CI-ben; a lock dart ≥ 3.13.7 / flutter ≥ … – a Flutter 3.50.0 / Dart 3.14.0 / Java 21 rögzítve; havi ellenőrzőlista: `docs/verzio-frissites.md` |
+| CMP-2 | részben | Android: minSdk/targetSdk a Flutter alapértelmezése (24/36); pontos … – a workflow-PR-ban (tanácsadó kapu: zipalign, engedély-lista) |
+| CMP-3 | részben | Windows: csak x64; a VC++ futtatókörnyezet függősége nem ellenőrzött; … – a workflow-PR-ban (VC++ DLL-ek az app mellé) |
+| CMP-4 | kész | Adatformátum-kompatibilitás verziók között (lásd REL-16) – verziókapu + kézzel írt minták (3/A) |
+| CMP-5 | részben | Google/ICS-valóság: WKST, RDATE, többszörös RRULE (dokumentált korlát), … – kézzel írt Apple / Outlook / Google minták; valódi export még nincs |
+| CMP-6 | részben | Függőségek: a pub outdated/advisory itt nem futtatható; drift_flutter … – a workflow-PR-ban (heti `deps.yml`) |
+| CMP-7 | kész | Töréspontok szétszórva (760 / 820 / 900 / 1000 px) három fájlban; … – a töréspontok egy helyen: `lib/ui/breakpoints.dart` |
+| CMP-8 | nem cél | iOS/macOS/Linux nincs célozva (nem kért) – iOS / macOS / Linux |
+| QA-1 | kész | A README elavult – 0. fázis; a README minden körben frissül |
+| QA-2 | részben | Nagy fájlok (assistant_service, settings_page …) – az `assistant_service` (1 670 → 708 sor) és a `settings_page` (1 187 → 574 sor) szétbontva; a `quick_entry` (1 085), `assistant_page`, `bank_import_page`, `event_editor` (~ 900) marad |
+| QA-3 | kész | Teszthiányok; valós idejű várakozások – 3/C |
+| QA-4 | részben | CI: lefedettség, formázás, kapuk – helyi rész kész: `tool/coverage.dart`, lint; a CI-sorok a workflow-PR-ban |
+| QA-5 | info | Nincs telemetria / összeomlás-napló (szándékos) – szándékos; a helyi diagnosztika pótolja |
