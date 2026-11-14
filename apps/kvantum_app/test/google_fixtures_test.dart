@@ -299,6 +299,36 @@ void main() {
       expect(e.exdates, [floating(2026, 6, 12)]);
     });
 
+    test('EXDATE;VALUE=DATE-TIME in UTC is a time of day, not a whole day', () {
+      final e = by['utcdt1']!.event!;
+      // 07:00 UTC on 12 May is 09:00 in Budapest
+      expect(e.exdates, [floating(2026, 5, 12, 9)]);
+      final occ = expand(e, DateTime.utc(2026, 5), DateTime.utc(2026, 6, 30));
+      // four Tuesdays: 5, 12, 19, 26 May; the 12th is excluded
+      expect(occ.map((o) => o.originalStart.day), [5, 19, 26]);
+    });
+
+    test('EXDATE;VALUE=DATE-TIME without a zone is a wall clock time', () {
+      final e = by['localdt1']!.event!;
+      expect(e.exdates, [floating(2026, 5, 5, 9)]);
+      final occ = expand(e, DateTime.utc(2026, 5), DateTime.utc(2026, 6));
+      expect(occ.map((o) => o.originalStart.day), [4, 6]);
+    });
+
+    test('VALUE=DATE and VALUE=DATE-TIME are told apart exactly', () {
+      final r = parseRecurrenceLines([
+        'RRULE:FREQ=DAILY;COUNT=4',
+        'EXDATE;VALUE=DATE-TIME:20260505T090000',
+        'EXDATE;VALUE=DATE:20260506',
+        'EXDATE;value=date-time:20260507T090000',
+      ], bp);
+      expect(r.exdates, [
+        floating(2026, 5, 5, 9),
+        floating(2026, 5, 6),
+        floating(2026, 5, 7, 9),
+      ]);
+    });
+
     test('RDATE (an extra date of a series) is not taken over (known)', () {
       final e = by['rdate1']!.event!;
       expect(e.rrule, 'FREQ=WEEKLY;COUNT=3;BYDAY=MO');
