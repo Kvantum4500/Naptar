@@ -181,14 +181,14 @@ final _notForChat = RegExp(
 /// Other models of [providerId] worth trying when [failed] has no quota left
 /// or is gone: the ones the provider's own preferences name, best first, never
 /// the failed one, nothing that cannot chat, at most three. Gemini has its own,
-/// subtler list; an address of the user's own has no catalogue to choose from.
+/// subtler list; an address of the user's own has no preferences (no catalogue
+/// to choose from), so it gets none.
 List<String> fallbackModelsFor(
   String providerId,
   List<LlmModel> models,
   String failed,
 ) {
   if (providerId == 'gemini') return fallbackModels(models, failed);
-  if (providerId == 'custom') return const [];
   final out = <String>[];
   for (final re in providerById(providerId).modelPrefs) {
     final hit = [

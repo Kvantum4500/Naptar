@@ -772,6 +772,57 @@ void main() {
       },
     );
 
+    // every sign of a model that is gone, one by one: a mutant that drops one
+    // of them must show
+    for (final c in <(String, int, String, String?)>[
+      ('does not exist (404)', 404, 'The model `gpt-9` does not exist.', null),
+      ('does not exist (400)', 400, 'The model `gpt-9` does not exist.', null),
+      ('does not exist (410)', 410, 'The model `gpt-9` does not exist.', null),
+      ('not found', 404, 'Model gpt-9 not found.', null),
+      ('deprecated', 404, 'The model `gpt-9` is deprecated.', null),
+      (
+        'decommissioned',
+        400,
+        'The model `gpt-9` has been decommissioned.',
+        null,
+      ),
+      ('no longer available', 404, 'This model is no longer available.', null),
+      ('no longer supported', 404, 'The model is no longer supported.', null),
+      ('no endpoints found', 404, 'No endpoints found for x/y:free.', null),
+      ('the code model_not_found alone', 404, 'Nope.', 'model_not_found'),
+      (
+        'the code model_decommissioned alone',
+        400,
+        'Nope.',
+        'model_decommissioned',
+      ),
+    ]) {
+      test('a sign of a model that is gone: ${c.$1}', () async {
+        final p = openai((_) async => _json(err(c.$3, code: c.$4), c.$2));
+        await expectLater(p.generate('m', req()), throwsA(isA<LlmModelGone>()));
+      });
+    }
+
+    for (final c in <(String, int, String)>[
+      (
+        'the words, but not at the usual statuses',
+        422,
+        'The model `gpt-9` does not exist.',
+      ),
+      (
+        'a tool that was not found in what the model wrote',
+        400,
+        'The function `get_weather` was not found in the model output.',
+      ),
+    ]) {
+      test('not a model that is gone: ${c.$1}', () async {
+        final p = openai((_) async => _json(err(c.$3), c.$2));
+        final e = await failure(p.generate('m', req()));
+        expect(e, isA<LlmBadResponse>());
+        expect(e, isNot(isA<LlmModelGone>()));
+      });
+    }
+
     test('a 404 about something else stays a plain bad response', () async {
       final p = openai((_) async => http.Response('Not Found', 404));
       final e = await failure(p.generate('m', req()));
@@ -832,6 +883,38 @@ void main() {
       );
       expect(other, isA<LlmBadResponse>());
       expect(other, isNot(isA<LlmModelGone>()));
+    });
+  });
+
+  group('a Gemini model that is gone: the status and the words each do', () {
+    Future<Object?> failureOf(http.Response r) async {
+      try {
+        await GeminiProvider(
+          MockClient((_) async => r),
+          apiKey: 'AIzaSy-SECRET-KEY-123',
+        ).generate('m', req());
+        return null;
+      } on LlmException catch (e) {
+        return e;
+      }
+    }
+
+    test('a 404 that says nothing else', () async {
+      expect(
+        await failureOf(http.Response('Not Found', 404)),
+        isA<LlmModelGone>(),
+      );
+    });
+
+    test('NOT_FOUND in the body of another status', () async {
+      expect(
+        await failureOf(
+          _json({
+            'error': {'code': 400, 'message': 'x', 'status': 'NOT_FOUND'},
+          }, 400),
+        ),
+        isA<LlmModelGone>(),
+      );
     });
   });
 

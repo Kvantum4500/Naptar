@@ -765,6 +765,86 @@ void main() {
       );
     });
 
+    test(
+      'a passing error on a letter stops the run: it is nobody\'s fault',
+      () async {
+        await introduceAll();
+        await b.addTx('tb', 100);
+        await c.addTx('tc', 200);
+        b.now += 10;
+        c.now += 10;
+        await b.mail.sync();
+        await c.mail.sync();
+        drive.failReadOf = (n) =>
+            n.startsWith(toA) ? DriveTransientError('offline') : null;
+
+        final r = await a.mail.sync();
+        expect(r.stoppedEarly, isTrue);
+        expect(r.failed, 0);
+
+        // nothing was held against the letter: it is read again, and applied
+        drive.failReadOf = null;
+        final again = await a.mail.sync();
+        expect(again.failed, 0);
+        expect(await a.amounts(), {'tb': 100, 'tc': 200});
+      },
+    );
+
+    test(
+      'an expired sign-in on a letter goes up, not into the failures',
+      () async {
+        await introduceAll();
+        await b.addTx('tb', 100);
+        b.now += 10;
+        await b.mail.sync();
+        drive.failReadOf = (n) =>
+            n.startsWith(toA) ? DriveTokenExpired() : null;
+        await expectLater(a.mail.sync(), throwsA(isA<DriveTokenExpired>()));
+
+        drive.failReadOf = null;
+        final again = await a.mail.sync();
+        expect(again.failed, 0);
+        expect(await a.amounts(), {'tb': 100});
+      },
+    );
+
+    test('what failed before a stop is still counted', () async {
+      await introduceAll();
+      await b.addTx('tb', 100);
+      await c.addTx('tc', 200);
+      b.now += 10;
+      c.now += 10;
+      await b.mail.sync();
+      await c.mail.sync();
+      // the letters are handled in the order of their names: B's, then C's
+      drive.failReadOf = (n) {
+        if (n.startsWith(toA)) return StateError('broken');
+        if (n.startsWith('fin-letter-cccc3333-to-aaaa1111')) {
+          return DriveTransientError('offline');
+        }
+        return null;
+      };
+      final r = await a.mail.sync();
+      expect(r.stoppedEarly, isTrue);
+      expect(r.failed, 1);
+    });
+
+    test('a passing error on the note of a peer stops the run too', () async {
+      await introduceAll();
+      await a.addTx('t1', 500);
+      a.now += 10;
+      drive.failReadOf = (n) => n.startsWith('fin-peer-bbbb2222')
+          ? DriveTransientError('offline')
+          : null;
+      final r = await a.mail.sync();
+      expect(r.stoppedEarly, isTrue);
+      expect(r.failed, 0);
+
+      drive.failReadOf = (n) =>
+          n.startsWith('fin-peer-bbbb2222') ? DriveTokenExpired() : null;
+      await expectLater(a.mail.sync(), throwsA(isA<DriveTokenExpired>()));
+    });
+
     test('a passing error still stops the run, as before', () async {
       await introduceAll();
       await a.addTx('t1', 500);

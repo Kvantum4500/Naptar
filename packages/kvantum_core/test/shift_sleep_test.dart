@@ -88,6 +88,23 @@ void main() {
       );
     });
 
+    test('a shift that starts in the small hours counts for that night', () {
+      // 00:00 -> 08:00 covers 7 of the 8 hours of the night that began the
+      // evening before (the night of the day before the shift starts)
+      expect(spans(shiftSleep([event('Műszak', at(5, 0), at(5, 8))], rules)), [
+        '09:00-17:00',
+      ]);
+      // 03:00 -> 11:00 covers exactly half of it (03:00-07:00), 04:00 -> 12:00
+      // less: the start of the shift is read on the wall clock, too
+      expect(spans(shiftSleep([event('Műszak', at(5, 3), at(5, 11))], rules)), [
+        '12:00-20:00',
+      ]);
+      expect(
+        shiftSleep([event('Műszak', at(5, 4), at(5, 12))], rules),
+        isEmpty,
+      );
+    });
+
     test('a title is no evidence: "Nappali" at night still counts', () {
       expect(
         spans(
@@ -200,6 +217,37 @@ void main() {
         validateProposal([block(5, 15)], existing: [n], rules: rules),
         isEmpty,
       );
+    });
+
+    test('a block that only touches the border of the sleep is not in it', () {
+      // with two hours of delay the sleep is 08:00 -> 16:00, outside the usual
+      // window (until 07:00): a block that ends at 08:00 is not in it
+      const slow = PlanRules(shiftSleepDelayMinutes: 120);
+      expect(
+        codes(validateProposal([block(5, 7)], existing: [n], rules: slow)),
+        isNot(contains('shift_sleep')),
+      );
+      expect(
+        codes(
+          validateProposal([block(5, 7, m: 1)], existing: [n], rules: slow),
+        ),
+        contains('shift_sleep'),
+      );
+      expect(
+        codes(validateProposal([block(5, 16)], existing: [n], rules: slow)),
+        isNot(contains('shift_sleep')),
+      );
+    });
+
+    test('a block in the sleep after two shifts is told once', () {
+      // the long night's sleep (09:00 -> 17:00) and the usual one (07:00 -> 15:00)
+      final long = event('Hosszú éjszaka', at(4, 20), at(5, 8));
+      final v = validateProposal(
+        [block(5, 10)],
+        existing: [n, long],
+        rules: rules,
+      );
+      expect(codes(v).where((c) => c == 'shift_sleep'), ['shift_sleep']);
     });
 
     test('the first minute is covered too (06:30 → 07:30 touches 07:00)', () {

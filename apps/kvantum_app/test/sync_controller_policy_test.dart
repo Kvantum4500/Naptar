@@ -15,6 +15,7 @@ import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/google/google_auth_service.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/api_errors.dart';
+import 'package:kvantum_app/sync/channel_status.dart';
 import 'package:kvantum_app/sync/remote.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_app/sync/sync_engine.dart';
@@ -683,6 +684,7 @@ void main() {
         await ctl.syncNow(manual: true);
         expect(st().error, contains('Pénzügy: 1 levelet vagy társeszközt'));
         expect(st().error, isNot(contains('refused')));
+        expect(st().channels[channelFinance]!.code, 'partial');
         expect(
           drive.files.values.where(
             (f) =>
@@ -694,5 +696,38 @@ void main() {
         );
       },
     );
+
+    test('the first problem names the channel: a corrupt letter, then a '
+        'failed peer', () async {
+      drive.forceFinChanged = true;
+      await ctl.signIn();
+      final me = await c.read(recordRepoProvider).deviceId();
+      drive.externalWrite(
+        'fin-peer-zzzz1111.json',
+        jsonEncode({'v': 1, 'device': 'zzzz1111', 'seen': 4102444800000}),
+      );
+      drive.externalWrite(
+        'fin-letter-yyyy9999-to-$me-1-1.json',
+        'not a letter',
+      );
+      drive.failWriteOf = (n) =>
+          n.contains('-to-zzzz1111-') ? StateError('refused') : null;
+      await c
+          .read(financeRepoProvider)
+          .saveTx(
+            FinTx(
+              id: 'tx1',
+              date: DateTime.utc(2026, 11, 11),
+              amount: 1200,
+              kind: FinKind.expense,
+              merchant: 'Bolt',
+            ),
+          );
+      await ctl.syncNow(manual: true);
+      final f = st().channels[channelFinance]!;
+      expect(f.code, 'corrupt', reason: 'the problem found first');
+      expect(f.text, contains('1 sérült levelet'));
+      expect(f.text, contains('1 levelet vagy társeszközt'));
+    });
   });
 }
