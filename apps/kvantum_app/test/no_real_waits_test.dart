@@ -170,4 +170,28 @@ Future<void> b() async {
       );
     });
   });
+
+  // The controller pauses 200 ms of the CLOCK between two uploads. A test that
+  // drives a sync run and does not set that pause to zero waits for turns of
+  // the event loop while the engine waits for time: on a quick machine the
+  // turns are used up first and the test fails (the CI found one: it passed
+  // for weeks on a slow machine).
+  test(
+    'a test that drives a sync run sets the pause between uploads to zero',
+    () {
+      final drives = RegExp(r'\.(signIn|syncNow)\(');
+      final missing = <String>[
+        for (final f in Directory('test').listSync().whereType<File>())
+          if (f.path.endsWith('_test.dart') &&
+              drives.hasMatch(withoutComments(f.readAsStringSync())) &&
+              !f.readAsStringSync().contains('syncPaceProvider'))
+            f.path,
+      ];
+      expect(
+        missing,
+        isEmpty,
+        reason: 'add syncPaceProvider.overrideWithValue(Duration.zero) to these tests',
+      );
+    },
+  );
 }

@@ -95,6 +95,10 @@ void main() {
           authGatewayProvider.overrideWithValue(auth),
           remoteFactoryProvider.overrideWithValue((_) => remote),
           driveFactoryProvider.overrideWithValue((_) => drive),
+          // no real pause between two uploads: the tests wait for turns of the
+          // event loop, and a pause of 200 ms of the clock would decide whether
+          // they pass (it does on a slow machine and fails on a quick one)
+          syncPaceProvider.overrideWithValue(Duration.zero),
           if (appNow != null) appClockProvider.overrideWithValue(() => appNow),
         ],
       );
