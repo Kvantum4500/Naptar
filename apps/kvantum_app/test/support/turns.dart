@@ -24,3 +24,24 @@ Future<void> turnUntil(
 /// finish when there is nothing to look at to know it has. (Waiting for
 /// something that is known to come: [turnUntil].)
 Future<void> turns([int count = 100]) => pumpEventQueue(times: count);
+
+/// Draws frames and lets the real event loop turn until [done] is true: for a
+/// widget test that waits for work it cannot see into (real futures, a file
+/// being read). The test ends when the thing has happened, not after a time;
+/// [within] is only how long a thing that never happens is waited for before
+/// the test fails (a slow machine takes longer, it does not fail sooner).
+Future<void> pumpUntil(
+  WidgetTester tester,
+  bool Function() done, {
+  Duration within = const Duration(seconds: 30),
+  String what = 'what the test waits for',
+}) async {
+  final bound = Stopwatch()..start();
+  while (!done()) {
+    if (bound.elapsed > within) {
+      fail('$what did not come about within $within');
+    }
+    await tester.runAsync(() => pumpEventQueue(times: 10));
+    await tester.pump();
+  }
+}

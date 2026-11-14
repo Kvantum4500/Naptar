@@ -11,6 +11,8 @@ import 'package:kvantum_app/ui/sync_status.dart';
 import 'package:kvantum_app/update/update_dialog.dart'
     show currentBuildProvider;
 
+import 'support/turns.dart';
+
 /// A controller that only records what the screen asks of it.
 class _Ctl extends SyncController {
   _Ctl(this.initial, {this.events = 7});
@@ -368,8 +370,10 @@ void main() {
       await _openMenu(tester);
       await tester.tap(find.text('Részletek'));
       // the build number arrives on the real event loop
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      await pumpUntil(
+        tester,
+        () => find.textContaining('build 54').evaluate().isNotEmpty,
+        what: 'the build number',
       );
       await tester.pumpAndSettle();
       expect(

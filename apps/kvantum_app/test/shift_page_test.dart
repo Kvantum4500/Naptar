@@ -14,6 +14,7 @@ import 'package:kvantum_app/ui/shift_page.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 /// A store whose reading waits for the test while its gate is set: the page is
 /// "busy" for as long as the test keeps it closed.
@@ -73,8 +74,11 @@ void main() {
     await tester.ensureVisible(btn);
     await tester.tap(btn);
     await tester.pump();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    // the work is done when the page is live again (the spinner is gone)
+    await pumpUntil(
+      tester,
+      () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+      what: 'the end of the creation',
     );
     await tester.pumpAndSettle();
   }
@@ -132,8 +136,10 @@ void main() {
 
     gated.gate!.complete();
     gated.gate = null;
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    await pumpUntil(
+      tester,
+      () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+      what: 'the end of the creation',
     );
     await tester.pumpAndSettle();
     // done: the page is live again

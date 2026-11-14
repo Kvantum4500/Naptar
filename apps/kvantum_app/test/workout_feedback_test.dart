@@ -14,6 +14,7 @@ import 'package:kvantum_app/ui/workout_feedback.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 /// The question after a workout and the "is it easy for you?" card (2e).
 void main() {
@@ -73,9 +74,7 @@ void main() {
 
   Future<void> settle(WidgetTester tester) async {
     // the providers read the database for real: let them finish, then draw
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 60)),
-    );
+    await tester.runAsync(turns);
     await tester.pumpAndSettle();
   }
 

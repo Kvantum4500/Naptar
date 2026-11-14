@@ -15,6 +15,7 @@ import 'package:kvantum_app/ui/shift_pay_card.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 typedef Ev = ({String title, String notes, DateTime start, DateTime end});
 
@@ -458,9 +459,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)),
-      );
+      await tester.runAsync(turns); // the providers read the database
       await tester.pumpAndSettle();
     }
 
