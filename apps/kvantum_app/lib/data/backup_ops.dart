@@ -161,12 +161,19 @@ Future<ImportPlan> previewBackup(
   );
   final onDevice = await repo.all();
   final existing = {for (final e in onDevice) e.id: e};
+  final problems = [...parsed.problems];
+  final incoming = _asTheDeviceKnowsThem(
+    parsed.events,
+    onDevice,
+    existing,
+    problems,
+  );
   final goneHere = _goneDays(onDevice);
-  final goneInFile = _goneDays(parsed.events);
+  final goneInFile = _goneDays(incoming);
   final fresh = <CalEvent>[];
   final changes = <ImportChange>[];
   var unchanged = 0;
-  for (final e in parsed.events) {
+  for (final e in incoming) {
     final old = existing[e.id];
     if (old == null) {
       fresh.add(e);
@@ -185,9 +192,102 @@ Future<ImportPlan> previewBackup(
     fresh: fresh,
     changes: changes,
     unchanged: unchanged,
-    problems: parsed.problems,
+    problems: problems,
   );
 }
+
+/// The events of a file under the ids and series of this device.
+///
+/// A file from Google carries, as the UID of an event, what the device keeps as
+/// the event's iCalUID (the device's own id is another one): such an event is
+/// that same event, not a new one, and a moved day of its series stays with the
+/// series under the device's id.
+///
+/// A moved day (a row with a RECURRENCE-ID) whose series is neither in the
+/// file nor on the device would be stored, but never seen (a day is only shown
+/// through its series). It is taken over as an event of its own instead, and
+/// the problems say so; a cancelled one is left out.
+List<CalEvent> _asTheDeviceKnowsThem(
+  List<CalEvent> events,
+  List<CalEvent> onDevice,
+  Map<String, CalEvent> existing,
+  List<String> problems,
+) {
+  final byUid = {
+    for (final e in onDevice)
+      if (!e.isException && e.iCalUid != null) e.iCalUid!: e,
+  };
+  // the id, on the device, of each event and series of the file
+  final deviceId = <String, String>{};
+  for (final e in events) {
+    if (e.isException) continue;
+    final own = existing.containsKey(e.id) ? e.id : byUid[e.id]?.id;
+    if (own != null) deviceId[e.id] = own;
+  }
+  final inFile = {
+    for (final e in events)
+      if (!e.isException) e.id,
+  };
+  final out = <CalEvent>[];
+  for (final e in events) {
+    if (!e.isException) {
+      final id = deviceId[e.id];
+      out.add(id == null || id == e.id ? e : e.copyWith(id: id));
+      continue;
+    }
+    final uid = e.recurringEventId!;
+    final series = deviceId[uid] ?? (existing.containsKey(uid) ? uid : null);
+    if (series == null && !inFile.contains(uid)) {
+      if (e.cancelled) {
+        problems.add(
+          '„${e.title}”: egy olyan sorozat lemondott napja, amely sem a '
+          'fájlban, sem az eszközön nincs, kihagytam.',
+        );
+      } else {
+        problems.add(
+          '„${e.title}”: a sorozata sem a fájlban, sem az eszközön nincs, '
+          'ezért önálló eseményként vettem át.',
+        );
+        out.add(_standalone(e));
+      }
+      continue;
+    }
+    if (series == null || series == uid) {
+      out.add(e);
+      continue;
+    }
+    // the device calls the series by another id, and so it does the moved day
+    final row = onDevice
+        .where(
+          (x) =>
+              x.recurringEventId == series &&
+              x.originalStart == e.originalStart,
+        )
+        .firstOrNull;
+    out.add(
+      e.copyWith(
+        recurringEventId: series,
+        id: row?.id ?? '$series#${e.originalStart!.toIso8601String()}',
+      ),
+    );
+  }
+  return out;
+}
+
+/// [e] (a moved day of a series) as an event of its own, at its moved time.
+CalEvent _standalone(CalEvent e) => CalEvent(
+  id: e.id,
+  calendarId: e.calendarId,
+  title: e.title,
+  notes: e.notes,
+  location: e.location,
+  start: e.start,
+  end: e.end,
+  tzid: e.tzid,
+  allDay: e.allDay,
+  colorId: e.colorId,
+  aiGenerated: e.aiGenerated,
+);
 
 /// Writes [plan]: the new events always, and the changed ones only when
 /// [overwrite] is true. A restored event keeps its Google link, so sync does
