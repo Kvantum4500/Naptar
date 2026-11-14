@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,7 +50,7 @@ class _HandbookPageState extends ConsumerState<HandbookPage> {
                   builder: (_) => HandbookEditorPage(id: id, title: title),
                 ),
               );
-              _load();
+              unawaited(_load());
             },
           ),
       ],

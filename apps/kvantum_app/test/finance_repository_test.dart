@@ -705,7 +705,7 @@ void main() {
         );
         final repo3 = FinanceRepository(upgraded);
         await repo3.ensureDefaults();
-        expect((await repo3.categories()), isNotEmpty);
+        expect(await repo3.categories(), isNotEmpty);
         await upgraded.close();
       } finally {
         dir.deleteSync(recursive: true);

@@ -109,9 +109,9 @@ void main() {
 
     test('tasks leave out the default priority and energy', () {
       Map<String, Object?> only(TaskView t) =>
-          ((tasksForTool([t], today: floating(2026, 5, 4))['feladatok'] as List)
+          (tasksForTool([t], today: floating(2026, 5, 4))['feladatok'] as List)
                   .single
-              as Map<String, Object?>);
+              as Map<String, Object?>;
       TaskView task({int priority = 2, int energy = 3}) => TaskView(
         SyncRecord(id: 'x', kind: kindTask).edit(
           taskFields(title: 'Valami', priority: priority, energyNeed: energy),

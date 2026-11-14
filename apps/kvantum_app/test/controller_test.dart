@@ -165,7 +165,7 @@ void main() {
         expect(s.lastSync, isNotNull);
         expect(s.pending, 0);
         expect(remote.events.length, 1);
-        c.read(syncControllerProvider.notifier).signOut();
+        await c.read(syncControllerProvider.notifier).signOut();
         await db.close();
       },
     );
@@ -175,7 +175,7 @@ void main() {
       c.read(syncControllerProvider); // triggers build -> restore
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(c.read(syncControllerProvider).signedIn, isTrue);
-      c.read(syncControllerProvider.notifier).signOut();
+      await c.read(syncControllerProvider.notifier).signOut();
       await db.close();
     });
 
@@ -211,7 +211,7 @@ void main() {
         expect(s.error, isNull);
         expect(s.pending, 0);
         expect(remote.events.length, 1);
-        ctl.signOut();
+        await ctl.signOut();
         await db.close();
       },
     );
@@ -234,7 +234,7 @@ void main() {
               .name,
           'task-t1.json',
         );
-        c.read(syncControllerProvider.notifier).signOut();
+        await c.read(syncControllerProvider.notifier).signOut();
         await db.close();
       },
     );
@@ -264,7 +264,7 @@ void main() {
           drive.files.values.where((f) => !f.name.startsWith('fin-')).length,
           1,
         );
-        ctl.signOut();
+        await ctl.signOut();
         await db.close();
       },
     );
@@ -284,7 +284,7 @@ void main() {
         1,
       );
       expect(s.error, contains('Naptár'));
-      ctl.signOut();
+      await ctl.signOut();
       await db.close();
     });
 
@@ -308,7 +308,7 @@ void main() {
         expect(s.error, contains('lejárt'));
         expect(s.error, isNot(contains('invalid_grant')));
         // the unsent change is still queued locally
-        expect((await EventRepoHelper(db).pendingCount()), 1);
+        expect(await EventRepoHelper(db).pendingCount(), 1);
 
         // after signing in again everything goes up
         remote.failWith = null;

@@ -577,7 +577,7 @@ void main() {
         expect((await repo.overridesOf('m')).length, 1);
         // taken back: the exception row goes, the day is where it was
         expect(await repo.undoChange(first.changes!), isTrue);
-        expect((await repo.overridesOf('m')), isEmpty);
+        expect(await repo.overridesOf('m'), isEmpty);
         final o = await occ('Edzés', day: 11);
         expect(toWallClock(bp, o.startUtc), floating(2026, 5, 11, 9));
       },

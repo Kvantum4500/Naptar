@@ -5,7 +5,9 @@ import 'package:uuid/uuid.dart';
 
 import '../data/event_change.dart';
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
 import '../providers.dart';
+import '../sync/error_catalog.dart';
 import '../sync/sync_controller.dart';
 import 'day_utils.dart';
 import 'delete_ops.dart';
@@ -14,8 +16,6 @@ import 'format.dart';
 import 'shift_ops.dart';
 import 'shift_pay_card.dart';
 import 'undo_service.dart';
-import '../diag/diag_log.dart';
-import '../sync/error_catalog.dart';
 
 enum ShiftType { night, day, off }
 

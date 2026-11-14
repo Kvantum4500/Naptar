@@ -45,7 +45,7 @@ final _filler = RegExp(
 
 /// "3 490", "3.490", "3,490.00", "1 234,56" -> whole forints (rounded).
 int? parseHufNumber(String raw) {
-  var s = raw.replaceAll(RegExp(r'[\s  ]'), '');
+  final s = raw.replaceAll(RegExp(r'[\s  ]'), '');
   if (s.isEmpty) return null;
   final dot = s.lastIndexOf('.'), comma = s.lastIndexOf(',');
   double? v;

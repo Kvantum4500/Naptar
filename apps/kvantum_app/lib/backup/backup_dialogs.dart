@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../diag/diag_snapshot.dart' show sizeText;
-import '../ui/format.dart';
 import '../drive/drive_remote.dart' show DriveName;
+import '../ui/format.dart';
 import 'backup_service.dart';
 import 'drive_backup.dart';
 

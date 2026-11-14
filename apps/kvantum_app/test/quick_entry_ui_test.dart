@@ -417,8 +417,8 @@ void main() {
     bool enabled(WidgetTester tester, String key) {
       final w = tester.widget(find.byKey(Key(key)));
       return switch (w) {
-        FilledButton b => b.onPressed != null,
-        TextButton b => b.onPressed != null,
+        final FilledButton b => b.onPressed != null,
+        final TextButton b => b.onPressed != null,
         _ => throw StateError('not a button: $w'),
       };
     }

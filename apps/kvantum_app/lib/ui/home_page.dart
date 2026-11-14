@@ -3,14 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../notify/budget_alerts.dart';
+import '../notify/reminders.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart';
+import '../widget/widget_sync.dart';
 import 'agenda_view.dart';
 import 'breakpoints.dart';
 import 'checkin.dart';
 import 'day_utils.dart';
-import 'workout_feedback.dart';
 import 'event_editor.dart';
 import 'format.dart';
 import 'month_view.dart';
@@ -18,13 +20,11 @@ import 'quick_entry_dialog.dart';
 import 'search_page.dart';
 import 'setup_card.dart';
 import 'shortcuts.dart';
-import '../notify/budget_alerts.dart';
-import '../notify/reminders.dart';
-import '../widget/widget_sync.dart';
 import 'swipe_nav.dart';
 import 'sync_status.dart';
 import 'time_grid.dart';
 import 'unreadable_events_banner.dart';
+import 'workout_feedback.dart';
 
 /// The calendar page. What it shows follows the room the PAGE has: beside the
 /// rail of a wide window it is narrower than the window.

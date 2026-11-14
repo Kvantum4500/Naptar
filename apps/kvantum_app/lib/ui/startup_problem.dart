@@ -13,8 +13,8 @@ class StartupProblemApp extends StatelessWidget {
   final Object problem;
 
   String get _message => switch (problem) {
-    NewerDatabaseError e => e.message,
-    UnreadableDatabaseError e => e.message,
+    final NewerDatabaseError e => e.message,
+    final UnreadableDatabaseError e => e.message,
     _ => 'Az adatbázist nem sikerült megnyitni. ${errorInfoFor(problem).text}',
   };
 

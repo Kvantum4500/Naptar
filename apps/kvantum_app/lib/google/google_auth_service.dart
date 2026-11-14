@@ -8,8 +8,8 @@ import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
-import '../sync/timeout_client.dart';
 import '../diag/diag_log.dart';
+import '../sync/timeout_client.dart';
 
 /// OAuth client values come from `--dart-define-from-file=secrets.json`
 /// (git-ignored). They never live in the repository.

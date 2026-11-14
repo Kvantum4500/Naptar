@@ -6,9 +6,9 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
-import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_wallet.dart';

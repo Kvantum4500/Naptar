@@ -7,11 +7,11 @@ import 'data/db.dart';
 import 'data/event_repository.dart';
 import 'data/finance_repository.dart';
 import 'data/housekeeping.dart';
-import 'finance/wallet_bridge.dart';
-import 'finance/wallet_ingest.dart';
 import 'data/record_repository.dart';
 import 'data/task_ops.dart';
 import 'diag/diag_log.dart';
+import 'finance/wallet_bridge.dart';
+import 'finance/wallet_ingest.dart';
 import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
 

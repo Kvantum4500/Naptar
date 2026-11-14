@@ -24,8 +24,8 @@ import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/providers.dart';
-import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
+import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/update/update_dialog.dart'
     show currentBuildProvider;
 import 'package:kvantum_core/kvantum_core.dart';

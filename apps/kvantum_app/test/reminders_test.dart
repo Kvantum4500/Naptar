@@ -9,8 +9,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ai/ai_providers.dart';
 import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/place.dart';
-import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
+import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
@@ -38,7 +38,7 @@ class FakeScheduler implements ReminderScheduler {
   /// Every id ever cancelled, and every reminder ever scheduled, in order.
   final cancelled = <int>[];
   final scheduled = <PlannedReminder>[];
-  var pendingReads = 0;
+  int pendingReads = 0;
 
   @override
   bool get supported => true;

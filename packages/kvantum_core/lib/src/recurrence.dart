@@ -1,8 +1,7 @@
 import 'package:rrule/rrule.dart';
 
-import 'shift_pattern.dart';
-
 import 'event.dart';
+import 'shift_pattern.dart';
 import 'time.dart';
 
 const _maxIterations = 20000; // hard stop for runaway/infinite rules

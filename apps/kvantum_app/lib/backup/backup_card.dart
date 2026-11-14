@@ -14,8 +14,8 @@ import 'backup_bundle.dart';
 import 'backup_dialogs.dart';
 import 'backup_file_io.dart';
 import 'backup_providers.dart';
-import 'drive_backup.dart' show DriveBackupState;
 import 'backup_store.dart';
+import 'drive_backup.dart' show DriveBackupState;
 
 enum _Job { now, toFile, restore, drive }
 

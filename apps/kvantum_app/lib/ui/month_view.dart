@@ -6,8 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../providers.dart';
-import 'breakpoints.dart';
 import 'a11y.dart';
+import 'breakpoints.dart';
 import 'day_utils.dart';
 import 'format.dart';
 import 'palette.dart';

@@ -547,7 +547,7 @@ void main() {
       () {
         // a low energy day: a hard session would be refused, an easy one is not
         final low = {floating(2026, 5, 5): 2};
-        codesOf(ProposalItem i, PlanRules r) => [
+        List<String> codesOf(ProposalItem i, PlanRules r) => [
           for (final v in validateProposal(
             [i.toBlock(rules: r)],
             existing: [],

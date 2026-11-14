@@ -30,7 +30,7 @@ void _seed(String path, int version, {bool blockFin = false}) {
     db.execute(_outbox);
     db.execute(_meta);
     db.execute(
-      "INSERT INTO event_rows (id, calendar_id, title, start_wall, end_wall) VALUES "
+      'INSERT INTO event_rows (id, calendar_id, title, start_wall, end_wall) VALUES '
       "('a', 'naptar', 'Edzés', '2026-05-04T09:00:00', '2026-05-04T10:00:00'), "
       "('p', 'primary', 'Régi, másik naptár', '2026-05-05T09:00:00', '2026-05-05T10:00:00')",
     );

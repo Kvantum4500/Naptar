@@ -5,7 +5,9 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
 import '../providers.dart';
+import '../sync/error_catalog.dart';
 import '../sync/sync_controller.dart';
 import 'breakpoints.dart';
 import 'day_utils.dart';
@@ -15,8 +17,6 @@ import 'palette.dart';
 import 'repeat_editor.dart';
 import 'text_scale.dart';
 import 'undo_service.dart';
-import '../diag/diag_log.dart';
-import '../sync/error_catalog.dart';
 
 const calendarIdLocal = kNaptarCalendar;
 

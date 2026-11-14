@@ -575,7 +575,7 @@ void main() {
     test('files of others in the folder are left alone', () async {
       await store.write('mine.zip', Uint8List(1));
       await auto.runIfDue();
-      expect((await store.read('mine.zip')), isNotNull);
+      expect(await store.read('mine.zip'), isNotNull);
     });
 
     test('a failure is written down, not raised, and the next try goes on', () async {

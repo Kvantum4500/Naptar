@@ -13,16 +13,16 @@ import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/assistant_page.dart';
 import 'package:kvantum_app/ai/handbook_page.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
-import 'package:kvantum_app/providers.dart';
-import 'package:kvantum_app/sync/sync_hold.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
 import 'package:kvantum_app/ai/location_service.dart';
 import 'package:kvantum_app/ai/place.dart';
-import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
+import 'package:kvantum_app/ai/weather_service.dart';
 import 'package:kvantum_app/data/backup_ops.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/sync_hold.dart';
 import 'package:kvantum_app/ui/backup_io.dart';
 import 'package:kvantum_app/ui/diagnostics_page.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
@@ -68,10 +68,10 @@ class GatedRepo extends EventRepository {
   GatedRepo(super.db);
 
   /// While true, every unit of work waits for [gate].
-  var closed = false;
+  bool closed = false;
 
   /// While true, reading the whole calendar waits for [gate] too.
-  var closedReads = false;
+  bool closedReads = false;
   final gate = Completer<void>();
   @override
   Future<T> atomically<T>(Future<T> Function() action) async {
@@ -1974,7 +1974,7 @@ void main() {
         );
         await press(tester, 'Engedélyezem');
         expect(find.text('1 esemény törölve.'), findsOneWidget);
-        expect((await tester.runAsync(() => events.byId('p1'))), isNull);
+        expect(await tester.runAsync(() => events.byId('p1')), isNull);
         await shutdown(tester, db);
       },
     );

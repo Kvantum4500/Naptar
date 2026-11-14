@@ -105,7 +105,7 @@ void main() {
         (t.title, t.estimateMin, t.priority, t.energyNeed, t.done),
         ('Futás a parkban', 45, 3, 5, false),
       );
-      expect((await tester.runAsync(() => repo.dirtyCount())), 1);
+      expect(await tester.runAsync(() => repo.dirtyCount()), 1);
       await shutdown(tester, db);
     });
 

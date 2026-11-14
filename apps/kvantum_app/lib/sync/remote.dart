@@ -82,7 +82,7 @@ class RemoteIdentity {
     final at = account.indexOf('@');
     if (account.isEmpty) return '(ismeretlen fiók)';
     if (at <= 1) return account;
-    final stars = '*' * (at - 1).clamp(1, 6).toInt();
+    final stars = '*' * (at - 1).clamp(1, 6);
     return '${account[0]}$stars${account.substring(at)}';
   }
 

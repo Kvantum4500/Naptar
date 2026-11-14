@@ -8,11 +8,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../diag/diag_log.dart';
 import '../providers.dart' show appClockProvider, repoProvider;
+import '../sync/error_catalog.dart';
 import 'update_config.dart';
 import 'update_service.dart';
-import '../diag/diag_log.dart';
-import '../sync/error_catalog.dart';
 
 /// Build number of the running app (the CI passes --build-number).
 final currentBuildProvider = FutureProvider<int>((ref) async {

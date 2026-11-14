@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:kvantum_core/kvantum_core.dart';
 import 'package:kvantum_app/sync/remote.dart';
+import 'package:kvantum_core/kvantum_core.dart';
 
 /// In-memory stand-in for Google Calendar with etags, sync tokens and
 /// idempotent upserts (keyed by appEventId, like extendedProperties).

@@ -4,7 +4,9 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
 import '../providers.dart';
+import '../sync/error_catalog.dart';
 import '../sync/sync_controller.dart';
 import '../ui/event_editor.dart' show Scope;
 import '../ui/undo_service.dart';
@@ -12,13 +14,11 @@ import 'ai_settings.dart';
 import 'approval.dart';
 import 'assistant_service.dart';
 import 'gemini_provider.dart';
-import 'provider_catalog.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
 import 'location_service.dart';
+import 'provider_catalog.dart';
 import 'weather_service.dart';
-import '../diag/diag_log.dart';
-import '../sync/error_catalog.dart';
 
 final apiKeyStoreProvider = Provider<ApiKeyStore>((_) => SecureApiKeyStore());
 

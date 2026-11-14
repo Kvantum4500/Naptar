@@ -128,7 +128,7 @@ void main() {
         'linked': 'delete',
         'waiting': 'delete',
       });
-      expect((await events.byId('unlinked')), isNull);
+      expect(await events.byId('unlinked'), isNull);
       expect(
         await events.isTombstone('linked'),
         isTrue,

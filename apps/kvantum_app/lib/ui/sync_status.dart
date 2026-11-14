@@ -5,8 +5,8 @@ import '../sync/error_catalog.dart';
 import '../sync/remote.dart' show SyncBindingMismatch;
 import '../sync/sync_controller.dart';
 import '../update/update_dialog.dart' show currentBuildProvider;
-import 'format.dart';
 import 'diagnostics_page.dart';
+import 'format.dart';
 
 /// Why there is no sync in this build (shown by the button and by Settings).
 const noGoogleTitle = 'Nincs Google-hozzáférés';

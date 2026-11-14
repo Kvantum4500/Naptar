@@ -4,11 +4,11 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/home_page.dart';
 import 'package:kvantum_app/ui/month_view.dart';
-import 'package:kvantum_app/ui/time_grid.dart';
 import 'package:kvantum_app/ui/palette.dart';
-import 'package:kvantum_app/ui/day_utils.dart';
+import 'package:kvantum_app/ui/time_grid.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';

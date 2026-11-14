@@ -10,9 +10,9 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../ai/ai_providers.dart'
     show aiSettingsProvider, weatherServiceProvider;
+import '../diag/diag_log.dart';
 import '../providers.dart';
 import '../ui/day_utils.dart';
-import '../diag/diag_log.dart';
 import 'summary_plan.dart';
 import 'windows_reminders.dart';
 
