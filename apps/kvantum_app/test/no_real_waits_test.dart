@@ -176,22 +176,69 @@ Future<void> b() async {
   // the event loop while the engine waits for time: on a quick machine the
   // turns are used up first and the test fails (the CI found one: it passed
   // for weeks on a slow machine).
+  final drivesSync = RegExp(r'\.(signIn|syncNow)\(');
+
+  /// The test files of [dir] that drive a sync run (`signIn` / `syncNow`) and
+  /// never mention the pause provider in code. [skip] is not looked at.
+  List<String> paceNotSet(Directory dir, {String skip = 'no_real_waits_test'}) {
+    final out = <String>[];
+    for (final f in dir.listSync().whereType<File>()) {
+      final name = f.uri.pathSegments.last;
+      if (!name.endsWith('_test.dart') || name == '$skip.dart') continue;
+      final code = withoutComments(f.readAsStringSync());
+      if (drivesSync.hasMatch(code) && !code.contains('syncPaceProvider')) {
+        out.add(name);
+      }
+    }
+    return out..sort();
+  }
+
   test(
     'a test that drives a sync run sets the pause between uploads to zero',
     () {
-      final drives = RegExp(r'\.(signIn|syncNow)\(');
-      final missing = <String>[
-        for (final f in Directory('test').listSync().whereType<File>())
-          if (f.path.endsWith('_test.dart') &&
-              drives.hasMatch(withoutComments(f.readAsStringSync())) &&
-              !f.readAsStringSync().contains('syncPaceProvider'))
-            f.path,
-      ];
       expect(
-        missing,
+        paceNotSet(roots['app']!),
         isEmpty,
         reason: 'add syncPaceProvider.overrideWithValue(Duration.zero) to these tests',
       );
     },
   );
+
+  group('the guard of the pause', () {
+    test('sees what it is meant to see', () {
+      final dir = Directory.systemTemp.createTempSync('no_pace_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      void put(String name, String text) =>
+          File('${dir.path}/$name').writeAsStringSync(text);
+      // drives a run, and sets nothing
+      put('a_test.dart', 'void main() { await ctl.syncNow(); }');
+      put('b_test.dart', 'void main() { await ctl.signIn(); }');
+      // drives a run and sets the pause
+      put(
+        'c_test.dart',
+        'final o = [syncPaceProvider.overrideWithValue(Duration.zero)];\n'
+            'void main() { await ctl.syncNow(); }',
+      );
+      // the provider is only said in a comment: not set
+      put(
+        'd_test.dart',
+        '// syncPaceProvider is not set here\n'
+            '/* syncPaceProvider */\n'
+            'void main() { await ctl.syncNow(); }',
+      );
+      // a run only said in a comment, or another call: nothing to set
+      put('e_test.dart', '// await ctl.syncNow();\nvoid main() { resync(); }');
+      // not a test file
+      put('helper.dart', 'void main() { ctl.syncNow(); }');
+      // the file of the scan itself is never looked at
+      put('no_real_waits_test.dart', 'void main() { ctl.syncNow(); }');
+      expect(paceNotSet(dir), ['a_test.dart', 'b_test.dart', 'd_test.dart']);
+      expect(paceNotSet(dir, skip: 'nothing'), [
+        'a_test.dart',
+        'b_test.dart',
+        'd_test.dart',
+        'no_real_waits_test.dart',
+      ]);
+    });
+  });
 }
