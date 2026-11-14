@@ -8,6 +8,7 @@ import 'package:kvantum_app/sync/sync_engine.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_remote.dart';
+import 'support/turns.dart';
 
 const cal = 'naptar';
 const bp = 'Europe/Budapest';
@@ -689,12 +690,13 @@ void main() {
     test('saveAll is one change for the screen, not one per event', () async {
       final emissions = <int>[];
       final sub = repo.watchAll().listen((l) => emissions.add(l.length));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await turnUntil(() => emissions.isNotEmpty, what: 'the first list');
       emissions.clear();
       await repo.saveAll([
         for (var i = 0; i < 6; i++) ev('e$i', 'x', day: 4 + i),
       ]);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await turnUntil(() => emissions.isNotEmpty, what: 'the new list');
+      await turns(); // and nothing more follows it
       await sub.cancel();
       expect(emissions, [6]);
     });

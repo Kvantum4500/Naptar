@@ -15,6 +15,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_drive.dart';
 import 'support/fake_remote.dart';
+import 'support/turns.dart';
 
 class FakeAuth implements AuthGateway {
   FakeAuth({this.restored = false, this.failSignIn = false});
@@ -115,9 +116,7 @@ void main() {
       final wire = Completer<void>();
       remote.upsertGateAt[2] = wire; // the second upload is on the wire
       final run = c.read(syncControllerProvider.notifier).signIn();
-      while (remote.upsertCalls < 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
+      await turnUntil(() => remote.upsertCalls >= 2, what: 'the second upload');
       final mid = c.read(syncControllerProvider);
       expect(mid.syncing, isTrue);
       expect(mid.upload, (done: 1, total: 3));
@@ -173,7 +172,10 @@ void main() {
     test('restored session signs in silently on start', () async {
       final c = make(FakeAuth(restored: true));
       c.read(syncControllerProvider); // triggers build -> restore
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await turnUntil(
+        () => c.read(syncControllerProvider).signedIn,
+        what: 'the silent sign-in',
+      );
       expect(c.read(syncControllerProvider).signedIn, isTrue);
       await c.read(syncControllerProvider.notifier).signOut();
       await db.close();

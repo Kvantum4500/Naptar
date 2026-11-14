@@ -22,6 +22,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_drive.dart';
 import 'support/fake_remote.dart';
+import 'support/turns.dart';
 
 class _Auth implements AuthGateway {
   @override
@@ -163,14 +164,18 @@ void main() {
       ctl.didChangeAppLifecycleState(AppLifecycleState.paused);
       now = now.add(const Duration(seconds: 10));
       ctl.didChangeAppLifecycleState(AppLifecycleState.resumed);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await turns(); // whatever would start, has started
       expect(remote.pullCalls, pulls, reason: '10 s: nothing new to look at');
       expect(live(), isNotNull, reason: 'the timer is back');
 
       ctl.didChangeAppLifecycleState(AppLifecycleState.paused);
       now = now.add(const Duration(minutes: 2));
       ctl.didChangeAppLifecycleState(AppLifecycleState.resumed);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await turnUntil(
+        () => remote.pullCalls > pulls,
+        what: 'the look after 2 minutes',
+      );
+      await turns(); // and it is the one look
       expect(remote.pullCalls, pulls + 1, reason: '2 minutes: look now');
     });
 

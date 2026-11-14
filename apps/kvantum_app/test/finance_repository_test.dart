@@ -9,6 +9,7 @@ import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 void main() {
   late AppDatabase db;
@@ -352,11 +353,11 @@ void main() {
     test('the stream follows changes', () async {
       final seen = <int>[];
       final sub = repo.watchTx().listen((l) => seen.add(l.length));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await turnUntil(() => seen.isNotEmpty, what: 'the first list');
       await repo.saveTx(tx('a', 500));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await turnUntil(() => seen.length >= 2, what: 'the list with the item');
       await repo.deleteTx('a');
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await turnUntil(() => seen.length >= 3, what: 'the list without it');
       await sub.cancel();
       expect(seen, containsAllInOrder([0, 1, 0]));
     });
