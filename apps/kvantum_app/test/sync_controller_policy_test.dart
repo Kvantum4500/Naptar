@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/native.dart';
@@ -653,5 +654,45 @@ void main() {
       await ctl.syncNow();
       expect(drive.listCalls, greaterThan(before));
     });
+
+    test(
+      'a peer that cannot be written to is reported, the rest goes on',
+      () async {
+        drive.forceFinChanged = true;
+        await ctl.signIn();
+        // two other devices have announced themselves; one of them refuses mail
+        for (final id in ['zzzz1111', 'zzzz2222']) {
+          drive.externalWrite(
+            'fin-peer-$id.json',
+            jsonEncode({'v': 1, 'device': id, 'seen': 4102444800000}),
+          );
+        }
+        drive.failWriteOf = (n) =>
+            n.contains('-to-zzzz1111-') ? StateError('refused') : null;
+        await c
+            .read(financeRepoProvider)
+            .saveTx(
+              FinTx(
+                id: 'tx1',
+                date: DateTime.utc(2026, 11, 11),
+                amount: 1200,
+                kind: FinKind.expense,
+                merchant: 'Bolt',
+              ),
+            );
+        await ctl.syncNow(manual: true);
+        expect(st().error, contains('Pénzügy: 1 levelet vagy társeszközt'));
+        expect(st().error, isNot(contains('refused')));
+        expect(
+          drive.files.values.where(
+            (f) =>
+                f.name.startsWith('fin-letter-') &&
+                f.name.contains('-to-zzzz2222-'),
+          ),
+          hasLength(1),
+          reason: 'the other peer got its letter',
+        );
+      },
+    );
   });
 }

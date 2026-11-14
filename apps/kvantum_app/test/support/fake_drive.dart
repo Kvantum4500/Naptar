@@ -16,6 +16,12 @@ class FakeDrive implements DriveRemote {
   /// at that very call).
   Object? failDelete;
 
+  /// Per-file failures: the error to throw for a file of this name (null: no
+  /// failure). Reading, writing and deleting each have their own.
+  Object? Function(String name)? failReadOf;
+  Object? Function(String name)? failWriteOf;
+  Object? Function(String name)? failDeleteOf;
+
   /// Makes every call fail with this error (e.g. an expired login).
   Object? failWith;
   bool expireToken = false;
@@ -95,6 +101,8 @@ class FakeDrive implements DriveRemote {
     readNames.add(files[fileId]?.name ?? '?');
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
+    final broken = failReadOf?.call(files[fileId]?.name ?? '');
+    if (broken != null) throw broken;
     return files[fileId]?.content;
   }
 
@@ -129,6 +137,8 @@ class FakeDrive implements DriveRemote {
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     if (failWrite != null) throw failWrite!;
+    final broken = failWriteOf?.call(name);
+    if (broken != null) throw broken;
     if (duringWrite != null) {
       final f = duringWrite!;
       duringWrite = null;
@@ -150,6 +160,8 @@ class FakeDrive implements DriveRemote {
     if (failWith != null) throw failWith!;
     if (offline) throw DriveTransientError('offline');
     if (failDelete != null) throw failDelete!;
+    final broken = failDeleteOf?.call(files[fileId]?.name ?? '');
+    if (broken != null) throw broken;
     deletes++;
     files.remove(fileId);
     _removedAt[fileId] = _bump();

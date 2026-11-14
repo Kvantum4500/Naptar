@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
+import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/drive/finance_mailbox.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -575,6 +576,204 @@ void main() {
         (jsonDecode(letter.content) as Map)['v'],
         FinanceMailbox.letterVersion,
       );
+    });
+  });
+
+  // REL-26: one failure must not stop the rest of the run.
+  group('one failure does not stop the rest', () {
+    late Device c;
+    setUp(() async {
+      c = await Device('cccc3333', drive).open();
+    });
+    tearDown(() => c.close());
+
+    const toA = 'fin-letter-bbbb2222-to-aaaa1111';
+
+    /// A, B and C have announced themselves and greeted each other.
+    Future<void> introduceAll() async {
+      for (final d in [a, b, c, a, b, c]) {
+        await d.mail.sync();
+      }
+    }
+
+    int waitingFor(String prefix) =>
+        drive.files.values.where((f) => f.name.startsWith(prefix)).length;
+
+    test('a letter that cannot be read does not hold up the others', () async {
+      await introduceAll();
+      await b.addTx('tb', 100);
+      await c.addTx('tc', 200);
+      b.now += 10;
+      c.now += 10;
+      await b.mail.sync();
+      await c.mail.sync();
+      drive.failReadOf = (n) => n.startsWith(toA) ? StateError('broken') : null;
+
+      final r = await a.mail.sync();
+      expect(r.failed, 1);
+      expect(r.receivedLetters, 1, reason: "C's letter was handled");
+      expect(await a.amounts(), {'tc': 200});
+      expect(waitingFor(toA), 1, reason: "B's letter stays in Drive");
+
+      drive.failReadOf = null;
+      final again = await a.mail.sync();
+      expect(again.failed, 0);
+      expect(await a.amounts(), {'tb': 100, 'tc': 200});
+      expect(waitingFor(toA), 0);
+    });
+
+    test(
+      'a letter that keeps failing is left alone after three runs',
+      () async {
+        await introduceAll();
+        await b.addTx('tb', 100);
+        b.now += 10;
+        await b.mail.sync();
+        drive.failReadOf = (n) =>
+            n.startsWith(toA) ? StateError('broken') : null;
+        for (var i = 0; i < 5; i++) {
+          await a.mail.sync();
+        }
+        expect(
+          drive.readNames.where((n) => n.startsWith(toA)).length,
+          FinanceMailbox.maxLetterTries,
+          reason: 'it is not read again and again',
+        );
+        final r = await a.mail.sync();
+        expect(r.failed, 1, reason: 'but it is still reported');
+        expect(waitingFor(toA), 1);
+      },
+    );
+
+    test(
+      'a refused delete after applying: in now, collected next time',
+      () async {
+        await introduceAll();
+        await b.addTx('tb', 100);
+        b.now += 10;
+        await b.mail.sync();
+        drive.failDeleteOf = (n) =>
+            n.startsWith(toA) ? StateError('refused') : null;
+        final r = await a.mail.sync();
+        expect(r.failed, 1);
+        expect(r.applied, 1);
+        expect(await a.amounts(), {'tb': 100});
+        expect(waitingFor(toA), 1);
+
+        drive.failDeleteOf = null;
+        final again = await a.mail.sync();
+        expect(again.receivedLetters, 1);
+        expect(again.applied, 0, reason: 'applying twice changes nothing');
+        expect(waitingFor(toA), 0);
+      },
+    );
+
+    test('a peer that cannot be written to does not keep the others from '
+        'their mail', () async {
+      await introduceAll();
+      await a.addTx('t1', 500);
+      a.now += 10;
+      drive.failWriteOf = (n) =>
+          n.contains('-to-bbbb2222-') ? StateError('refused') : null;
+
+      final r = await a.mail.sync();
+      expect(r.failed, 1);
+      expect(r.sentLetters, 1, reason: 'C got its letter');
+      expect(
+        await a.repo.dirtyCount(),
+        greaterThan(0),
+        reason: 'B is still owed it',
+      );
+      await c.mail.sync();
+      expect(await c.amounts(), {'t1': 500});
+      await b.mail.sync();
+      expect(await b.amounts(), isEmpty);
+
+      drive.failWriteOf = null;
+      final again = await a.mail.sync();
+      expect(again.failed, 0);
+      expect(await a.repo.dirtyCount(), 0);
+      await b.mail.sync();
+      expect(await b.amounts(), {'t1': 500});
+    });
+
+    test('a new peer that cannot be written to is greeted with everything '
+        'later', () async {
+      for (final d in [a, b, a, b]) {
+        await d.mail.sync(); // A and B know each other
+      }
+      await a.addTx('t1', 500);
+      a.now += 10;
+      await a.mail.sync();
+      await b.mail.sync(); // delivered; A's change is "clean" now
+      await c.mail.sync(); // C announces itself
+      drive.failWriteOf = (n) =>
+          n.contains('-to-cccc3333-') ? StateError('refused') : null;
+
+      final r = await a.mail.sync();
+      expect(r.failed, 1);
+      expect(await a.repo.meta('fin.known'), isNot(contains('cccc3333')));
+
+      drive.failWriteOf = null;
+      a.now += 10;
+      await a.mail.sync();
+      await c.mail.sync();
+      expect(await c.amounts(), {
+        't1': 500,
+      }, reason: 'the whole history, although the change was already clean');
+    });
+
+    test('a presence note that cannot be read counts as a live peer', () async {
+      await introduceAll();
+      drive.failReadOf = (n) =>
+          n.startsWith('fin-peer-') ? StateError('unreadable') : null;
+      await a.addTx('t1', 500);
+      a.now += 10;
+      final r = await a.mail.sync();
+      expect(r.peers, 2);
+      expect(r.sentLetters, 2);
+      expect(r.failed, 0);
+    });
+
+    test('a letter that cannot be removed does not stop the clean-up of the '
+        'others', () async {
+      await introduceAll();
+      await a.addTx('t1', 500);
+      a.now += 10;
+      await a.mail.sync(); // letters for B and C wait
+      expect(letters(drive), 2);
+      const day = 24 * 3600 * 1000;
+      a.now += 61 * day;
+      drive.failDeleteOf = (n) =>
+          n.contains('-to-bbbb2222-') ? StateError('refused') : null;
+
+      final r = await a.mail.sync();
+      expect(r.expired, 1);
+      expect(r.failed, 1);
+      expect(letters(drive), 1);
+
+      drive.failDeleteOf = null;
+      final again = await a.mail.sync();
+      expect(again.expired, 1);
+      // the old letter for B is gone (C, written off meanwhile, was greeted
+      // with a fresh full letter in this run)
+      expect(
+        drive.files.values.where(
+          (f) => f.name.startsWith('fin-letter-aaaa1111-to-bbbb2222-'),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a passing error still stops the run, as before', () async {
+      await introduceAll();
+      await a.addTx('t1', 500);
+      a.now += 10;
+      drive.failWriteOf = (n) =>
+          n.contains('-to-bbbb2222-') ? DriveTransientError('offline') : null;
+      final r = await a.mail.sync();
+      expect(r.stoppedEarly, isTrue);
+      expect(r.failed, 0);
     });
   });
 }

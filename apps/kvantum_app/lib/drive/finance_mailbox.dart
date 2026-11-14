@@ -17,6 +17,7 @@ class MailReport {
     this.peers = 0,
     this.stoppedEarly = false,
     this.newerLetters = 0,
+    this.failed = 0,
     this.hint,
   });
   final int sentLetters;
@@ -35,12 +36,18 @@ class MailReport {
   /// version does not know): kept in Drive, not deleted.
   final int newerLetters;
 
+  /// Letters, peers and notes this run could not handle because of an error
+  /// that is not a passing one (a refused write, a letter that cannot be
+  /// applied). Everything else was done: one failure does not stop the rest,
+  /// and what failed stays where it was, to be tried again.
+  final int failed;
+
   /// Why the run stopped early (when it did).
   final RetryHint? hint;
 
   @override
   String toString() =>
-      'MailReport(sent:$sentLetters received:$receivedLetters applied:$applied corrupt:$corrupt expired:$expired peers:$peers early:$stoppedEarly)';
+      'MailReport(sent:$sentLetters received:$receivedLetters applied:$applied corrupt:$corrupt expired:$expired peers:$peers failed:$failed early:$stoppedEarly)';
 }
 
 /// Finance sync "by post": each device keeps its data in its own database and
@@ -73,6 +80,10 @@ class FinanceMailbox {
   static const letterPrefix = 'fin-letter-';
   static const maxPerLetter = 400;
 
+  /// A letter that fails this many runs (in this run of the app) is left alone
+  /// until the app is started anew: it would only fill the log.
+  static const maxLetterTries = 3;
+
   /// The letter format this build writes and reads.
   static const letterVersion = 1;
   static const announceEvery = Duration(hours: 12);
@@ -93,6 +104,9 @@ class FinanceMailbox {
   /// not read again until the app is started anew.
   final _leftAlone = <String>{};
 
+  /// Letter id -> how many runs failed on it (see [maxLetterTries]).
+  final _failedLetters = <String, int>{};
+
   Future<MailReport> sync() => _running ??= _run().whenComplete(() {
     _running = null;
   });
@@ -107,7 +121,7 @@ class FinanceMailbox {
 
   Future<MailReport> _run() async {
     var sent = 0, received = 0, applied = 0, corrupt = 0, expired = 0;
-    var peerCount = 0, newerLetters = 0;
+    var peerCount = 0, newerLetters = 0, failed = 0;
     try {
       await _announce();
 
@@ -120,44 +134,61 @@ class FinanceMailbox {
           newerLetters++;
           continue;
         }
-        final text = await drive.read(l.id);
-        if (text == null) continue; // already gone
-        final letter = _letter(text);
-        if (letter == null) {
-          corrupt++;
-          _log?.info('mail', 'letter.corrupt');
-          await drive.delete(l.id);
+        if ((_failedLetters[l.id] ?? 0) >= maxLetterTries) {
+          failed++; // still there and still unusable: not tried again now
           continue;
         }
-        if (letter.newer) {
-          // A newer version of the app wrote it: it stays in Drive until this
-          // version is updated and can read it.
-          _leftAlone.add(l.id);
-          newerLetters++;
-          _log?.infoOnce('letter.newer:${l.id}', 'mail', 'letter.newer');
-          continue;
-        }
-        applied += await repo.applyIncomingAll([
-          for (final r in letter.records)
-            if (r is Map) ('${r['kind']}', r['data']),
-        ]);
-        final unknownKind = letter.records.any(
-          (r) => r is Map && !repo.knowsKind('${r['kind']}'),
-        );
-        if (unknownKind) {
-          // what is understood has been applied (applying it again later is
-          // harmless); the letter stays for the version that knows the rest
-          _leftAlone.add(l.id);
-          newerLetters++;
-          _log?.infoOnce(
-            'letter.unknown:${l.id}',
-            'mail',
-            'letter.unknown_kind',
+        try {
+          final text = await drive.read(l.id);
+          if (text == null) continue; // already gone
+          final letter = _letter(text);
+          if (letter == null) {
+            corrupt++;
+            _log?.info('mail', 'letter.corrupt');
+            await drive.delete(l.id);
+            continue;
+          }
+          if (letter.newer) {
+            // A newer version of the app wrote it: it stays in Drive until this
+            // version is updated and can read it.
+            _leftAlone.add(l.id);
+            newerLetters++;
+            _log?.infoOnce('letter.newer:${l.id}', 'mail', 'letter.newer');
+            continue;
+          }
+          applied += await repo.applyIncomingAll([
+            for (final r in letter.records)
+              if (r is Map) ('${r['kind']}', r['data']),
+          ]);
+          final unknownKind = letter.records.any(
+            (r) => r is Map && !repo.knowsKind('${r['kind']}'),
           );
-          continue;
+          if (unknownKind) {
+            // what is understood has been applied (applying it again later is
+            // harmless); the letter stays for the version that knows the rest
+            _leftAlone.add(l.id);
+            newerLetters++;
+            _log?.infoOnce(
+              'letter.unknown:${l.id}',
+              'mail',
+              'letter.unknown_kind',
+            );
+            continue;
+          }
+          await drive.delete(l.id); // "it has arrived"
+          received++;
+        } on DriveTransientError {
+          rethrow;
+        } on DriveTokenExpired {
+          rethrow;
+        } catch (e, st) {
+          // One letter that cannot be handled must not stop the other letters
+          // nor the sending below: it stays in Drive and is tried again, a few
+          // times (a letter is applied as a whole or not at all).
+          failed++;
+          final tries = _failedLetters[l.id] = (_failedLetters[l.id] ?? 0) + 1;
+          _log?.error('mail', 'letter.failed', e, st, {'tries': tries});
         }
-        await drive.delete(l.id); // "it has arrived"
-        received++;
       }
 
       // --------------------------------------------------------- send
@@ -171,24 +202,39 @@ class FinanceMailbox {
       final changed = await repo.mailRecords(onlyDirty: true);
       List<MailRecord>? everything;
       var allDelivered = false;
+      var peersFailed = 0;
       try {
         for (final p in peers) {
-          final List<MailRecord> payload;
-          if (!known.contains(p)) {
-            payload = everything ??= await repo.mailRecords(onlyDirty: false);
-          } else if (changed.isNotEmpty) {
-            payload = changed;
-          } else {
-            continue;
-          }
-          if (payload.isEmpty) {
+          try {
+            final List<MailRecord> payload;
+            if (!known.contains(p)) {
+              payload = everything ??= await repo.mailRecords(onlyDirty: false);
+            } else if (changed.isNotEmpty) {
+              payload = changed;
+            } else {
+              continue;
+            }
+            if (payload.isEmpty) {
+              known.add(p);
+              continue;
+            }
+            sent += await _post(p, payload);
             known.add(p);
-            continue;
+          } on DriveTransientError {
+            rethrow;
+          } on DriveTokenExpired {
+            rethrow;
+          } catch (e, st) {
+            // One peer that cannot be written to must not keep the others from
+            // their mail. Its status stays as it was (a peer not greeted yet
+            // is greeted with everything next time) and what is dirty stays
+            // dirty, so the next run sends it again.
+            peersFailed++;
+            failed++;
+            _log?.error('mail', 'peer.failed', e, st);
           }
-          sent += await _post(p, payload);
-          known.add(p);
         }
-        allDelivered = true;
+        allDelivered = peersFailed == 0;
       } finally {
         await _saveKnown(known);
         if (allDelivered && peers.isNotEmpty && changed.isNotEmpty) {
@@ -197,7 +243,9 @@ class FinanceMailbox {
       }
 
       // ------------------------------------------------ housekeeping
-      expired = await _expireOldLetters(letters, known);
+      final old = await _expireOldLetters(letters, known);
+      expired = old.expired;
+      failed += old.failed;
       await _saveKnown(known);
     } on DriveTransientError catch (e) {
       return MailReport(
@@ -209,6 +257,7 @@ class FinanceMailbox {
         peers: peerCount,
         stoppedEarly: true,
         newerLetters: newerLetters,
+        failed: failed,
         hint: e,
       );
     }
@@ -220,6 +269,7 @@ class FinanceMailbox {
       expired: expired,
       peers: peerCount,
       newerLetters: newerLetters,
+      failed: failed,
     );
   }
 
@@ -263,7 +313,17 @@ class FinanceMailbox {
     for (final f in await drive.listNames(peerPrefix)) {
       final m = _peerName.firstMatch(f.name);
       if (m == null || m[1] == deviceId) continue;
-      final text = await drive.read(f.id);
+      String? text;
+      try {
+        text = await drive.read(f.id);
+      } on DriveTransientError {
+        rethrow;
+      } on DriveTokenExpired {
+        rethrow;
+      } catch (e, st) {
+        // a note that cannot be read is taken like one that cannot be parsed
+        _log?.error('mail', 'peer.note_failed', e, st);
+      }
       var seen = now; // unreadable note: assume alive
       try {
         final j = text == null ? null : jsonDecode(text);
@@ -316,21 +376,32 @@ class FinanceMailbox {
 
   /// Own letters nobody collected for [letterTtl] are removed; that peer then
   /// counts as new again and gets a full letter when it comes back.
-  Future<int> _expireOldLetters(
+  Future<({int expired, int failed})> _expireOldLetters(
     List<DriveName> listed,
     Set<String> known,
   ) async {
     final now = _clock();
-    var n = 0;
+    var n = 0, failed = 0;
     for (final l in listed) {
       final m = _letterName.firstMatch(l.name);
       if (m == null || m[1] != deviceId) continue;
       final sent = int.tryParse(m[3]!) ?? now;
       if (now - sent < letterTtl.inMilliseconds) continue;
-      await drive.delete(l.id);
+      try {
+        await drive.delete(l.id);
+      } on DriveTransientError {
+        rethrow;
+      } on DriveTokenExpired {
+        rethrow;
+      } catch (e, st) {
+        // it stays (and so does its peer's status); the next run tries again
+        failed++;
+        _log?.error('mail', 'expire.failed', e, st);
+        continue;
+      }
       known.remove(m[2]);
       n++;
     }
-    return n;
+    return (expired: n, failed: failed);
   }
 }

@@ -665,6 +665,13 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
               code = 'corrupt';
               lines.add('Pénzügy: ${r.corrupt} sérült levelet eldobtam.');
             }
+            if (r.failed > 0) {
+              code ??= 'partial';
+              lines.add(
+                'Pénzügy: ${r.failed} levelet vagy társeszközt most nem '
+                'tudtam kezelni; a többit elintéztem, ezt később újra próbálom.',
+              );
+            }
             financeNewer = r.newerLetters;
             if (r.newerLetters > 0) {
               code ??= 'newer';
@@ -693,6 +700,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
                 'sent': r.sentLetters,
                 'received': r.receivedLetters,
                 'corrupt': r.corrupt,
+                'failed': r.failed,
                 'newer': r.newerLetters,
               },
             );
