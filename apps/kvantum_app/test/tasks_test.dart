@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
 import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/tasks_page.dart';
@@ -10,7 +11,10 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 
-DateTime today() => todayIn(DateTime.now());
+/// The moment of these tests: the app and the test agree on what "today" is.
+final _now = DateTime.utc(2026, 5, 13, 9, 30);
+
+DateTime today() => todayIn(_now);
 
 void main() {
   setUpAll(() async {
@@ -25,7 +29,9 @@ void main() {
     useSize(tester);
     db = await newDb();
     repo = RecordRepository(db);
-    await tester.pumpWidget(app(home, db));
+    await tester.pumpWidget(
+      app(home, db, extra: [appClockProvider.overrideWithValue(() => _now)]),
+    );
     await tester.pumpAndSettle();
   }
 

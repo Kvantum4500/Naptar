@@ -21,10 +21,19 @@ void main() {
 
   late AppDatabase db;
 
+  /// The moment of these tests: the app and the test agree on what "today" is.
+  final now = DateTime.utc(2026, 5, 13, 9, 30);
+
   Future<void> boot(WidgetTester tester, {Size? size}) async {
     useSize(tester, size: size ?? const Size(1280, 900));
     db = await newDb();
-    await tester.pumpWidget(app(const Scaffold(body: CheckInBanner()), db));
+    await tester.pumpWidget(
+      app(
+        const Scaffold(body: CheckInBanner()),
+        db,
+        extra: [appClockProvider.overrideWithValue(() => now)],
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -57,7 +66,7 @@ void main() {
       () =>
           ref0(tester)
               .read(recordRepoProvider)
-              .get(kindCheckIn, checkInId(todayIn(DateTime.now()))),
+              .get(kindCheckIn, checkInId(todayIn(now))),
     );
     final v = CheckInView(rec!);
     expect((v.physical, v.sleep, v.mental, v.mood), (4, 2, null, null));

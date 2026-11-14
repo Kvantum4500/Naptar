@@ -24,6 +24,11 @@ Occurrence occ(DateTime s, DateTime e, {bool allDay = false}) => Occurrence(
   originalStart: s,
 );
 
+/// The moment of the tests that look at "now": the app and the test agree on
+/// what today is, and on the hour the time grid scrolls to.
+final _now = DateTime.utc(2026, 5, 13, 9, 30);
+final _clock = appClockProvider.overrideWithValue(() => _now);
+
 void main() {
   setUpAll(() async {
     ensureTimeZones();
@@ -89,7 +94,7 @@ void main() {
       useSize(tester);
       final db = await newDb();
       final repo = EventRepository(db);
-      final today = todayIn(DateTime.now());
+      final today = todayIn(_now);
       final d = floating(today.year, today.month, 15);
       await tester.runAsync(() async {
         for (var i = 0; i < 6; i++) {
@@ -106,7 +111,7 @@ void main() {
           evt('ad', 'Szabadnap', d, len: const Duration(days: 1), allDay: true),
         );
       });
-      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
       await tester.pumpAndSettle();
 
       expect(
@@ -133,7 +138,7 @@ void main() {
       final db = await newDb();
       final repo = EventRepository(db);
       // The grid scrolls to "now - 1 h"; an event starting this hour is always visible.
-      final n = toWallClock(bp, DateTime.now().toUtc());
+      final n = toWallClock(bp, _now);
       final h = n.hour.clamp(1, 21);
       String hh(int x) => x.toString().padLeft(2, '0');
       await tester.runAsync(
@@ -146,7 +151,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
       await tester.pumpAndSettle();
 
       // still the month view ...
@@ -198,7 +203,7 @@ void main() {
     useSize(tester);
     final db = await newDb();
     final repo = EventRepository(db);
-    final n = toWallClock(bp, DateTime.now().toUtc());
+    final n = toWallClock(bp, _now);
     final h = n.hour.clamp(1, 21);
     String hh(int x) => x.toString().padLeft(2, '0');
     await tester.runAsync(
@@ -211,7 +216,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpWidget(app(const HomePage(), db));
+    await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Hét'));

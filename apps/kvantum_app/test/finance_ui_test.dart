@@ -21,6 +21,10 @@ void main() {
     await initializeDateFormatting('hu');
   });
 
+  /// The moment of the tests that look at "now": the app and the test agree
+  /// on the month, and on when the payments were made.
+  final fixedNow = DateTime.utc(2026, 5, 13, 9, 30);
+
   late AppDatabase db;
   late FinanceRepository repo;
 
@@ -446,14 +450,14 @@ void main() {
   });
 
   testWidgets('the month switcher moves between months', (tester) async {
-    await boot(tester);
+    await boot(tester, clock: fixedNow);
     final label = find.byTooltip('Előző hónap');
     await tester.tap(label);
     await tester.pumpAndSettle();
     final container = ProviderScope.containerOf(
       tester.element(find.byType(FinancePage)),
     );
-    final now = todayIn(DateTime.now());
+    final now = todayIn(fixedNow);
     final prev = DateTime.utc(now.year, now.month - 1, 1);
     expect(container.read(finMonthProvider), prev);
     await tester.tap(find.byTooltip('Következő hónap'));
@@ -481,15 +485,15 @@ void main() {
     (tester) async {
       final w = FakeWallet(
         queue: [
-          note('SPAR', '3 490 Ft', DateTime.now().millisecondsSinceEpoch),
+          note('SPAR', '3 490 Ft', fixedNow.millisecondsSinceEpoch),
           note(
             'Google Wallet',
             'Új ajánlat',
-            DateTime.now().millisecondsSinceEpoch + 1,
+            fixedNow.millisecondsSinceEpoch + 1,
           ),
         ],
       );
-      await boot(tester, home: const RootShell(), wallet: w);
+      await boot(tester, home: const RootShell(), wallet: w, clock: fixedNow);
       await tester.tap(find.text('Pénzügyek').last);
       await tester.pumpAndSettle();
       await goTo(tester, 'Tételek');
@@ -507,11 +511,11 @@ void main() {
   testWidgets('filing a payment teaches the app the merchant', (tester) async {
     final w = FakeWallet(
       queue: [
-        note('SPAR', '1 000 Ft', DateTime.now().millisecondsSinceEpoch),
-        note('SPAR', '2 000 Ft', DateTime.now().millisecondsSinceEpoch + 5),
+        note('SPAR', '1 000 Ft', fixedNow.millisecondsSinceEpoch),
+        note('SPAR', '2 000 Ft', fixedNow.millisecondsSinceEpoch + 5),
       ],
     );
-    await boot(tester, home: const RootShell(), wallet: w);
+    await boot(tester, home: const RootShell(), wallet: w, clock: fixedNow);
     await tester.tap(find.text('Pénzügyek').last);
     await tester.pumpAndSettle();
     await goTo(tester, 'Áttekintés');
