@@ -126,6 +126,9 @@ void main() {
       find.widgetWithText(TextField, 'API-kulcs'),
       'gsk_secret-typed',
     );
+    // (a field that has the focus keeps its card in the list by itself: it is
+    // the card's own keeping that is under test, so the focus goes first)
+    FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
     await awayFromTheTop(tester);
     await up(tester, find.widgetWithText(TextField, 'API-kulcs'));
