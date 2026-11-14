@@ -1,0 +1,106 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-2",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000014248087\"",
+      "id": "series9z8y7x",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=series9z8y7x",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Hétfői tervezés",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "series9z8y7x@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;COUNT=6;BYDAY=MO"
+      ],
+      "extendedProperties": {
+        "private": {
+          "appEventId": "L-series"
+        }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000061886764\"",
+      "id": "series9z8y7x_20260511T070000Z",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=series9z8y7x_20260511T070000Z",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Hétfői tervezés (áthelyezve)",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-12T14:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-12T15:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "series9z8y7x@google.com",
+      "sequence": 1,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurringEventId": "series9z8y7x",
+      "originalStartTime": {
+        "dateTime": "2026-05-11T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000000000001\"",
+      "id": "series9z8y7x_20260518T070000Z",
+      "status": "cancelled",
+      "recurringEventId": "series9z8y7x",
+      "originalStartTime": {
+        "dateTime": "2026-05-18T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      }
+    }
+  ]
+}

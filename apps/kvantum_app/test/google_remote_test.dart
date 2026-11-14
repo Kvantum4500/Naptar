@@ -10,39 +10,10 @@ import 'package:kvantum_app/sync/remote.dart';
 import 'package:kvantum_app/sync/retry_after_client.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import 'support/google_fake.dart';
+
 const cal = 'primary';
 const bp = 'Europe/Budapest';
-
-/// Records every request and answers from [handler].
-class Fake {
-  final List<http.Request> reqs = [];
-  late final http.Client client;
-  Fake(http.Response Function(http.Request r) handler) {
-    client = MockClient((r) async {
-      reqs.add(r);
-      if (r.url.path.endsWith('/calendars/primary') && r.method == 'GET') {
-        return _json({'timeZone': bp});
-      }
-      return handler(r);
-    });
-  }
-}
-
-http.Response _json(Object body, [int status = 200]) => http.Response(
-  jsonEncode(body),
-  status,
-  headers: {'content-type': 'application/json; charset=utf-8'},
-);
-
-http.Response _err(int status, [String reason = '']) => _json({
-  'error': {
-    'code': status,
-    'message': 'x',
-    'errors': [
-      {'reason': reason},
-    ],
-  },
-}, status);
 
 CalEvent ev({
   String id = 'L1',
@@ -69,8 +40,8 @@ void main() {
 
   group('pull mapping', () {
     test('timed, all-day, recurring (+EXDATE forms), cancelled', () async {
-      final f = Fake(
-        (r) => _json({
+      final f = FakeGoogle(
+        (r) => jsonResp({
           'nextSyncToken': 'T1',
           'items': [
             {
@@ -175,7 +146,9 @@ void main() {
     });
 
     test('full sync sends timeMin; incremental sends only the token', () async {
-      final f = Fake((r) => _json({'items': [], 'nextSyncToken': 'N'}));
+      final f = FakeGoogle(
+        (r) => jsonResp({'items': [], 'nextSyncToken': 'N'}),
+      );
       final remote = GoogleCalendarRemote(f.client);
       await remote.pull(cal, null);
       final full = f.reqs.last.url.queryParameters;
@@ -189,10 +162,10 @@ void main() {
     });
 
     test('pagination collects all pages, token comes from the last', () async {
-      final f = Fake((r) {
+      final f = FakeGoogle((r) {
         final page = r.url.queryParameters['pageToken'];
         return page == null
-            ? _json({
+            ? jsonResp({
                 'nextPageToken': 'P2',
                 'items': [
                   {
@@ -203,7 +176,7 @@ void main() {
                   },
                 ],
               })
-            : _json({
+            : jsonResp({
                 'nextSyncToken': 'FINAL',
                 'items': [
                   {
@@ -224,22 +197,24 @@ void main() {
       '410 -> SyncTokenExpired; 429/5xx/network -> TransientSyncError',
       () async {
         expect(
-          GoogleCalendarRemote(Fake((_) => _err(410)).client).pull(cal, 'old'),
+          GoogleCalendarRemote(FakeGoogle((_) => errResp(410)).client)
+              .pull(cal, 'old'),
           throwsA(isA<SyncTokenExpired>()),
         );
         expect(
           GoogleCalendarRemote(
-            Fake((_) => _err(429, 'rateLimitExceeded')).client,
+            FakeGoogle((_) => errResp(429, 'rateLimitExceeded')).client,
           ).pull(cal, null),
           throwsA(isA<TransientSyncError>()),
         );
         expect(
-          GoogleCalendarRemote(Fake((_) => _err(503)).client).pull(cal, null),
+          GoogleCalendarRemote(FakeGoogle((_) => errResp(503)).client)
+              .pull(cal, null),
           throwsA(isA<TransientSyncError>()),
         );
         expect(
           GoogleCalendarRemote(
-            Fake((_) => _err(403, 'userRateLimitExceeded')).client,
+            FakeGoogle((_) => errResp(403, 'userRateLimitExceeded')).client,
           ).pull(cal, null),
           throwsA(isA<TransientSyncError>()),
         );
@@ -258,11 +233,11 @@ void main() {
     test(
       'new event: inserts with appEventId, zone and recurrence lines',
       () async {
-        final f = Fake((r) {
+        final f = FakeGoogle((r) {
           if (r.method == 'GET') {
-            return _json({'items': []}); // lookup by appEventId: none
+            return jsonResp({'items': []}); // lookup by appEventId: none
           }
-          return _json({'id': 'g1', 'etag': 'E1'});
+          return jsonResp({'id': 'g1', 'etag': 'E1'});
         });
         final res = await GoogleCalendarRemote(f.client)
             .upsert(ev(rrule: 'FREQ=DAILY;COUNT=5'));
@@ -290,15 +265,15 @@ void main() {
     test(
       'retry after a lost response does NOT insert twice (found by appEventId)',
       () async {
-        final f = Fake((r) {
+        final f = FakeGoogle((r) {
           if (r.method == 'GET') {
-            return _json({
+            return jsonResp({
               'items': [
                 {'id': 'gExisting'},
               ],
             });
           }
-          return _json({'id': 'gExisting', 'etag': 'E2'});
+          return jsonResp({'id': 'gExisting', 'etag': 'E2'});
         });
         final res = await GoogleCalendarRemote(f.client).upsert(ev());
         expect(res.googleId, 'gExisting');
@@ -308,10 +283,10 @@ void main() {
     );
 
     test('all-day body uses date, exclusive end', () async {
-      final f = Fake(
+      final f = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json({'items': []})
-            : _json({'id': 'g', 'etag': 'e'}),
+            ? jsonResp({'items': []})
+            : jsonResp({'id': 'g', 'etag': 'e'}),
       );
       await GoogleCalendarRemote(f.client).upsert(ev(allDay: true));
       final body = jsonDecode(f.reqs.last.body) as Map<String, dynamic>;
@@ -322,10 +297,10 @@ void main() {
     test(
       'update sends the etag it just read as If-Match (not the old one)',
       () async {
-        final ok = Fake(
+        final ok = FakeGoogle(
           (r) => r.method == 'GET'
-              ? _json({'id': 'g1', 'etag': 'E7'})
-              : _json({'id': 'g1', 'etag': 'E9'}),
+              ? jsonResp({'id': 'g1', 'etag': 'E7'})
+              : jsonResp({'id': 'g1', 'etag': 'E9'}),
         );
         final res = await GoogleCalendarRemote(ok.client)
             .upsert(ev(googleId: 'g1', etag: 'stale-local'));
@@ -339,10 +314,10 @@ void main() {
     test(
       'update of an event deleted remotely recreates it (local wins)',
       () async {
-        final f = Fake(
+        final f = FakeGoogle(
           (r) => r.method == 'PUT'
-              ? _err(404)
-              : _json({'id': 'gNew', 'etag': 'E'}),
+              ? errResp(404)
+              : jsonResp({'id': 'gNew', 'etag': 'E'}),
         );
         final res = await GoogleCalendarRemote(f.client)
             .upsert(ev(googleId: 'gOld', etag: 'E1'));
@@ -351,9 +326,9 @@ void main() {
     );
 
     test('delete: 404 is fine; unknown event makes no delete call', () async {
-      final gone = Fake((r) => _err(404));
+      final gone = FakeGoogle((r) => errResp(404));
       await GoogleCalendarRemote(gone.client).delete(ev(googleId: 'g1'));
-      final none = Fake((r) => _json({'items': []}));
+      final none = FakeGoogle((r) => jsonResp({'items': []}));
       await GoogleCalendarRemote(none.client).delete(ev());
       expect(none.reqs.where((r) => r.method == 'DELETE'), isEmpty);
     });
@@ -361,18 +336,18 @@ void main() {
 
   group('Naptar calendar (find or create once)', () {
     http.Response calList(List<Map<String, Object?>> items) =>
-        _json({'items': items});
+        jsonResp({'items': items});
 
     test('creates the calendar when none carries the marker', () async {
-      final f = Fake((r) {
+      final f = FakeGoogle((r) {
         if (r.url.path.endsWith('/users/me/calendarList')) return calList([]);
         if (r.method == 'POST' && r.url.path.endsWith('/calendars')) {
-          return _json({'id': 'newCal', 'timeZone': bp});
+          return jsonResp({'id': 'newCal', 'timeZone': bp});
         }
         if (r.url.path.endsWith('/calendars/newCal')) {
-          return _json({'timeZone': bp});
+          return jsonResp({'timeZone': bp});
         }
-        return _json({'items': [], 'nextSyncToken': 'T'});
+        return jsonResp({'items': [], 'nextSyncToken': 'T'});
       });
       await GoogleCalendarRemote(f.client).pull('naptar', null);
       final post = f.reqs.firstWhere((r) => r.method == 'POST');
@@ -383,7 +358,7 @@ void main() {
     });
 
     test('reuses an existing marked calendar; several -> the same (smallest id) one', () async {
-      final f = Fake((r) {
+      final f = FakeGoogle((r) {
         if (r.url.path.endsWith('/users/me/calendarList')) {
           return calList([
             {
@@ -401,9 +376,9 @@ void main() {
           ]);
         }
         if (r.url.path.endsWith('/calendars/aaa')) {
-          return _json({'timeZone': bp});
+          return jsonResp({'timeZone': bp});
         }
-        return _json({'items': [], 'nextSyncToken': 'T'});
+        return jsonResp({'items': [], 'nextSyncToken': 'T'});
       });
       final remote = GoogleCalendarRemote(f.client);
       await remote.pull('naptar', null);
@@ -421,7 +396,7 @@ void main() {
     test(
       'events are pushed into the Naptar calendar, never into primary',
       () async {
-        final f = Fake((r) {
+        final f = FakeGoogle((r) {
           if (r.url.path.endsWith('/users/me/calendarList')) {
             return calList([
               {
@@ -431,8 +406,8 @@ void main() {
               },
             ]);
           }
-          if (r.method == 'GET') return _json({'items': []});
-          return _json({'id': 'g', 'etag': 'e'});
+          if (r.method == 'GET') return jsonResp({'items': []});
+          return jsonResp({'id': 'g', 'etag': 'e'});
         });
         final logical = CalEvent(
           id: 'L',
@@ -454,8 +429,8 @@ void main() {
 
   group('colours and AI flag', () {
     test('pull maps colorId and the ai marker; push sends them back', () async {
-      final f = Fake(
-        (r) => _json({
+      final f = FakeGoogle(
+        (r) => jsonResp({
           'nextSyncToken': 'T',
           'items': [
             {
@@ -480,10 +455,10 @@ void main() {
       expect(e.colorId, '11');
       expect(e.aiGenerated, isTrue);
 
-      final out = Fake(
+      final out = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json({'items': []})
-            : _json({'id': 'g', 'etag': 'e'}),
+            ? jsonResp({'items': []})
+            : jsonResp({'id': 'g', 'etag': 'e'}),
       );
       await GoogleCalendarRemote(out.client)
           .upsert(ev().copyWith(colorId: '5', aiGenerated: true));
@@ -510,9 +485,9 @@ void main() {
     test(
       'finds the instance by its original start and patches only it',
       () async {
-        final f = Fake((r) {
+        final f = FakeGoogle((r) {
           if (r.url.path.contains('/events/gMaster/instances')) {
-            return _json({
+            return jsonResp({
               'items': [
                 {
                   'id': 'gMaster_20260505T070000Z',
@@ -524,7 +499,7 @@ void main() {
               ],
             });
           }
-          return _json({'id': 'gMaster_20260505T070000Z', 'etag': 'E7'});
+          return jsonResp({'id': 'gMaster_20260505T070000Z', 'etag': 'E7'});
         });
         final res = await GoogleCalendarRemote(f.client)
             .upsert(override(), masterGoogleId: 'gMaster');
@@ -540,7 +515,7 @@ void main() {
     );
 
     test('known instance id is patched directly (no lookup)', () async {
-      final f = Fake((r) => _json({'id': 'inst', 'etag': 'E'}));
+      final f = FakeGoogle((r) => jsonResp({'id': 'inst', 'etag': 'E'}));
       await GoogleCalendarRemote(f.client)
           .upsert(override(googleId: 'inst'), masterGoogleId: 'gMaster');
       expect(f.reqs.where((r) => r.url.path.contains('/instances')), isEmpty);
@@ -548,7 +523,7 @@ void main() {
     });
 
     test('a cancelled override cancels exactly that occurrence', () async {
-      final f = Fake((r) => _json({'id': 'inst', 'etag': 'E'}));
+      final f = FakeGoogle((r) => jsonResp({'id': 'inst', 'etag': 'E'}));
       await GoogleCalendarRemote(f.client).upsert(
         override(googleId: 'inst', cancelled: true),
         masterGoogleId: 'gMaster',
@@ -559,7 +534,7 @@ void main() {
     test(
       'missing instance or missing series id fail loudly, never silently',
       () async {
-        final none = Fake((r) => _json({'items': []}));
+        final none = FakeGoogle((r) => jsonResp({'items': []}));
         expect(
           GoogleCalendarRemote(none.client)
               .upsert(override(), masterGoogleId: 'gMaster'),
@@ -573,10 +548,10 @@ void main() {
     );
 
     test('series push carries EXDATE lines and the converted UNTIL', () async {
-      final f = Fake(
+      final f = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json({'items': []})
-            : _json({'id': 'g', 'etag': 'e'}),
+            ? jsonResp({'items': []})
+            : jsonResp({'id': 'g', 'etag': 'e'}),
       );
       final m = ev(rrule: 'FREQ=DAILY;UNTIL=20260510T235959Z');
       await GoogleCalendarRemote(f.client).upsert(m);
@@ -619,10 +594,10 @@ void main() {
     };
 
     test('reminders, guests, Meet, availability, extra keys survive; ours replace theirs', () async {
-      final f = Fake(
+      final f = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json(googleSide())
-            : _json({'id': 'g1', 'etag': 'E8'}),
+            ? jsonResp(googleSide())
+            : jsonResp({'id': 'g1', 'etag': 'E8'}),
       );
       await GoogleCalendarRemote(f.client)
           .upsert(ev(googleId: 'g1', etag: 'old', rrule: 'FREQ=DAILY;COUNT=5'));
@@ -664,10 +639,10 @@ void main() {
     test(
       'an event that is not a series here is not one afterwards either',
       () async {
-        final f = Fake(
+        final f = FakeGoogle(
           (r) => r.method == 'GET'
-              ? _json(googleSide())
-              : _json({'id': 'g1', 'etag': 'E8'}),
+              ? jsonResp(googleSide())
+              : jsonResp({'id': 'g1', 'etag': 'E8'}),
         );
         await GoogleCalendarRemote(f.client).upsert(ev(googleId: 'g1'));
         final b = jsonDecode(f.reqs.last.body) as Map<String, dynamic>;
@@ -676,10 +651,10 @@ void main() {
     );
 
     test('the AI marker is set when the event is AI generated', () async {
-      final f = Fake(
+      final f = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json({'id': 'g1', 'etag': 'E7'})
-            : _json({'id': 'g1', 'etag': 'E8'}),
+            ? jsonResp({'id': 'g1', 'etag': 'E7'})
+            : jsonResp({'id': 'g1', 'etag': 'E8'}),
       );
       await GoogleCalendarRemote(f.client)
           .upsert(ev(googleId: 'g1').copyWith(aiGenerated: true));
@@ -691,13 +666,15 @@ void main() {
       'somebody changed it meanwhile (412): read again, write again',
       () async {
         var gets = 0, puts = 0;
-        final f = Fake((r) {
+        final f = FakeGoogle((r) {
           if (r.method == 'GET') {
             gets++;
-            return _json({'id': 'g1', 'etag': 'E$gets'});
+            return jsonResp({'id': 'g1', 'etag': 'E$gets'});
           }
           puts++;
-          return puts == 1 ? _err(412) : _json({'id': 'g1', 'etag': 'done'});
+          return puts == 1
+              ? errResp(412)
+              : jsonResp({'id': 'g1', 'etag': 'done'});
         });
         final res = await GoogleCalendarRemote(f.client)
             .upsert(ev(googleId: 'g1'));
@@ -709,10 +686,10 @@ void main() {
 
     test('a write that keeps conflicting gives up after three tries', () async {
       var puts = 0;
-      final f = Fake((r) {
-        if (r.method == 'GET') return _json({'id': 'g1', 'etag': 'E'});
+      final f = FakeGoogle((r) {
+        if (r.method == 'GET') return jsonResp({'id': 'g1', 'etag': 'E'});
         puts++;
-        return _err(412);
+        return errResp(412);
       });
       await expectLater(
         GoogleCalendarRemote(f.client).upsert(ev(googleId: 'g1')),
@@ -725,14 +702,16 @@ void main() {
       'deleted in Google (cancelled or 404 on read): created again, local wins',
       () async {
         for (final kind in ['cancelled', '404']) {
-          final f = Fake((r) {
+          final f = FakeGoogle((r) {
             if (r.method == 'GET') {
               return kind == '404'
-                  ? _err(404)
-                  : _json(googleSide(status: 'cancelled'));
+                  ? errResp(404)
+                  : jsonResp(googleSide(status: 'cancelled'));
             }
-            if (r.method == 'POST') return _json({'id': 'gNew', 'etag': 'N'});
-            return _err(500); // a PUT must not happen
+            if (r.method == 'POST') {
+              return jsonResp({'id': 'gNew', 'etag': 'N'});
+            }
+            return errResp(500); // a PUT must not happen
           });
           final res = await GoogleCalendarRemote(f.client)
               .upsert(ev(googleId: 'g1'));
@@ -754,8 +733,10 @@ void main() {
       test(
         '403 $reason -> transient, throttled${wantDaily ? ', daily' : ''}',
         () async {
-          final f = Fake(
-            (r) => r.method == 'GET' ? _json({'items': []}) : _err(403, reason),
+          final f = FakeGoogle(
+            (r) => r.method == 'GET'
+                ? jsonResp({'items': []})
+                : errResp(403, reason),
           );
           try {
             await GoogleCalendarRemote(f.client).upsert(ev());
@@ -769,10 +750,10 @@ void main() {
     }
 
     test('403 forbiddenForNonOrganizer is a rejection of THIS item', () async {
-      final f = Fake(
+      final f = FakeGoogle(
         (r) => r.method == 'GET'
-            ? _json({'items': []})
-            : _err(403, 'forbiddenForNonOrganizer'),
+            ? jsonResp({'items': []})
+            : errResp(403, 'forbiddenForNonOrganizer'),
       );
       await expectLater(
         GoogleCalendarRemote(f.client).upsert(ev()),
@@ -785,9 +766,9 @@ void main() {
       () async {
         final inner = MockClient((r) async {
           if (r.url.path.endsWith('/calendars/primary')) {
-            return _json({'timeZone': bp});
+            return jsonResp({'timeZone': bp});
           }
-          if (r.method == 'GET') return _json({'items': []});
+          if (r.method == 'GET') return jsonResp({'items': []});
           return http.Response(
             jsonEncode({
               'error': {
@@ -809,8 +790,8 @@ void main() {
           expect(e.throttled, isTrue);
           expect(e.retryAfter, const Duration(seconds: 45));
         }
-        final f = Fake(
-          (r) => r.method == 'GET' ? _json({'items': []}) : _err(503),
+        final f = FakeGoogle(
+          (r) => r.method == 'GET' ? jsonResp({'items': []}) : errResp(503),
         );
         try {
           await GoogleCalendarRemote(f.client).upsert(ev());
@@ -838,8 +819,8 @@ void main() {
     test(
       'an unknown time zone is skipped and reported, the rest arrive',
       () async {
-        final f = Fake(
-          (r) => _json({
+        final f = FakeGoogle(
+          (r) => jsonResp({
             'nextSyncToken': 'T',
             'items': [item('a'), item('bad', zone: 'Mars/Phobos'), item('c')],
           }),
@@ -854,8 +835,8 @@ void main() {
     );
 
     test('instances say so: kind and the occurrence they replace', () async {
-      final f = Fake(
-        (r) => _json({
+      final f = FakeGoogle(
+        (r) => jsonResp({
           'nextSyncToken': 'T',
           'items': [
             item('series'),
@@ -884,12 +865,12 @@ void main() {
 
   group('the calendar vanishing and the identity of the account', () {
     http.Response calList(List<Map<String, Object?>> items) =>
-        _json({'items': items});
+        jsonResp({'items': items});
 
     test('404 on the listing: CalendarGoneError, and the calendar is looked up again', () async {
       var listing = 0;
       var eventsGone = false;
-      final f = Fake((r) {
+      final f = FakeGoogle((r) {
         if (r.url.path.endsWith('/users/me/calendarList')) {
           listing++;
           return calList([
@@ -897,10 +878,10 @@ void main() {
           ]);
         }
         if (r.url.path.endsWith('/calendars/nap')) {
-          return _json({'timeZone': bp});
+          return jsonResp({'timeZone': bp});
         }
-        if (eventsGone) return _err(404);
-        return _json({'items': [], 'nextSyncToken': 'T'});
+        if (eventsGone) return errResp(404);
+        return jsonResp({'items': [], 'nextSyncToken': 'T'});
       });
       final remote = GoogleCalendarRemote(f.client);
       await remote.pull('naptar', null);
@@ -916,12 +897,12 @@ void main() {
     });
 
     test('410 with a token is an expired token, 404 with a token is a missing calendar', () async {
-      final expired = Fake((r) => _err(410));
+      final expired = FakeGoogle((r) => errResp(410));
       await expectLater(
         GoogleCalendarRemote(expired.client).pull(cal, 'T'),
         throwsA(isA<SyncTokenExpired>()),
       );
-      final missing = Fake((r) => _err(404));
+      final missing = FakeGoogle((r) => errResp(404));
       await expectLater(
         GoogleCalendarRemote(missing.client).pull(cal, 'T'),
         throwsA(isA<CalendarGoneError>()),
@@ -933,14 +914,14 @@ void main() {
       final client = MockClient((r) async {
         if (r.url.path.endsWith('/calendars/primary')) {
           primary++;
-          return _json({'id': 'anna@gmail.com', 'timeZone': bp});
+          return jsonResp({'id': 'anna@gmail.com', 'timeZone': bp});
         }
         if (r.url.path.endsWith('/users/me/calendarList')) {
           return calList([
             {'id': 'nap', 'accessRole': 'owner', 'description': calendarMarker},
           ]);
         }
-        return _json({'items': []});
+        return jsonResp({'items': []});
       });
       final remote = GoogleCalendarRemote(client);
       final id = await remote.identity('naptar');

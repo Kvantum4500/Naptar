@@ -1,0 +1,120 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextPageToken": "PAGE2-TOKEN",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000093120887\"",
+      "id": "weekly1a2b3c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=weekly1a2b3c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Heti megbeszélés",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "weekly1a2b3c@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "extendedProperties": {
+        "private": {
+          "appEventId": "L-weekly"
+        }
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000094314062\"",
+      "id": "dentist4d5e6f",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=dentist4d5e6f",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Fogorvos",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-06-03T16:30:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-06-03T17:15:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "dentist4d5e6f@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "location": "Budapest, Andrássy út 10.",
+      "description": "Hozd a kártyát.\nMásodik sor"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000091269451\"",
+      "id": "leave7a8b9c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=leave7a8b9c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Szabi",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-08-03"
+      },
+      "end": {
+        "date": "2026-08-04"
+      },
+      "iCalUID": "leave7a8b9c@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "transparency": "transparent"
+    }
+  ]
+}

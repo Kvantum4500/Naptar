@@ -1,0 +1,231 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-4",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000063318927\"",
+      "id": "birthday1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=birthday1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Anyu születésnapja",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-03-21"
+      },
+      "end": {
+        "date": "2026-03-22"
+      },
+      "iCalUID": "birthday1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "birthday",
+      "recurrence": [
+        "RRULE:FREQ=YEARLY"
+      ],
+      "transparency": "transparent",
+      "visibility": "private",
+      "birthdayProperties": {
+        "type": "birthday",
+        "contact": "people/c1234567890"
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000089605667\"",
+      "id": "ooo1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=ooo1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Szabadság",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-07-13T00:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-07-18T00:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "ooo1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "outOfOffice",
+      "outOfOfficeProperties": {
+        "autoDeclineMode": "declineOnlyNewConflictingInvitations",
+        "declineMessage": "Szabadságon vagyok."
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000016795184\"",
+      "id": "focus1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=focus1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Fókusz idő",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-06T13:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-06T15:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "focus1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "focusTime",
+      "focusTimeProperties": {
+        "autoDeclineMode": "declineNone",
+        "chatStatus": "doNotDisturb"
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000078053509\"",
+      "id": "where1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=where1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Otthon",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-05-07"
+      },
+      "end": {
+        "date": "2026-05-08"
+      },
+      "iCalUID": "where1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "workingLocation",
+      "visibility": "public",
+      "transparency": "transparent",
+      "workingLocationProperties": {
+        "type": "homeOffice",
+        "homeOffice": {}
+      }
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000077099262\"",
+      "id": "gmail1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=gmail1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Repülőjegy: BUD → LHR",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-06-20T08:15:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-06-20T10:30:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "gmail1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "fromGmail",
+      "location": "Budapest Liszt Ferenc Nemzetközi Repülőtér",
+      "description": "<a href=\"https://mail.google.com/mail?extsrc=cal&amp;plid=ACUX6D\">Megtekintés a Gmailben</a>"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000083671818\"",
+      "id": "plain1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=plain1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Közönséges",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-08T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-08T11:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "plain1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default"
+    }
+  ]
+}

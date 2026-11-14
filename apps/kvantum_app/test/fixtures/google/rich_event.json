@@ -1,0 +1,111 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-5",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000062271684\"",
+      "id": "rich1a2b3c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=rich1a2b3c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Negyedéves áttekintés",
+      "creator": {
+        "email": "szervezo@example.com"
+      },
+      "organizer": {
+        "email": "szervezo@example.com"
+      },
+      "start": {
+        "dateTime": "2026-06-02T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-06-02T11:30:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "rich1a2b3c@google.com",
+      "sequence": 3,
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 1440
+          }
+        ]
+      },
+      "eventType": "default",
+      "description": "<b>Napirend</b><br>1. Eredmények<br>2. Terv<br><a href=\"https://example.com/doc\">Dokumentum</a>",
+      "location": "Budapest, Váci út 1., Nagyterem",
+      "colorId": "9",
+      "attendees": [
+        {
+          "email": "me@example.com",
+          "self": true,
+          "responseStatus": "accepted"
+        },
+        {
+          "email": "kollega@example.com",
+          "displayName": "Kolléga",
+          "responseStatus": "needsAction",
+          "optional": true
+        }
+      ],
+      "hangoutLink": "https://meet.google.com/abc-defg-hij",
+      "conferenceData": {
+        "entryPoints": [
+          {
+            "entryPointType": "video",
+            "uri": "https://meet.google.com/abc-defg-hij",
+            "label": "meet.google.com/abc-defg-hij"
+          }
+        ],
+        "conferenceSolution": {
+          "key": {
+            "type": "hangoutsMeet"
+          },
+          "name": "Google Meet"
+        },
+        "conferenceId": "abc-defg-hij"
+      },
+      "extendedProperties": {
+        "private": {
+          "appEventId": "L-rich",
+          "ai": "1",
+          "otherApp": "keep-me"
+        },
+        "shared": {
+          "team": "x"
+        }
+      },
+      "guestsCanModify": false,
+      "transparency": "opaque",
+      "visibility": "default",
+      "attachments": [
+        {
+          "fileUrl": "https://drive.google.com/file/d/1abc/view",
+          "title": "Prezi",
+          "mimeType": "application/pdf"
+        }
+      ]
+    }
+  ]
+}
