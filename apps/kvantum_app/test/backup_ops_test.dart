@@ -199,11 +199,100 @@ void main() {
         cancelled,
         calendarId: kNaptarCalendar,
       );
-      expect(plan.changes.map((c) => c.current.id), ['o']);
-      expect(plan.changes.single.incoming.cancelled, isTrue);
+      // the moved occurrence is cancelled in the file, and with it a day of
+      // the series is gone there: both differ from the device
+      expect(
+        plan.changes.map((c) => c.current.id),
+        unorderedEquals(['m', 'o']),
+      );
+      expect(
+        plan.changes.singleWhere((c) => c.current.id == 'o').incoming.cancelled,
+        isTrue,
+      );
       // and the device's own file shows no change at all
       final same = await previewBackup(repo, text, calendarId: kNaptarCalendar);
       expect(same.changes, isEmpty);
+    });
+
+    group('a day of a series that is gone is gone in either spelling', () {
+      // A cancelled occurrence of a series (what Google sends when one day is
+      // deleted there) is a row of its own on the device; a file writes it as an
+      // EXDATE of the series. Both say: that day is gone.
+      CalEvent master({List<DateTime> gone = const []}) => evt(
+        'm',
+        'Edzés',
+        floating(2026, 11, 2, 9),
+        rrule: 'FREQ=DAILY;COUNT=5',
+      ).copyWith(exdates: gone);
+
+      CalEvent cancelledDay(int day) => CalEvent(
+        id: 'c$day',
+        calendarId: kNaptarCalendar,
+        title: 'Edzés',
+        tzid: bp,
+        start: floating(2026, 11, day, 9),
+        end: floating(2026, 11, day, 10),
+        recurringEventId: 'm',
+        originalStart: floating(2026, 11, day, 9),
+        cancelled: true,
+      );
+
+      test('the device\'s own backup shows no change', () async {
+        await repo.saveAll([master(), cancelledDay(4)]);
+        final text = await exportBackup(repo);
+        expect(text, contains('EXDATE;TZID=Europe/Budapest:20261104T090000'));
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes, isEmpty);
+        expect(plan.fresh, isEmpty);
+        expect(plan.unchanged, 1);
+      });
+
+      test(
+        'one day gone as an EXDATE, one as a cancelled row: the same',
+        () async {
+          await repo.saveAll([
+            master(gone: [floating(2026, 11, 3, 9)]),
+            cancelledDay(4),
+          ]);
+          final plan = await previewBackup(
+            repo,
+            await exportBackup(repo),
+            calendarId: kNaptarCalendar,
+          );
+          expect(plan.changes, isEmpty);
+        },
+      );
+
+      test('a day gone only in the file IS a change', () async {
+        await repo.saveAll([master(), cancelledDay(4)]);
+        final text = (await exportBackup(repo)).replaceFirst(
+          'EXDATE;TZID=Europe/Budapest:20261104T090000',
+          'EXDATE;TZID=Europe/Budapest:20261104T090000\r\n'
+              'EXDATE;TZID=Europe/Budapest:20261105T090000',
+        );
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes.map((c) => c.current.id), ['m']);
+      });
+
+      test('a day gone only on the device IS a change', () async {
+        await repo.saveAll([master(), cancelledDay(4)]);
+        final text = await exportBackup(repo);
+        await repo.saveLocal(cancelledDay(5));
+        final plan = await previewBackup(
+          repo,
+          text,
+          calendarId: kNaptarCalendar,
+        );
+        expect(plan.changes.map((c) => c.current.id), ['m']);
+      });
     });
 
     test('junk gives an empty plan and the reasons', () async {

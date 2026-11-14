@@ -346,6 +346,7 @@ void main() {
     // as a backup, and the backup is compared with the device it came from:
     // nothing may look changed, and nothing may be new.
     for (final name in [
+      'recurring_with_exception.json',
       'all_day_multiday.json',
       'event_types.json',
       'rich_event.json',

@@ -101,7 +101,31 @@ String? _canonicalRule(CalEvent e) {
   }
 }
 
-bool _same(CalEvent a, CalEvent b) =>
+/// The days of each series that are gone, by the id of the series: its
+/// EXDATEs, and the original days of its cancelled occurrences. A cancelled
+/// occurrence (what Google sends when one day is deleted there) is a row of its
+/// own on the device, while a file writes it as an EXDATE of the series: both
+/// say "that day is gone", and only that is compared.
+Map<String, Set<DateTime>> _goneDays(Iterable<CalEvent> events) {
+  final gone = <String, Set<DateTime>>{};
+  for (final e in events) {
+    if (e.isException) {
+      if (e.cancelled && e.originalStart != null) {
+        (gone[e.recurringEventId!] ??= {}).add(e.originalStart!);
+      }
+    } else {
+      (gone[e.id] ??= {}).addAll(e.exdates);
+    }
+  }
+  return gone;
+}
+
+bool _same(
+  CalEvent a,
+  CalEvent b, {
+  required Set<DateTime> goneA,
+  required Set<DateTime> goneB,
+}) =>
     a.title == b.title &&
     a.notes == b.notes &&
     a.location == b.location &&
@@ -115,8 +139,8 @@ bool _same(CalEvent a, CalEvent b) =>
     a.recurringEventId == b.recurringEventId &&
     a.originalStart == b.originalStart &&
     a.cancelled == b.cancelled &&
-    a.exdates.length == b.exdates.length &&
-    a.exdates.every(b.exdates.contains);
+    goneA.length == goneB.length &&
+    goneA.containsAll(goneB);
 
 /// Reads a backup and compares it with the events on this device. Writes
 /// nothing: the caller shows [ImportPlan.changes] and asks before
@@ -135,7 +159,10 @@ Future<ImportPlan> previewBackup(
     threshold: threshold,
     runner: runner,
   );
-  final existing = {for (final e in await repo.all()) e.id: e};
+  final onDevice = await repo.all();
+  final existing = {for (final e in onDevice) e.id: e};
+  final goneHere = _goneDays(onDevice);
+  final goneInFile = _goneDays(parsed.events);
   final fresh = <CalEvent>[];
   final changes = <ImportChange>[];
   var unchanged = 0;
@@ -143,7 +170,12 @@ Future<ImportPlan> previewBackup(
     final old = existing[e.id];
     if (old == null) {
       fresh.add(e);
-    } else if (_same(old, e)) {
+    } else if (_same(
+      old,
+      e,
+      goneA: goneHere[old.id] ?? const {},
+      goneB: goneInFile[e.id] ?? const {},
+    )) {
       unchanged++;
     } else {
       changes.add(ImportChange(old, e));
