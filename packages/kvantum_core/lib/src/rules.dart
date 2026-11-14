@@ -17,6 +17,7 @@ class PlanRules {
     this.hardFromMinutes = 60,
     this.shiftBufferFromMinutes = 45,
     this.shiftBufferHours = 8,
+    this.shiftSleepDelayMinutes = 60,
     this.hardFromBySport = const {},
     this.tzid = 'Europe/Budapest',
   });
@@ -45,6 +46,11 @@ class PlanRules {
   /// start/end this close to a shift.
   final int shiftBufferHours;
 
+  /// After a night shift the person sleeps: the sleep starts this many minutes
+  /// after the shift ends and lasts as long as the usual sleep window (see
+  /// [shiftSleep]).
+  final int shiftSleepDelayMinutes;
+
   /// What the program has learned of the user's own workouts: from how many
   /// minutes a workout of a sport (see `sportKey`) is a hard one for them.
   /// A sport that is not here uses [hardFromMinutes].
@@ -66,6 +72,7 @@ class PlanRules {
     hardFromMinutes: hardFromMinutes,
     shiftBufferFromMinutes: shiftBufferFromMinutes,
     shiftBufferHours: shiftBufferHours,
+    shiftSleepDelayMinutes: shiftSleepDelayMinutes,
     hardFromBySport: bySport,
     tzid: tzid,
   );
@@ -118,6 +125,8 @@ class Violation {
         if (!events) {
           return 'Ütközik egy meglévő eseménnyel, vagy túl közel van egy műszakhoz.';
         }
+      case 'shift_sleep':
+        if (!events) return 'Egy műszak utáni alvás idejére esik.';
       case 'low_energy':
       case 'no_data_hard':
         if (!checkins) return 'Erre a napra nehéz edzés nem javasolható.';
@@ -142,6 +151,9 @@ List<Violation> validateProposal(
   final buffer = Duration(minutes: rules.bufferMinutes);
   final sorted = [...proposal]
     ..sort((a, b) => a.startUtc.compareTo(b.startUtc));
+  // The sleep after the night shifts of the calendar (the usual sleep window
+  // does not cover it).
+  final shiftSleeps = shiftSleep(existing, rules);
 
   for (var i = 0; i < sorted.length; i++) {
     final b = sorted[i];
@@ -161,6 +173,18 @@ List<Violation> validateProposal(
     // outside the sleep window and still takes the sleep away)
     if (_touchesSleep(s, e, rules)) {
       v.add(Violation('sleep_window', '„${b.title}” az alvási sávba esik'));
+    } else {
+      for (final z in shiftSleeps) {
+        if (z.overlaps(b.startUtc, b.endUtc)) {
+          v.add(
+            Violation(
+              'shift_sleep',
+              '„${b.title}” a műszak (${z.shiftTitle}) utáni alvás idejére esik (kb. ${_hm(rules.tzid, z.startUtc)}–${_hm(rules.tzid, z.endUtc)})',
+            ),
+          );
+          break;
+        }
+      }
     }
     // Overlap + buffer with existing events (all-day events do not block).
     for (final x in existing.where((x) => !x.allDay)) {
@@ -362,6 +386,71 @@ List<Violation> validateProposal(
     }
   });
   return v;
+}
+
+/// The sleep that follows a night shift: from
+/// [PlanRules.shiftSleepDelayMinutes] after the shift ends, for as long as the
+/// usual sleep window.
+class ShiftSleep {
+  const ShiftSleep(this.startUtc, this.endUtc, this.shiftTitle);
+  final DateTime startUtc;
+  final DateTime endUtc;
+
+  /// The title of the shift this sleep follows.
+  final String shiftTitle;
+
+  bool overlaps(DateTime fromUtc, DateTime toUtc) =>
+      startUtc.isBefore(toUtc) && fromUtc.isBefore(endUtc);
+
+  @override
+  String toString() => 'ShiftSleep($startUtc..$endUtc after $shiftTitle)';
+}
+
+/// The sleep after each night shift among [events]. A shift is a night shift
+/// when it covers at least half of the usual sleep window of some night: the
+/// usual 18:00–06:00 shift covers 7 of the 8 hours of 23:00–07:00 (so the
+/// person sleeps 07:00–15:00 afterwards), a 06:00–18:00 one covers 1. Judged by
+/// the real times, never by the title; all-day events and everything that is
+/// not a shift are ignored. A rule set without a sleep window has no such sleep.
+List<ShiftSleep> shiftSleep(Iterable<Occurrence> events, PlanRules rules) {
+  final length = _sleepLength(rules);
+  if (length == Duration.zero) return const [];
+  final out = <ShiftSleep>[];
+  for (final x in events) {
+    if (!x.isShift || x.allDay) continue;
+    if (_nightOverlap(x, rules, length) * 2 < length) continue;
+    final start = x.endUtc.add(Duration(minutes: rules.shiftSleepDelayMinutes));
+    out.add(ShiftSleep(start, start.add(length), x.title));
+  }
+  return out..sort((a, b) => a.startUtc.compareTo(b.startUtc));
+}
+
+/// How long the usual sleep window is (zero when it is empty).
+Duration _sleepLength(PlanRules r) =>
+    Duration(hours: (r.sleepEndHour - r.sleepStartHour) % 24);
+
+/// How much of one night's sleep window [x] covers (the best night).
+Duration _nightOverlap(Occurrence x, PlanRules r, Duration length) {
+  final s = toWallClock(r.tzid, x.startUtc);
+  final e = toWallClock(r.tzid, x.endUtc);
+  var best = Duration.zero;
+  var day = floating(s.year, s.month, s.day).subtract(const Duration(days: 1));
+  final last = floating(e.year, e.month, e.day);
+  while (!day.isAfter(last)) {
+    final from = floating(day.year, day.month, day.day, r.sleepStartHour);
+    final to = from.add(length);
+    final overlap = (e.isBefore(to) ? e : to).difference(
+      s.isAfter(from) ? s : from,
+    );
+    if (overlap > best) best = overlap;
+    day = day.add(const Duration(days: 1));
+  }
+  return best;
+}
+
+String _hm(String tzid, DateTime utc) {
+  final w = toWallClock(tzid, utc);
+  return '${w.hour.toString().padLeft(2, '0')}:${w.minute.toString().padLeft(2, '0')}';
 }
 
 /// Whether the wall-clock interval [s, e) takes any of the sleep window, the

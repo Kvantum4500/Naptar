@@ -441,21 +441,23 @@ void main() {
           energyByDate: energy4,
         );
         expect(close.map((v) => v.code), contains('shift_rest'));
-        // an hour of training keeps the distance too, hard or not (45 min or more)
+        // an hour of training keeps the distance too, hard or not (45 min or
+        // more); and he sleeps until 15:00 after a night shift (AI-19)
         final notHard = validateProposal(
           [block(5, 13)],
           existing: [night],
           rules: rules,
           energyByDate: energy4,
         );
-        expect(notHard.map((v) => v.code), ['shift_rest']);
-        // half an hour of easy movement does not need it
+        expect(notHard.map((v) => v.code), ['shift_sleep', 'shift_rest']);
+        // half an hour of easy movement does not need the distance (tested
+        // before the shift: after it he sleeps, whatever the length)
         final light = validateProposal(
           [
             ProposedBlock(
               title: 'könnyű mozgás',
-              startUtc: resolveWallClock(bp, floating(2026, 5, 5, 13)),
-              endUtc: resolveWallClock(bp, floating(2026, 5, 5, 13, 30)),
+              startUtc: resolveWallClock(bp, floating(2026, 5, 4, 12)),
+              endUtc: resolveWallClock(bp, floating(2026, 5, 4, 12, 30)),
             ),
           ],
           existing: [night],

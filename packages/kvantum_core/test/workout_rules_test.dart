@@ -165,19 +165,22 @@ void main() {
       minutes: 12 * 60,
       shift: true,
     );
-    // the shift ends 5 May 06:00; 8 hours later is 14:00
+    // The shift runs 4 May 18:00 - 5 May 06:00; 10:00 on the 4th is 8 hours
+    // before its start. (After it the person sleeps, which the distance rule
+    // alone would not forbid: that is shift_sleep_test.dart. The distance is
+    // therefore tested on the side before the shift.)
 
     test('a workout of 45 minutes or more keeps it, hard or not', () {
       expect(
         codes(
-          validateProposal([block(5, 13)], existing: [night], rules: rules),
+          validateProposal([block(4, 11)], existing: [night], rules: rules),
         ),
         ['shift_rest'],
       );
       expect(
         codes(
           validateProposal(
-            [block(5, 13, hard: true)],
+            [block(4, 11, hard: true)],
             existing: [night],
             rules: rules,
           ),
@@ -189,7 +192,7 @@ void main() {
     test('44 minutes of light movement does not need it, 45 does', () {
       expect(
         validateProposal(
-          [block(5, 13, minutes: 44)],
+          [block(4, 11, minutes: 44)],
           existing: [night],
           rules: rules,
         ),
@@ -198,7 +201,7 @@ void main() {
       expect(
         codes(
           validateProposal(
-            [block(5, 13, minutes: 45)],
+            [block(4, 11, minutes: 45)],
             existing: [night],
             rules: rules,
           ),
@@ -207,18 +210,31 @@ void main() {
       );
     });
 
-    test('8 hours after the shift is fine; a non-workout is never checked', () {
+    test(
+      '8 hours before the start is fine; a non-workout is never checked',
+      () {
+        expect(
+          validateProposal([block(4, 9)], existing: [night], rules: rules),
+          isEmpty,
+        );
+        expect(
+          validateProposal(
+            [block(4, 11, workout: false, title: 'Számla')],
+            existing: [night],
+            rules: rules,
+          ),
+          isEmpty,
+        );
+      },
+    );
+
+    test('after the shift the distance rule and the sleep both apply', () {
+      // 13:00 on the 5th is 7 hours after the end, and he sleeps until 15:00
       expect(
-        validateProposal([block(5, 14)], existing: [night], rules: rules),
-        isEmpty,
-      );
-      expect(
-        validateProposal(
-          [block(5, 7, workout: false, title: 'Számla')],
-          existing: [night],
-          rules: rules,
+        codes(
+          validateProposal([block(5, 13)], existing: [night], rules: rules),
         ),
-        isEmpty,
+        ['shift_sleep', 'shift_rest'],
       );
     });
   });
