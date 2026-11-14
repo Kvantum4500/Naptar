@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/diag/guarded.dart';
 
+import 'support/turns.dart';
+
 void main() {
   late MemoryDiagSink sink;
   late DiagLog log;
@@ -76,11 +78,8 @@ void main() {
     final done = Completer<void>();
     runGuarded(() async {
       // nobody listens to this future: its error is "uncaught"
-      Future<void>.delayed(
-        const Duration(milliseconds: 5),
-        () => throw StateError('késői hiba'),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      unawaited(Future<void>(() => throw StateError('késői hiba')));
+      await turns(); // the turn in which it throws is among these
       done.complete();
     }, log);
     await done.future;
@@ -92,7 +91,7 @@ void main() {
 
   test('an error thrown by the body itself reaches the log too', () async {
     runGuarded(() async => throw const FormatException('induláskor'), log);
-    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await turns();
     await log.flush();
     expect(written().map((e) => e.code), contains('zone'));
   });

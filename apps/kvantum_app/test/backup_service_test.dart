@@ -26,12 +26,23 @@ class _CountingStore extends MemoryBackupStore {
   }
 }
 
+/// The clock of a device's records: a number the test sets (milliseconds).
+class DeviceClock {
+  int ms = 1700000000000;
+  int call() => ms;
+}
+
 /// One device: a database and the three stores on it.
 class Device {
-  Device(this.db)
+  Device(AppDatabase db) : this._(db, DeviceClock());
+  Device._(this.db, this.clock)
     : events = EventRepository(db),
-      records = RecordRepository(db),
+      records = RecordRepository(db, clock: clock.call),
       fin = FinanceRepository(db);
+
+  /// What time the records of this device think it is (a test moves it, so
+  /// that "later" is a number and not a wait).
+  final DeviceClock clock;
   final AppDatabase db;
   final EventRepository events;
   final RecordRepository records;
@@ -395,7 +406,7 @@ void main() {
       () async {
         // b has the task from before; a created it later on and deleted it
         await b.records.edit(kindTask, 't1', taskFields(title: 'Számla'));
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        a.clock.ms = b.clock.ms + 5; // a does it later than b
         await a.records.edit(kindTask, 't1', taskFields(title: 'Számla'));
         await a.records.delete(kindTask, 't1');
         final file = await a.service().open(await a.service().create());
@@ -427,7 +438,7 @@ void main() {
       'a record that is newer in the backup is a change, and is queued',
       () async {
         await b.records.edit(kindTask, 't1', taskFields(title: 'Régi cím'));
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        a.clock.ms = b.clock.ms + 5; // a does it later than b
         await a.records.edit(kindTask, 't1', taskFields(title: 'Régi cím'));
         await a.records.edit(kindTask, 't1', {'title': 'Új cím'});
         final file = await a.service().open(await a.service().create());
