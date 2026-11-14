@@ -22,6 +22,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
+import 'support/turns.dart';
 
 DateTime at(int d, int h, [int m = 0]) =>
     resolveWallClock(bp, floating(2026, 11, d, h, m));
@@ -545,11 +546,7 @@ void main() {
           ),
         );
 
-    Future<void> until(bool Function() ok) async {
-      for (var i = 0; i < 400 && !ok(); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
-    }
+    Future<void> until(bool Function() ok) => turnUntil(ok);
 
     Future<void> turnOn(ReminderSettings s) async {
       await c.read(reminderSettingsProvider.future);
@@ -564,7 +561,7 @@ void main() {
       await until(() => timers.live > 0);
       timers.made.lastWhere((m) => m.live()).fire();
       await until(() => fake.pendingReads > before);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await turns();
     }
 
     /// Everything the sync watches has answered and every wait that started
@@ -576,7 +573,7 @@ void main() {
       while (timers.live > 0) {
         await fireLast();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
       expect(timers.live, 0);
     }
 
@@ -605,7 +602,7 @@ void main() {
         await turnOn(const ReminderSettings(shiftLeadMinutes: 60));
         for (var d = 13; d < 18; d++) {
           await shiftOn(d, id: 's$d');
-          await Future<void>.delayed(const Duration(milliseconds: 15));
+          await turns(); // this change is seen before the next one is made
         }
         // every change started the wait again; only the newest is still running
         expect(timers.made.length, greaterThan(2));

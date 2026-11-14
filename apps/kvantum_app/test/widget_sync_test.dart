@@ -22,6 +22,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'support/fake_wallet.dart';
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
+import 'support/turns.dart';
 
 /// The platform side of the widget, as far as the app can tell.
 class FakeWidgetBridge implements WidgetBridge {
@@ -77,11 +78,7 @@ class FakeWidgetBridge implements WidgetBridge {
   }
 }
 
-Future<void> until(bool Function() ok) async {
-  for (var i = 0; i < 400 && !ok(); i++) {
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-  }
-}
+Future<void> until(bool Function() ok) => turnUntil(ok);
 
 Map<String, Object?> decode(String snapshot) =>
     jsonDecode(snapshot) as Map<String, Object?>;
@@ -147,7 +144,7 @@ void main() {
       timers.made.lastWhere((m) => m.live()).fire();
       await until(() => bridge.looks >= before + looks);
       // (and the rest of the run: reading the calendar, handing it over)
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
     }
 
     /// The app is in front again: the sync looks once more.
@@ -357,7 +354,7 @@ void main() {
       await start();
       for (var h = 8; h < 12; h++) {
         await EventRepository(db).saveLocal(visit('v$h', 'E$h', h));
-        await Future<void>.delayed(const Duration(milliseconds: 15));
+        await turns();
       }
       expect(timers.made.length, greaterThan(2));
       expect(timers.live, 1);
@@ -377,12 +374,12 @@ void main() {
       // a second run is asked for while the first is still waiting
       await comeBack();
       timers.made.lastWhere((m) => m.live()).fire();
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
       expect(bridge.looks, 1, reason: 'the second waits for the first');
 
       bridge.gate!.complete();
       await until(() => bridge.looks == 2);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
       expect(bridge.maxInFlight, 1);
       expect(bridge.updates, hasLength(1), reason: 'the same text, once');
     });
@@ -397,7 +394,7 @@ void main() {
       while (timers.live > 0) {
         await fire();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
       expect(timers.live, 0);
       expect(bridge.updates, hasLength(1));
       expect(
@@ -434,7 +431,7 @@ void main() {
       );
       addTearDown(other.dispose);
       other.listen(widgetSyncProvider, (_, _) {}, fireImmediately: true);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await turns();
       expect(timers.made, isEmpty);
     });
   });
