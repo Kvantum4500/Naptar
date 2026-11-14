@@ -277,10 +277,10 @@ CalEvent? _toEvent(
   var tz = defaultTz;
   final given = ds.params['TZID'];
   if (given != null) {
-    try {
-      locationOf(given);
-      tz = given;
-    } catch (_) {
+    final zone = ianaZoneOf(given);
+    if (zone != null) {
+      tz = zone;
+    } else {
       problems.add(
         '$label: ismeretlen időzóna ($given), $defaultTz-t használom.',
       );
@@ -288,8 +288,32 @@ CalEvent? _toEvent(
   }
   final allDay = s.dateOnly || ds.params['VALUE'] == 'DATE';
 
-  DateTime wall(_Prop p, ({DateTime value, bool dateOnly, bool utc}) st) =>
-      st.utc && !allDay ? toWallClock(tz, st.value) : st.value;
+  // A zone name that is not known is told once per event.
+  final unknownZones = <String>{?given};
+
+  /// The wall-clock time, in the zone of the event, of a time property. Every
+  /// time has its own zone: UTC (`Z`), the `TZID` of the property itself (the
+  /// end of a flight is told in the zone of the landing), or none, which means
+  /// the zone of the event.
+  DateTime wall(_Prop p, ({DateTime value, bool dateOnly, bool utc}) st) {
+    if (allDay) return st.value;
+    if (st.utc) return toWallClock(tz, st.value);
+    final own = p.params['TZID'];
+    if (own == null) return st.value;
+    final zone = ianaZoneOf(own);
+    if (zone == null) {
+      if (unknownZones.add(own)) {
+        problems.add(
+          '$label: ismeretlen időzóna ($own) a(z) ${p.name} értéknél, az '
+          'esemény zónájában olvastam.',
+        );
+      }
+      return st.value;
+    }
+    return zone == tz
+        ? st.value
+        : toWallClock(tz, resolveWallClock(zone, st.value));
+  }
 
   final start = allDay
       ? DateTime.utc(s.value.year, s.value.month, s.value.day)
@@ -350,6 +374,17 @@ CalEvent? _toEvent(
       exdates.add(
         allDay
             ? DateTime.utc(st.value.year, st.value.month, st.value.day)
+            : st.dateOnly
+            // a date alone takes out the occurrence of that day (some programs
+            // write it so for a series of timed events)
+            ? DateTime.utc(
+                st.value.year,
+                st.value.month,
+                st.value.day,
+                start.hour,
+                start.minute,
+                start.second,
+              )
             : wall(x, st),
       );
     }

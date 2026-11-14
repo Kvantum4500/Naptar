@@ -295,6 +295,180 @@ void main() {
     });
   });
 
+  group('zones: Windows names, and a zone of its own on every time', () {
+    late IcsImport r;
+    setUp(() => r = read('outlook_windows_tz.ics'));
+
+    CalEvent master(String title) => r.events.firstWhere(
+      (e) => e.title == title && e.recurringEventId == null,
+    );
+
+    test('"W. Europe Standard Time" is a zone the app knows', () {
+      final e = master('Heti projekt egyeztetés');
+      expect(e.tzid, 'Europe/Berlin');
+      expect(e.start, floating(2026, 5, 6, 13));
+      expect(e.end, floating(2026, 5, 6, 14, 30));
+      expect(e.exdates, [floating(2026, 5, 20, 13)]);
+      expect(r.problems.where((p) => p.contains('időzóna')), isEmpty);
+    });
+
+    test('a meeting in San Francisco time is where it is in the world', () {
+      final e = master('Webinar (San Francisco)');
+      expect(e.tzid, 'America/Los_Angeles');
+      expect(e.start, floating(2026, 5, 11, 9));
+      expect(e.end, floating(2026, 5, 11, 10));
+      // 09:00 in San Francisco (summer time) is 16:00 UTC
+      expect(e.startUtc, DateTime.utc(2026, 5, 11, 16));
+    });
+
+    test('the end of a flight is told in the zone of the landing', () {
+      final e = master('Repülőút Londonba');
+      expect(e.tzid, 'Europe/Berlin');
+      expect(e.start, floating(2026, 6, 20, 8, 15));
+      // 09:30 in London (summer time) is 10:30 in Berlin: a flight of 2 h 15 min
+      expect(e.end, floating(2026, 6, 20, 10, 30));
+      expect(
+        e.endUtc.difference(e.startUtc),
+        const Duration(hours: 2, minutes: 15),
+      );
+    });
+
+    test('a name nobody knows is said so, and the default zone is used', () {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:z\r\n'
+        'DTSTART;TZID="Bogus Standard Time":20260504T090000\r\n'
+        'DTEND;TZID="Bogus Standard Time":20260504T100000\r\n'
+        'SUMMARY:Ismeretlen\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      final e = imp.events.single;
+      expect(e.tzid, 'Europe/Budapest');
+      expect(e.start, floating(2026, 5, 4, 9));
+      expect(imp.problems, [contains('Bogus Standard Time')]);
+    });
+
+    test('a path in front of the name (Thunderbird) is taken off', () {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:t\r\n'
+        'DTSTART;TZID=/mozilla.org/20070129_1/America/New_York:20260504T090000\r\n'
+        'DTEND;TZID=/mozilla.org/20070129_1/America/New_York:20260504T100000\r\n'
+        'SUMMARY:Thunderbird\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      expect(imp.problems, isEmpty);
+      expect(imp.events.single.tzid, 'America/New_York');
+    });
+
+    String series(String extra) =>
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\n'
+        'DTSTART;TZID=Europe/Budapest:20260504T090000\r\n'
+        'DTEND;TZID=Europe/Budapest:20260504T100000\r\n'
+        'RRULE:FREQ=DAILY;COUNT=20\r\nSUMMARY:S\r\n'
+        'END:VEVENT\r\n$extra'
+        'END:VCALENDAR\r\n';
+
+    test('an EXDATE in the zone of its own is turned into the event zone', () {
+      // 03:00 in New York in May is 07:00 UTC, which is 09:00 in Budapest
+      final imp = parseIcs(
+        series('').replaceFirst(
+          'SUMMARY:S\r\n',
+          'SUMMARY:S\r\nEXDATE;TZID=America/New_York:20260518T030000\r\n',
+        ),
+        calendarId: 'c',
+      );
+      expect(imp.events.single.exdates, [floating(2026, 5, 18, 9)]);
+    });
+
+    test('an EXDATE in UTC is turned into the event zone', () {
+      final imp = parseIcs(
+        series('').replaceFirst(
+          'SUMMARY:S\r\n',
+          'SUMMARY:S\r\nEXDATE:20260518T070000Z\r\n',
+        ),
+        calendarId: 'c',
+      );
+      expect(imp.events.single.exdates, [floating(2026, 5, 18, 9)]);
+    });
+
+    test('a date-only EXDATE of a timed series takes out that day', () {
+      final imp = parseIcs(
+        series('').replaceFirst(
+          'SUMMARY:S\r\n',
+          'SUMMARY:S\r\nEXDATE;VALUE=DATE:20260518\r\n',
+        ),
+        calendarId: 'c',
+      );
+      final e = imp.events.single;
+      expect(e.exdates, [floating(2026, 5, 18, 9)]);
+      final occ = expand(
+        e,
+        DateTime.utc(2026, 5, 17),
+        DateTime.utc(2026, 5, 20),
+      );
+      expect(occ.map((o) => o.originalStart.day), [17, 19]);
+    });
+
+    test('a RECURRENCE-ID in the zone of its own points at the occurrence', () {
+      final imp = parseIcs(
+        series(
+          'BEGIN:VEVENT\r\nUID:u\r\n'
+          'RECURRENCE-ID;TZID=America/New_York:20260518T030000\r\n'
+          'DTSTART;TZID=Europe/Budapest:20260518T110000\r\n'
+          'DTEND;TZID=Europe/Budapest:20260518T120000\r\n'
+          'SUMMARY:S (később)\r\nEND:VEVENT\r\n',
+        ),
+        calendarId: 'c',
+      );
+      final o = imp.events.singleWhere((e) => e.recurringEventId != null);
+      expect(o.originalStart, floating(2026, 5, 18, 9));
+    });
+  });
+
+  group('the zone names', () {
+    test('a known IANA name stays, a Windows name becomes one', () {
+      expect(ianaZoneOf('Europe/Budapest'), 'Europe/Budapest');
+      expect(ianaZoneOf('Central Europe Standard Time'), 'Europe/Budapest');
+      expect(ianaZoneOf('W. Europe Standard Time'), 'Europe/Berlin');
+      expect(ianaZoneOf('GMT Standard Time'), 'Europe/London');
+      expect(ianaZoneOf('Pacific Standard Time'), 'America/Los_Angeles');
+      expect(ianaZoneOf('UTC'), 'UTC');
+    });
+
+    test(
+      'case and spaces around the name do not matter for a Windows name',
+      () {
+        expect(ianaZoneOf('  w. europe standard time '), 'Europe/Berlin');
+      },
+    );
+
+    test('a path in front of the name is taken off', () {
+      expect(
+        ianaZoneOf('/mozilla.org/20070129_1/Europe/Berlin'),
+        'Europe/Berlin',
+      );
+      expect(
+        ianaZoneOf(
+          '/freeassociation.sourceforge.net/Tzfile/America/Argentina/Buenos_Aires',
+        ),
+        'America/Argentina/Buenos_Aires',
+      );
+    });
+
+    test('what nobody knows is null', () {
+      expect(ianaZoneOf('Bogus Standard Time'), isNull);
+      expect(ianaZoneOf(''), isNull);
+      expect(ianaZoneOf('/'), isNull);
+    });
+
+    test('every Windows name of the table is a zone the database knows', () {
+      expect(windowsZoneNames, isNotEmpty);
+      windowsZoneNames.forEach((windows, iana) {
+        expect(() => locationOf(iana), returnsNormally, reason: windows);
+        expect(ianaZoneOf(windows), iana, reason: windows);
+      });
+    });
+  });
+
   group('what is written from these samples reads back the same', () {
     // A file that went through the app once (read, written, read) must be a
     // fixed point: reading the written file again changes nothing, and the
