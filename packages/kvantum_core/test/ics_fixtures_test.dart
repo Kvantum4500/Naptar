@@ -173,8 +173,8 @@ void main() {
     late IcsImport r;
     setUp(() => r = read('google_export.ics'));
 
-    test('eight events, nothing to complain about', () {
-      expect(r.problems, isEmpty);
+    test('eight events (two things are said: RDATE and the UTC series)', () {
+      expect(r.problems.length, 2);
       expect(r.events.length, 8);
     });
 
@@ -582,6 +582,92 @@ void main() {
         expect(instants(second), instants(first));
       });
     }
+  });
+
+  group('what the app does not take over is said, not hidden', () {
+    // These files are still read; what a line of the file means beyond what
+    // the app can do is told in the problems, so that nobody wonders later why
+    // a day is missing or an hour is off.
+    String one(
+      String extra, {
+      String dtstart = 'DTSTART;TZID=Europe/Budapest:20260503T090000',
+    }) =>
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:w\r\n$dtstart\r\n'
+        'DTEND;TZID=Europe/Budapest:20260503T100000\r\n$extra'
+        'SUMMARY:Valami\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
+
+    test('RDATE: the extra dates of a series', () {
+      final r = read('google_export.ics');
+      expect(r.problems.where((p) => p.contains('RDATE')), [
+        allOf(contains('Hétfői ebéd'), contains('nem vettem át')),
+      ]);
+    });
+
+    test('EXRULE: a rule of excluded days', () {
+      final imp = parseIcs(
+        one('RRULE:FREQ=DAILY;COUNT=7\r\nEXRULE:FREQ=WEEKLY;BYDAY=SA,SU\r\n'),
+        calendarId: 'c',
+      );
+      expect(imp.events.length, 1);
+      expect(imp.problems, [allOf(contains('Valami'), contains('EXRULE'))]);
+    });
+
+    test('RANGE=THISANDFUTURE: a change of this and all later days', () {
+      final imp = parseIcs(
+        'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:s\r\n'
+        'RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/Budapest:20260518T090000\r\n'
+        'DTSTART;TZID=Europe/Budapest:20260518T100000\r\n'
+        'DTEND;TZID=Europe/Budapest:20260518T110000\r\n'
+        'SUMMARY:Sor (késve)\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+        calendarId: 'c',
+      );
+      expect(imp.events.length, 1);
+      expect(imp.problems, [
+        allOf(contains('Sor (késve)'), contains('THISANDFUTURE')),
+      ]);
+    });
+
+    test('a week start that is not Monday, where it can change the days', () {
+      final imp = parseIcs(
+        one('RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=SU\r\n'),
+        calendarId: 'c',
+      );
+      expect(imp.problems, [allOf(contains('Valami'), contains('WKST=SU'))]);
+    });
+
+    test('a week start that changes nothing is not mentioned', () {
+      // one day of the week, every week or every second week: the weeks may
+      // start on any day
+      for (final rule in [
+        'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU;WKST=SU',
+        'FREQ=WEEKLY;BYDAY=SU,MO;WKST=SU',
+        'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=MO',
+        'FREQ=DAILY;INTERVAL=2;WKST=SU',
+      ]) {
+        final imp = parseIcs(one('RRULE:$rule\r\n'), calendarId: 'c');
+        expect(imp.problems, isEmpty, reason: rule);
+      }
+    });
+
+    test('a series that starts in UTC: the hour moves with summer time', () {
+      final r = read('google_export.ics');
+      expect(r.problems.where((p) => p.contains('UTC')), [
+        allOf(contains('Reggeli áttekintés'), contains('nyári')),
+      ]);
+    });
+
+    test('a single event in UTC is nothing to say', () {
+      final imp = parseIcs(
+        one('', dtstart: 'DTSTART:20260503T070000Z'),
+        calendarId: 'c',
+      );
+      expect(imp.problems, isEmpty);
+    });
+
+    test('the samples that are in order say nothing', () {
+      expect(read('apple_calendar.ics').problems, isEmpty);
+      expect(read('google_export.ics').problems.length, 2); // RDATE, UTC series
+    });
   });
 
   group('known limits: how these things are read today', () {

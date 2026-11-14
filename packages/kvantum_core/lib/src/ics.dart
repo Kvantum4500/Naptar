@@ -400,6 +400,40 @@ CalEvent? _toEvent(
   }
   final rr = one('RRULE')?.value.trim();
 
+  // What a file can say beyond what the app does. The event is still read; the
+  // problems tell what was left out or read differently, so that nobody
+  // wonders later why a day is missing or an hour is off.
+  if (props.any((p) => p.name == 'RDATE')) {
+    problems.add(
+      '$label: a sorozat kiegészítő időpontjait (RDATE) nem vettem át, '
+      'csak a szabályát.',
+    );
+  }
+  if (props.any((p) => p.name == 'EXRULE')) {
+    problems.add('$label: a kizáró szabályt (EXRULE) nem vettem át.');
+  }
+  if ((rid?.params['RANGE'] ?? '').toUpperCase() == 'THISANDFUTURE') {
+    problems.add(
+      '$label: a „ez és a következők” módosítást (RANGE=THISANDFUTURE) csak '
+      'erre az egy előfordulásra vettem át.',
+    );
+  }
+  if (rr != null && rr.isNotEmpty) {
+    final week = _weekStartThatMatters(rr);
+    if (week != null) {
+      problems.add(
+        '$label: a hét kezdete nem hétfő (WKST=$week), a heteket hétfőtől '
+        'számoltam – a kétheti (vagy ritkább) ismétlődés napjai eltérhetnek.',
+      );
+    }
+    if (s.utc && !allDay) {
+      problems.add(
+        '$label: a sorozat kezdete UTC-ben van megadva, ezért a nyári–téli '
+        'időszámítás váltásakor az óra eltolódhat az eredetihez képest.',
+      );
+    }
+  }
+
   final id = rid != null
       ? (one('X-NAPTAR-ID')?.value.trim().isNotEmpty ?? false)
             ? one('X-NAPTAR-ID')!.value.trim()
@@ -434,6 +468,23 @@ CalEvent? _toEvent(
     colorId: one('X-NAPTAR-COLOR')?.value.trim(),
     aiGenerated: one('X-NAPTAR-AI')?.value.trim() == '1',
   );
+}
+
+/// The `WKST` of a weekly rule when it can change which days the rule means.
+/// The app counts weeks from Monday; that only matters for a rule that picks
+/// several days of the week and skips weeks (every second week or rarer).
+String? _weekStartThatMatters(String rule) {
+  final r = rule.toUpperCase();
+  if (!r.contains('FREQ=WEEKLY')) return null;
+  final week = RegExp(r'(?:^|;)WKST=([A-Z]{2})').firstMatch(r)?.group(1);
+  if (week == null || week == 'MO') return null;
+  final interval = int.tryParse(
+    RegExp(r'(?:^|;)INTERVAL=(\d+)').firstMatch(r)?.group(1) ?? '1',
+  );
+  final days = RegExp(r'(?:^|;)BYDAY=([^;]*)').firstMatch(r)?.group(1);
+  return (interval ?? 1) > 1 && days != null && days.contains(',')
+      ? week
+      : null;
 }
 
 Duration? _duration(String v) {

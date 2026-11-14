@@ -373,9 +373,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       if (r.total > 0) {
         ref.read(syncControllerProvider.notifier).requestSync();
       }
+      // what the file says is told in words: the first thing as it is, and how
+      // many more follow (a bare count told nobody what to look at)
+      final more = r.problems.length - 1;
       final extra = r.problems.isEmpty
           ? ''
-          : ' (${r.problems.length} elemet kihagytam vagy figyelmeztetéssel olvastam be)';
+          : ' ${r.problems.first}${more > 0 ? ' (és még $more figyelmeztetés)' : ''}';
       final nothing = r.total == 0 && r.unchanged == 0 && r.kept == 0;
       final kept = r.kept > 0
           ? ' ${r.kept} módosult eseményt nem írtam felül.'

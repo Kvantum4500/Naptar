@@ -699,6 +699,45 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('a file with things the app does not take over says the first '
+        'one in the message, and how many more', (tester) async {
+      final io = _MemoryIo();
+      await boot(tester, const SettingsPage(), io: io);
+      final scroll = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.text('Visszaállítás fájlból'),
+        200,
+        scrollable: scroll,
+      );
+      String event(String uid, String title, String extra) =>
+          'BEGIN:VEVENT\r\nUID:$uid\r\n'
+          'DTSTART;TZID=Europe/Budapest:20261120T090000\r\n'
+          'DTEND;TZID=Europe/Budapest:20261120T100000\r\n'
+          'SUMMARY:$title\r\n$extra'
+          'END:VEVENT\r\n';
+      io.toPick =
+          'BEGIN:VCALENDAR\r\n'
+          '${event('a', 'Első', 'RRULE:FREQ=DAILY;COUNT=3\r\nRDATE:20261201T080000Z\r\n')}'
+          '${event('b', 'Második', 'RRULE:FREQ=DAILY;COUNT=3\r\nEXRULE:FREQ=WEEKLY\r\n')}'
+          '${event('c', 'Harmadik', 'RRULE:FREQ=DAILY;COUNT=3\r\nEXRULE:FREQ=WEEKLY\r\n')}'
+          'END:VCALENDAR\r\n';
+      await tester.ensureVisible(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visszaállítás fájlból'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Visszaállítva: 3 új, 0 frissítve, 0 változatlan'),
+        findsOneWidget,
+      );
+      // the first thing the file says, word for word, and that two more follow
+      expect(
+        find.textContaining('„Első”: a sorozat kiegészítő időpontjait'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('(és még 2 figyelmeztetés)'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
     testWidgets('a cancelled picker or a junk file changes nothing', (
       tester,
     ) async {
