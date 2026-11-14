@@ -98,10 +98,15 @@ String exportIcs(Iterable<CalEvent> events, {DateTime? nowUtc}) {
     if (e.isRecurring) {
       // UNTIL is a UTC instant in iCalendar (the app keeps a wall-clock limit)
       final rule = e.rrule!.replaceFirst(RegExp('^RRULE:'), '');
-      _put(
-        out,
-        'RRULE:${rruleToGoogle(rule, e.start, e.tzid, allDay: e.allDay)}',
-      );
+      var written = rule;
+      try {
+        written = rruleToGoogle(rule, e.start, e.tzid, allDay: e.allDay);
+      } catch (_) {
+        // A rule the recurrence engine refuses (it can arrive from a file or
+        // from Google) cannot be converted: it is written as it is stored, so
+        // that one broken series never costs the whole backup.
+      }
+      _put(out, 'RRULE:$written');
     }
     final gone = <DateTime>{...e.exdates, ...?deleted[e.id]};
     for (final x in gone) {

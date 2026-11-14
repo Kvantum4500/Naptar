@@ -228,6 +228,62 @@ END:VCALENDAR
     });
   });
 
+  group('one series the rule engine refuses does not stop the backup', () {
+    // A rule can reach the store from outside (a file, Google) in a form the
+    // recurrence engine rejects: both UNTIL and COUNT, or a frequency it does
+    // not know. Writing the file must not fail because of one such series.
+    for (final bad in [
+      'FREQ=DAILY;COUNT=3;UNTIL=20261231T235959Z',
+      'FREQ=SOMETIMES;UNTIL=20261231T235959Z',
+    ]) {
+      test('"$bad" is written as it is stored; the others come through', () {
+        final broken = ev(
+          'bad',
+          'Rossz szabály',
+          t0,
+          t0.add(const Duration(hours: 1)),
+          rrule: bad,
+        );
+        final fine = ev(
+          'good',
+          'Jó sorozat',
+          t0,
+          t0.add(const Duration(hours: 1)),
+          rrule: 'FREQ=DAILY;COUNT=2',
+        );
+        final single = ev(
+          'one',
+          'Egyedi',
+          t0,
+          t0.add(const Duration(hours: 1)),
+        );
+        final text = exportIcs([broken, fine, single]);
+        expect(text, contains('RRULE:$bad'));
+        final back = parseIcs(text, calendarId: 'naptar');
+        expect(back.events.map((e) => e.id), ['bad', 'good', 'one']);
+        expect(back.events[1].rrule, 'FREQ=DAILY;COUNT=2');
+      });
+    }
+
+    test('a good rule next to a broken one is still written in UTC form', () {
+      final broken = ev(
+        'bad',
+        'Rossz',
+        t0,
+        t0.add(const Duration(hours: 1)),
+        rrule: 'FREQ=NEVER;UNTIL=20261231T235959Z',
+      );
+      final fine = ev(
+        'good',
+        'Jó',
+        floating(2026, 5, 4, 9),
+        floating(2026, 5, 4, 10),
+        rrule: 'FREQ=DAILY;UNTIL=20260508T090000Z',
+      );
+      expect(exportIcs([broken, fine]), contains('UNTIL=20260508T070000Z'));
+    });
+  });
+
   group('deleted occurrences travel as EXDATEs of their series', () {
     CalEvent series() => ev(
       'm',
