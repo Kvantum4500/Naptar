@@ -360,21 +360,35 @@ void main() {
     test(
       'a pause between two uploads, none before the first or after the last',
       () async {
+        // the pauses are told to a recorder instead of being waited for: no
+        // clock decides whether this test passes
+        final pauses = <(Duration, int)>[];
         engine = SyncEngine(
           repo,
           remote,
           pace: const Duration(milliseconds: 40),
+          pause: (d) async => pauses.add((d, remote.upsertCalls)),
         );
         for (var i = 0; i < 4; i++) {
           await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
         }
-        final t = Stopwatch()..start();
         final r = await engine.sync(cal);
-        t.stop();
         expect(r.pushed, 4);
-        expect(t.elapsedMilliseconds, greaterThanOrEqualTo(3 * 40 - 5));
+        // after the first, the second and the third upload: three pauses
+        const forty = Duration(milliseconds: 40);
+        expect(pauses, [(forty, 1), (forty, 2), (forty, 3)]);
       },
     );
+
+    test('no pace, no pause', () async {
+      var asked = 0;
+      engine = SyncEngine(repo, remote, pause: (d) async => asked++);
+      for (var i = 0; i < 3; i++) {
+        await repo.saveLocal(ev('e$i', 'x$i', day: 4 + i));
+      }
+      await engine.sync(cal);
+      expect(asked, 0);
+    });
 
     test(
       'items that wait for their series do not use up the cap or the pause',

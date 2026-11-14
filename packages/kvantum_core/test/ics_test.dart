@@ -504,8 +504,13 @@ END:VCALENDAR
   });
 
   group('long folded lines', () {
+    // The guard against the line-by-line gluing that took minutes is the
+    // time the test itself may take (20 s; reading it takes well under one),
+    // not a measured number of milliseconds: a slow or busy machine must not
+    // be able to fail it by being slow.
     test(
       'a description of megabytes in 75-octet pieces is read in moments',
+      timeout: const Timeout(Duration(seconds: 20)),
       () {
         final b = StringBuffer(
           'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:big\r\n'
@@ -517,11 +522,8 @@ END:VCALENDAR
           b.write('\r\n ${'x' * 73}');
         }
         b.write('\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n');
-        final sw = Stopwatch()..start();
         final imp = parseIcs(b.toString(), calendarId: 'c');
-        sw.stop();
         expect(imp.events.single.notes.length, 5 + 30000 * 73);
-        expect(sw.elapsedMilliseconds, lessThan(3000));
       },
     );
 

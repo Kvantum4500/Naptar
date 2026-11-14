@@ -58,6 +58,8 @@ const syncBindingKey = 'sync.binding';
 /// then waits for a manual retry or an edit).
 const maxUploadAttempts = 5;
 
+Future<void> _wait(Duration d) => Future<void>.delayed(d);
+
 /// Pull -> apply -> push. Local pending edits win over remote edits of the
 /// same event (their etag is adopted so the push does not conflict); this is
 /// reported in [SyncReport.localWonConflicts].
@@ -75,6 +77,7 @@ class SyncEngine {
     this.maxAttempts = maxUploadAttempts,
     this.maxPushPerRun = 150,
     this.pace = Duration.zero,
+    this.pause = _wait,
     this.isHeld,
     this.onProgress,
     this._log,
@@ -93,6 +96,10 @@ class SyncEngine {
   /// Pause between two consecutive uploads. Google throttles quick bursts of
   /// writes (tens of events in a few seconds) with a "usage limits" error.
   final Duration pace;
+
+  /// How [pace] is waited for (tests replace it, so that no clock decides
+  /// whether they pass).
+  final Future<void> Function(Duration) pause;
 
   /// Told how far the uploads of this run are: `(done, total)` before the
   /// first one and after each one. [total] is the most this run will try (what
@@ -355,7 +362,7 @@ class SyncEngine {
         report.more = true;
         break;
       }
-      if (uploads > 0 && pace > Duration.zero) await Future.delayed(pace);
+      if (uploads > 0 && pace > Duration.zero) await pause(pace);
       try {
         if (item.op == 'delete') {
           await remote.delete(item.event);

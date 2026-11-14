@@ -250,20 +250,17 @@ void main() {
 
     test('a call that takes longer than what is left is given up on', () async {
       final llm = GatedLlm(); // never answers
-      final started = DateTime.now();
       // the request's own clock stands still at 0, so the preparations (database
-      // reads, a slow machine) cannot eat into the 50 ms the call is given
+      // reads, a slow machine) cannot eat into the single millisecond the call
+      // is given; how long the test took is not asserted (a busy machine could
+      // fail that), only that it ended in the timeout and did not hang
       await expectLater(
         service(
           llm,
-          deadline: const Duration(milliseconds: 50),
+          deadline: const Duration(milliseconds: 1),
           sinceStart: () => Duration.zero,
         ).ask('Tervezz edzést', model: 'm', settings: settings),
         throwsA(isA<LlmTimeout>()),
-      );
-      expect(
-        DateTime.now().difference(started),
-        lessThan(const Duration(seconds: 10)),
       );
       expect(llm.requests.length, 1);
     });
