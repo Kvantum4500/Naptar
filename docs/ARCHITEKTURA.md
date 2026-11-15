@@ -15,9 +15,9 @@ A számok a generált kód (a drift `db.g.dart`-ja: 4 118 sor) nélkül, az üre
 
 | Hely | Fájl | Sor | Mi van benne |
 |---|---:|---:|---|
-| `packages/kvantum_core/lib/src` | 40 | ≈ 10 000 | tiszta Dart: idő és zónák (`time`), ismétlődés (`recurrence`, `rrule_convert`), `.ics` (`ics`), egyeztetés (`reconcile`), az AI szabályai és adatblokkjai (`rules`, `assistant_context`, `assistant_models`, `free_slots`, `local_answers`), a gyors felvitel értelmezője (`quick_entry`), pénzügy (`finance*`, `bank_import`, `csv_parse`, `subscriptions`), bérbecslés, keret-értesítés, magyar ünnepek (`hu_calendar`), keresés |
-| `apps/kvantum_app/lib/ui` | 45 (ebből 5 a `finance/`-ban) | ≈ 13 600 | képernyők, szerkesztők, nézetek (hónap, hét, nap, napirend), navigáció (`root_shell`), visszavonás (`undo_service`) |
-| `…/lib/ai` | 29 | ≈ 7 600 | asszisztens (`assistant_service` + `service/`), szolgáltatók (`gemini_`, `openai_provider`), Kézikönyv, időjárás, Beállítások (`settings_page` + `settings/`) |
+| `packages/kvantum_core/lib/src` | 46 | ≈ 10 900 | tiszta Dart: idő és zónák (`time`), ismétlődés (`recurrence`, `rrule_convert`), `.ics` (`ics`), egyeztetés (`reconcile`), az AI szabályai és adatblokkjai (`rules`, `assistant_context`, `assistant_models`, `free_slots`, `local_answers`), a gyors felvitel értelmezője (`quick_entry`), pénzügy (`finance*`, `bank_import`, `csv_parse`, `subscriptions`), bérbecslés, keret-értesítés, magyar ünnepek (`hu_calendar`), keresés |
+| `apps/kvantum_app/lib/ui` | 49 (ebből 7 a `finance/`-ban) | ≈ 13 700 | képernyők, szerkesztők, nézetek (hónap, hét, nap, napirend), navigáció (`root_shell`), visszavonás (`undo_service`) |
+| `…/lib/ai` | 34 | ≈ 8 200 | asszisztens (`assistant_service` + `service/`), szolgáltatók (`gemini_`, `openai_provider`), Kézikönyv, időjárás, Beállítások (`settings_page` + `settings/`) |
 | `…/lib/data` | 10 | ≈ 2 800 | drift-adatbázis, az eseményekhez / rekordokhoz / pénzügyhöz tartozó tárak (`*_repository`), takarítás, indulás |
 | `…/lib/sync` | 11 | ≈ 2 300 | a naptár-szinkron motorja, ütemezése, hibaosztályozása, a vezérlő (`sync_controller`) |
 | `…/lib/backup` | 10 | ≈ 2 200 | automatikus és kézi mentés, titkosított zip, Drive-példány |
@@ -28,7 +28,7 @@ A számok a generált kód (a drift `db.g.dart`-ja: 4 118 sor) nélkül, az üre
 | `…/lib` (gyökér) | 2 | ≈ 500 | `main.dart` (indulás, hibakampók), `providers.dart` (a Riverpod-szolgáltatók, köztük az egy óra: `appClockProvider`) |
 | Android (`android/…/kotlin`) | 5 | – | Wallet-értesítés figyelő, főképernyő-widget |
 | Windows (`windows/runner`) | 4 | – | ablak (legkisebb méret, megjegyzett hely), egypéldányosság |
-| Tesztek | 157 | ≈ 71 600 | app: 119 fájl (≈ 54 600 sor), mag: 38 fájl (≈ 16 900 sor) |
+| Tesztek | 162 | ≈ 76 200 | app: 122 fájl (≈ 57 700 sor), mag: 40 fájl (≈ 18 500 sor) |
 
 ## Az áttekintő ábra
 
@@ -99,6 +99,8 @@ Három csatorna, egy vezérlő (`sync_controller`):
 
 Helyben, modell nélkül válaszol (`local_answers`): a költségkeretre és a napirendre vonatkozó, teljes mondatra illeszkedő kérdések.
 
+**A helyi terv (modell nélkül):** a „Terv AI nélkül” gomb és a hibakártya „Helyi terv” gombja nem megy végig a fenti úton. `AssistantController.planLocally` → `AssistantService.localPlan` (`service/local_planning`: beolvassa a naptárt a tervezett ablak körül, az edzésnaplót, az energiát és – ha be van kapcsolva – az előrejelzést) → a mag `planWorkoutsLocally` (`local_plan.dart`): tiszta függvény, jelöltek (félóránként 05:00–22:00 és a szabad ablakok kezdete), minden jelöltet a `validateProposal` ítél meg (a szabályok nincsenek kétszer leírva); a sorrend: a legrégebben végzett sport, napi egy edzés, a kedvelt napszak, a már meglévő edzésektől való távolság. A kimenet ugyanaz a `AssistantOutcome` (`calls: 0`, `LocalKind.plan`), tehát a jóváhagyás, a visszavonás és az elvetés a szokásos. A sportok és a kívánságok az eszközön, a meta-táblában vannak (`plan.local`, `ai/local_plan_prefs.dart`); a Beállítások kártyája `ai/settings/local_plan_card.dart`.
+
 ## Értesítések és widget
 
 - **Emlékeztetők:** az operációs rendszer tartja (ütemezett értesítés), nem a program fut miatta. A terv különbség-alapú (`diffReminders`): csak a törölt azonosítók mondódnak le, az új és módosult ütemeződik; Windowson saját terv-tár őrzi, mi van ütemezve.
@@ -137,10 +139,12 @@ Az `update_service` kulcs nélkül, névtelenül kérdezi le a GitHub nyilvános
 |---|---|
 | az alkalmazás indulása, a hibakampók | `lib/main.dart`, `lib/diag/guarded.dart`, `lib/data/startup.dart` |
 | a szolgáltatók (Riverpod) | `lib/providers.dart`, `lib/ai/ai_providers.dart`, `lib/sync/sync_controller.dart` |
-| a naptár nézetei és a szerkesztő | `lib/ui/home_page.dart`, `month_view.dart`, `time_grid.dart`, `agenda_view.dart`, `event_editor.dart` |
+| a naptár nézetei és a szerkesztő | `lib/ui/home_page.dart`, `month_view.dart`, `time_grid.dart`, `agenda_view.dart`, `event_editor.dart` (+ `event_editor/`: mentés / törlés, színválasztó) |
+| a gyors felvitel értelmezője | a mag: `quick_entry.dart` (a lépések: `quick_entry/`: ismétlődés, nap, idő, szótár, forrás) |
 | a navigáció, a töréspontok | `lib/ui/root_shell.dart`, `lib/ui/breakpoints.dart` |
 | a törlés és a visszavonás | `lib/ui/undo_service.dart`, `lib/data/event_change.dart`, `lib/sync/sync_hold.dart` |
-| az asszisztens | `lib/ai/assistant_service.dart` (+ `service/`), `lib/ai/ai_providers.dart`, `lib/ai/assistant_page.dart`; a szabályok a magban: `rules.dart`, `assistant_context.dart` |
+| az asszisztens | `lib/ai/assistant_service.dart` (+ `service/`), `lib/ai/ai_providers.dart`, `lib/ai/assistant_page.dart` (+ `page/`); a szabályok a magban: `rules.dart`, `assistant_context.dart` |
+| a helyi terv (AI nélkül) | a mag: `local_plan.dart`; az app: `lib/ai/service/local_planning.dart`, `lib/ai/local_plan_prefs.dart`, `lib/ai/settings/local_plan_card.dart`; a gombok: `assistant_page.dart`, `ai_providers.dart` (`planLocally`) |
 | a Beállítások | `lib/ai/settings_page.dart` (+ `settings/`: fiók, AI-szolgáltató, mentés-visszaállítás, beleegyezés) |
 | a hibaüzenetek magyarul | `lib/sync/error_catalog.dart` |
 | a naplózás és a Diagnosztika | `lib/diag/`, `lib/ui/diagnostics_page.dart` |

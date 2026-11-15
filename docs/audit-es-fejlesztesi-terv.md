@@ -303,7 +303,7 @@ Először: képernyőképes bejárás a fő feladatokra (a felhasználóval), ut
 | E | **Gyors felvitel** szövegből (helyi értelmező: „holnap 18:00 edzés”), Androidon hangbevitel; feladat: részfeladat, ismétlődő feladat | közepes | M | 3 |
 | F | **Automatikus mentés**: forgó helyi + titkosított Drive-mentés, visszaállítási előnézet | magas (adatbiztonság) | M | 1b |
 | G *(későbbre)* | **Zár és titkosítás**: alkalmazászár (biometrikus), `FLAG_SECURE`, titkosított DB, Drive-boríték | közepes | M–L | 1b |
-| H *(későbbre)* | **Helyi tartalék-tervező** (szabad idősáv + szabályok + sportforgás, LLM nélkül, ha a limit elfogyott), majd heti automatikus terv | közepes | L | 2d |
+| H | **Helyi tartalék-tervező** (szabad idősáv + szabályok + sportforgás, LLM nélkül, ha a limit elfogyott) – **kész a 7. körben**; a heti automatikus terv nem készült | közepes | L | 2d |
 
 **Csomag-megjegyzések (kockázat, függés):**
 - **A – Windows emlékeztetők:** a `flutter_local_notifications` Windows-ütemezése nem biztos; a munka elején rövid megvalósíthatósági próba. Ha nem megy, alkalmazáson belüli időzítő + Windows-toast (csak amíg fut). Tálca-ikon + automatikus indítás beállításban kapcsolható, alapból ki. Az „emlékeztető csak futó appnál megy” korlátot a felületen ki kell írni.
@@ -745,7 +745,7 @@ Tesztek: app 2 705 (volt 2 627), mag 1 553 (volt 1 459), az elemzők és a form�
 | CMP-5 minták (.ics, Google JSON) | részben | `packages/kvantum_core/test/fixtures/ics/` (Apple-, Outlook-, Google-stílus), `apps/kvantum_app/test/fixtures/google/` (7 JSON); **kézzel írt minták, nem valódi exportok** – a CMP-5 addig „részben”, amíg valódi exportot nem küldesz; a `.gitattributes` (`*.ics -text`) bájtpontosan őrzi a CRLF-et és a BOM-ot |
 | ① ② ②b ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ | kész | ① az `.ics`-mentés sosem dob; ② + ②b a mentés-előnézet kanonikus szabály- és kiesett nap-összevetése; ③ + ⑥ Windows-zónanevek és minden időpont a saját zónájában (`ianaZoneOf`, `windowsZoneNames`); ④ `STATUS:CANCELLED`; ⑤ `EXDATE;VALUE=DATE-TIME`; ⑦ a Google fájlja = az eszköz eseménye (iCalUID); ⑧ az árva átrakott nap önálló esemény; ⑨ az áthajtott többbájtos betű (`decodeCalendarBytes`); mind egy-egy commit, a javítás nélkül bizonyítottan piros teszttel |
 | figyelmeztetések | kész | RDATE, EXRULE, `RANGE=THISANDFUTURE`, WKST ≠ MO több napos kétheti szabálynál, UTC-ben rögzített sorozat; az import értesítése az első problémát szó szerint is mutatja |
-| QA-2 szétbontás | részben | `assistant_service.dart` 1 670 → 708 sor (`part` + privát kiterjesztés, a régi fájl újra-exportál; a sorok halmaza egyezik), `settings_page.dart` 1 187 → 574 sor (két állapotos kártya `AutomaticKeepAlive`-val és a beleegyezés-ablak külön fájlban; `settings_split_test`); nem része: `quick_entry` 1 085, `assistant_page` 921, `bank_import_page` 908, `event_editor` 908 |
+| QA-2 szétbontás | részben | `assistant_service.dart` 1 670 → 708 sor (`part` + privát kiterjesztés, a régi fájl újra-exportál; a sorok halmaza egyezik), `settings_page.dart` 1 187 → 574 sor (két állapotos kártya `AutomaticKeepAlive`-val és a beleegyezés-ablak külön fájlban; `settings_split_test`); a `quick_entry` (1 085), az `assistant_page` (921), a `bank_import_page` (908) és az `event_editor` (908) szétbontása a 7. körben kész |
 | QA-3 várakozások és órák | kész | 36 valós várakozás (≈ 11 s) → az eseményhurok fordulói / `FakeAsync` / beinjektált szünet és óra; három falióra-állítás kikerült (`SyncEngine.pause`); őrző-teszt (`no_real_waits_test`); egy óra (`appClockProvider`; a szolgáltatók, a tárak bélyege, a mentés `DTSTAMP`-je, a mentés-fájlok neve, a feladat-lista sorrend-alapja, a cél határidő-választója); a „most”-ra támaszkodó tesztek rögzített órán |
 | QA-4 helyi rész | kész | `dart tool/coverage.dart` (+ `tool/lcov.dart`, 28 teszt a magban): app **93,4 %** (13 637 / 14 606 sor, 137 fájl), mag **97,1 %** (3 963 / 4 083 sor, 40 fájl) sorfedettség; a generált kód nem számít; lint: 21 új szabály mindkét csomagban |
 | `material_ui` próba | kész (nem épül be) | külön másolaton a csomag + `dart fix --apply`: 203 javítás 95 fájlban (98 fájl, +134 / −131 sor), a `GlobalMaterialLocalizations` ütközés három fájlban kézzel; Flutter 3.50.0-n a próba idején mind a 2 699 app-teszt zöld volt, 3.47.9-en az elemzés tiszta; a beépítés külön döntésre vár (lásd `docs/verzio-frissites.md`) |
@@ -769,11 +769,24 @@ Tesztek: app 2 758 (volt 2 705), mag 1 585 (volt 1 553), az elemzők és a form�
 | Android-fordítási próba | nem készült | a környezet-kérést elutasítottad; a kör csak Dart-kódot érint (a natív részeket a Build 84 lefordította) |
 | megfigyelések | nyitva | (1) a műszak utáni alvás hossza és kezdete (1 óra késés, a sáv hossza) becslés: a saját ciklusodon kell kipróbálni; (2) a `shiftSleepDelayMinutes` nincs a Beállításokban (a szabálykészletben van); (3) a modell-tartalék a szolgáltatók valódi hibaüzenetein nincs kipróbálva (a minták a dokumentált alakot követik) |
 
+## 7. kör
+
+### H (helyi tartalék-tervező), QA-2 maradéka és egy értelmező-hiba – kész, a build után kipróbálandó
+
+Tesztek: app 2845 (volt 2 797), mag 1663 (volt 1 585); az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0). Szándékos elrontás: **154** (az első menetben 115 elbukott; a maradék 39-ből 32 tesztelési hiány volt – mind kapott tesztet –, 7 egyenértékű, felesleges kód vagy érvénytelen elrontás).
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| H helyi tartalék-tervező | kész (a heti automatikus terv nem) | a „Terv AI nélkül” gomb és a hibakártya „Helyi terv” gombja; a mag `planWorkoutsLocally` minden jelöltet a `validateProposal`-lal ítéltet meg (a szabályok nincsenek kétszer leírva); napi egy edzés, a legrégebben végzett sport előbb (napló + naptár), kedvelt napszak, szétosztás, szabadtéri sport szezonja és előrejelzése, nem a múltba; a kimenet a szokásos `AssistantOutcome` (`LocalKind.plan`, `calls: 0`); a sportok és kívánságok csak az eszközön (`plan.local`); ha kevesebb fér be, megmondja miért (két ok, műszaknál külön mondat) |
+| QA-2 szétbontás (maradék) | kész | `assistant_page` 949 → 306, `event_editor` 908 → 570, `bank_import_page` 908 → 244, a mag `quick_entry` 1 085 → 286 sor (`part` + privát kiterjesztés; a 750 soros `parseQuickEntry` lépésekre); a régi és az új értelmező ~ 1 millió elemzésen azonos; a `setState` helyett `_set` (21 sor) az egyetlen szöveg-változás |
+| gyors felvitel: „18:00 hetente edzés” | javítva | a „(szám) hetente / naponta” minta az óra perceit (00) 0 hetes ismétlődésnek vette (összeomlás hibakereső módban, hibás szabály éles módban); most a szám nem kapcsolódhat órához, a nulla nem darabszám; hét új teszt (öt a javítás előtt piros) |
+| megfigyelések | nyitva | (1) a helyi terv kipróbálása élő naptáron (műszakos hét, szabadtéri sport, az időjárás-előrejelzéssel) még hátra van; (2) a heti automatikus terv (a H csomag második fele) nem készült; (3) a helyi terv sportjai és kívánságai nem szinkronizálódnak (döntés: csak az eszközön) |
+
 ## I. ZÁRÓ ÁTNÉZÉS (a teljes kör vége: 2026-11-14)
 
-A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **78 kész**, **13 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő) – a 6. kör 1. része után (a REL-26 „részben”-ből „kész” lett).
+A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **79 kész**, **12 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő) – a 7. kör után (a REL-26 a 6. kör 1. részében, a QA-2 a 7. körben lett „részben”-ből „kész”).
 
-**Nem része a körnek (kimondva):** néhány biztonsági tétel (a részletek nem nyilvánosak), a **H** csomag (helyi tartalék-tervező), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
+**Nem része a körnek (kimondva):** néhány biztonsági tétel (a részletek nem nyilvánosak), a H csomag második fele (heti automatikus terv; a helyi tartalék-tervező a 7. körben kész), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
 
 | Azonosító | Állapot | Mi az, és mi lett |
 |---|---|---|
@@ -871,7 +884,7 @@ A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végreh
 | CMP-7 | kész | Töréspontok szétszórva (760 / 820 / 900 / 1000 px) három fájlban; … – a töréspontok egy helyen: `lib/ui/breakpoints.dart` |
 | CMP-8 | nem cél | iOS/macOS/Linux nincs célozva (nem kért) – iOS / macOS / Linux |
 | QA-1 | kész | A README elavult – 0. fázis; a README minden körben frissül |
-| QA-2 | részben | Nagy fájlok (assistant_service, settings_page …) – az `assistant_service` (1 670 → 708 sor) és a `settings_page` (1 187 → 574 sor) szétbontva; a `quick_entry` (1 085), `assistant_page`, `bank_import_page`, `event_editor` (~ 900) marad |
+| QA-2 | kész | Nagy fájlok – az `assistant_service` (1 670 → 708 sor), a `settings_page` (1 187 → 574 sor), és a 7. körben a `quick_entry` (1 085 → 286), az `assistant_page` (949 → 306), az `event_editor` (908 → 570) és a `bank_import_page` (908 → 244) is szétbontva |
 | QA-3 | kész | Teszthiányok; valós idejű várakozások – 3/C |
 | QA-4 | részben | CI: lefedettség, formázás, kapuk – helyi rész kész: `tool/coverage.dart`, lint; a CI-sorok a workflow-PR-ban |
 | QA-5 | info | Nincs telemetria / összeomlás-napló (szándékos) – szándékos; a helyi diagnosztika pótolja |
