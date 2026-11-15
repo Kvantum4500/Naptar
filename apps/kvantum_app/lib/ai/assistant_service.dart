@@ -17,6 +17,7 @@ export 'service/assistant_outcome.dart';
 export 'service/prepared_request.dart';
 export 'service/tool_decls.dart' show assistantToolsFor;
 
+part 'service/local_planning.dart';
 part 'service/proposal_checks.dart';
 part 'service/request_data.dart';
 
@@ -304,6 +305,8 @@ class AssistantService {
     LocalKind.budget => s.finance,
     LocalKind.agenda => s.events && s.tasks,
     LocalKind.switchedOff => false,
+    // (a plan is no answer to build a question on)
+    LocalKind.plan => false,
   };
 
   /// The local answer as a data block of the first message of a follow-up
@@ -368,9 +371,20 @@ class AssistantService {
         );
         return AssistantOutcome(text: a.text, localAnswer: a);
       case LocalKind.switchedOff:
+      case LocalKind.plan:
         return null;
     }
   }
+
+  /// The workout plan the program makes by itself ("Terv AI nélkül"): the next
+  /// [localPlanDays] days from tomorrow, from the sports and wishes in [prefs],
+  /// every session checked by the same rules as a model's proposal. Nothing
+  /// is sent anywhere (the forecast, when it is switched on, is the one thing
+  /// fetched).
+  Future<AssistantOutcome> localPlan(
+    LocalPlanPrefs prefs, {
+    required AiSettings settings,
+  }) => _planLocally(prefs, settings);
 
   AssistantOutcome? _switchedOff(String prompt, AiSettings s) {
     final scope = scopeFor(prompt, _today);

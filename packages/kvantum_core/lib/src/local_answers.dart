@@ -24,6 +24,10 @@ enum LocalKind {
   /// The source the request needs is switched off: there is nothing to ask the
   /// model about, so the program says so itself.
   switchedOff,
+
+  /// A workout plan the program made by itself ("Terv AI nélkül"): not the
+  /// answer to a question, so there is nothing to ask the model about it.
+  plan,
 }
 
 /// Which local question the wording is.
