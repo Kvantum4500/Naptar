@@ -417,13 +417,12 @@ void main() {
           reason: name,
         );
       }
-      for (final name in [
-        'UPDATE_TOKEN',
-        'UPDATE_PUBLIC_KEY',
-        'UPDATE_REQUIRE_SIGNATURE',
-      ]) {
+      for (final name in ['UPDATE_PUBLIC_KEY', 'UPDATE_REQUIRE_SIGNATURE']) {
         expect(example.keys, contains(name));
       }
+      // The repository is public: the example does not ask for a token any
+      // more (the build still reads one if it is given, an old setup works).
+      expect(example.keys, isNot(contains('UPDATE_TOKEN')));
       // (nothing is required, and no key is set, until it is chosen)
       expect(example['UPDATE_PUBLIC_KEY'], '');
       expect(example['UPDATE_REQUIRE_SIGNATURE'], 'false');
