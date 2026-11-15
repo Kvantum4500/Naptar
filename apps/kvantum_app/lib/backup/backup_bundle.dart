@@ -72,6 +72,10 @@ enum BackupProblem {
 
   /// A part is missing or damaged.
   damaged,
+
+  /// A copy in the Drive that is not locked with a password. The program
+  /// always locks what it puts there, so somebody else put this in.
+  notLocked,
 }
 
 class BackupException implements Exception {
@@ -88,10 +92,32 @@ class BackupException implements Exception {
       'Ezt a mentést a program újabb változata készítette; frissítsd a '
           'programot, mielőtt visszaállítod.',
     BackupProblem.damaged => 'A mentés sérült, nem lehet beolvasni.',
+    BackupProblem.notLocked =>
+      'Ez a Drive-másolat nincs jelszóval lezárva, pedig a program mindig '
+          'lezárva tölti fel: valaki más írhatta át. Nem állítom vissza.',
   };
 
   @override
   String toString() => 'BackupException($problem)';
+}
+
+/// Whether the zip [bytes] is locked with a password: there is at least one
+/// entry with content, and every entry with content carries the zip's own
+/// "encrypted" flag. (An entry with no content is never locked by the zip
+/// format, so it does not count either way.) Anything that cannot be read as
+/// a zip is not locked.
+bool zipIsLocked(List<int> bytes) {
+  try {
+    final directory = ZipDirectory()..read(InputMemoryStream(bytes));
+    final withContent = [
+      for (final h in directory.fileHeaders)
+        if (h.uncompressedSize > 0) h,
+    ];
+    return withContent.isNotEmpty &&
+        withContent.every((h) => h.generalPurposeBitFlag & 0x1 != 0);
+  } catch (_) {
+    return false;
+  }
 }
 
 const _metaName = 'meta.json';

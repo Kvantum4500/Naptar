@@ -399,6 +399,52 @@ void main() {
       );
     });
 
+    test('a plain zip in the Drive is not restored: it was put there by someone else', () async {
+      // (what the program uploads is always locked; this is a good zip, but
+      // nobody asked for a password to open it)
+      final plain = packBackup(
+        const BackupData(calendarIcs: 'BEGIN:VCALENDAR\nEND:VCALENDAR'),
+        BackupMeta(createdAt: DateTime.utc(2026, 11, 13), counts: const {}),
+      );
+      final id = drive.externalWrite(
+        'kvbackup-20261113-091500.zip.b64',
+        base64.encode(plain),
+      );
+      await expectLater(
+        backup.download(
+          DriveName(id: id, name: 'kvbackup-20261113-091500.zip.b64'),
+        ),
+        throwsA(
+          isA<BackupException>().having(
+            (e) => e.problem,
+            'problem',
+            BackupProblem.notLocked,
+          ),
+        ),
+      );
+    });
+
+    test('a file bigger than any copy is a damaged backup', () async {
+      final id = drive.externalWrite(
+        'kvbackup-20261113-091500.zip.b64',
+        'AAAA',
+      );
+      drive.failReadOf = (n) =>
+          n.startsWith('kvbackup-') ? const DriveFileTooBig(99999999) : null;
+      await expectLater(
+        backup.download(
+          DriveName(id: id, name: 'kvbackup-20261113-091500.zip.b64'),
+        ),
+        throwsA(
+          isA<BackupException>().having(
+            (e) => e.problem,
+            'problem',
+            BackupProblem.damaged,
+          ),
+        ),
+      );
+    });
+
     test('without a login there is nothing to list or fetch', () async {
       signedIn = null;
       await expectLater(

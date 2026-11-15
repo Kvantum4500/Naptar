@@ -718,6 +718,50 @@ void main() {
     });
   });
 
+  group(
+    'a handbook file is bounded in the prompt (it may come from the Drive)',
+    () {
+      test(
+        'boundedHandbook: what is short stays, what is long is cut and marked',
+        () {
+          expect(handbookPromptMaxChars, 12000);
+          final exact = 'a' * handbookPromptMaxChars;
+          expect(boundedHandbook(exact), exact);
+          final over = boundedHandbook('${exact}b');
+          expect(over, '${'a' * handbookPromptMaxChars}…');
+          expect(over.length, handbookPromptMaxChars + 1);
+        },
+      );
+
+      test('a surrogate pair is never cut in two', () {
+        // the emoji (two UTF-16 units) would straddle the limit
+        final text = '${'a' * (handbookPromptMaxChars - 1)}😀tovább';
+        final cut = boundedHandbook(text);
+        expect(cut, '${'a' * (handbookPromptMaxChars - 1)}…');
+        for (final unit in cut.codeUnits) {
+          expect(unit >= 0xD800 && unit <= 0xDFFF, isFalse);
+        }
+      });
+
+      test(
+        'the prompt block is bounded, the editor keeps the whole text',
+        () async {
+          final hb = HandbookStore(records, loader: (p) async => 'ALAP');
+          final huge = 'Szabály: ${'x' * 50000}';
+          await hb.save('rules', huge);
+          expect(
+            await hb.textOf('rules'),
+            huge,
+            reason: 'the editor shows it all',
+          );
+          final block = await hb.combined(only: {'rules'});
+          expect(block.length, lessThan(handbookPromptMaxChars + 100));
+          expect(block, contains('…'));
+        },
+      );
+    },
+  );
+
   group('smaller requests', () {
     String firstOf(FakeLlm llm) =>
         (llm.requests.first.turns.first.parts.single as LlmText).text;

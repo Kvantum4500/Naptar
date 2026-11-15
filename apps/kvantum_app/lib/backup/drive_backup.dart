@@ -245,12 +245,26 @@ class DriveBackup {
     if (r == null) {
       throw const DriveBackupException(DriveBackupProblem.signedOut);
     }
-    final text = await r.read(n.id);
-    if (text == null) return null;
+    final String? text;
     try {
-      return base64.decode(text.trim());
+      text = await r.read(n.id);
+    } on DriveFileTooBig {
+      // (a copy is about 4 MB at most: a bigger file is not one)
+      throw const BackupException(BackupProblem.damaged);
+    }
+    if (text == null) return null;
+    final Uint8List bytes;
+    try {
+      bytes = base64.decode(text.trim());
     } on FormatException {
       throw const BackupException(BackupProblem.damaged);
     }
+    // what the program puts into the Drive is always locked with the backup
+    // password: a plain zip here has been put there by somebody else (it
+    // would be restored without the password ever being asked)
+    if (!zipIsLocked(bytes)) {
+      throw const BackupException(BackupProblem.notLocked);
+    }
+    return bytes;
   }
 }

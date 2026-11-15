@@ -17,6 +17,23 @@ const handbookFiles = <(String id, String title)>[
 /// Default texts ship inside the app; the user's edited copies are synced
 /// through Drive like tasks (record kind `handbook`). A blank edit means
 /// "back to the default".
+/// The most characters of one handbook file that go into the prompt. The files
+/// the program ships are about a thousand; what the user writes stays whole in
+/// the editor, but a record that came from the Drive could be anything (a
+/// forged or an enormous one), and the prompt - and what it costs - must not
+/// follow it.
+const handbookPromptMaxChars = 12000;
+
+/// [body] at most [handbookPromptMaxChars] long, with a mark where it was cut
+/// (never cutting a surrogate pair in two).
+String boundedHandbook(String body) {
+  if (body.length <= handbookPromptMaxChars) return body;
+  var cut = handbookPromptMaxChars;
+  final last = body.codeUnitAt(cut - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) cut--;
+  return '${body.substring(0, cut)}…';
+}
+
 class HandbookStore {
   HandbookStore(
     this.records, {
@@ -108,7 +125,7 @@ class HandbookStore {
     for (final (id, title) in handbookFiles) {
       if (only != null && !only.contains(id)) continue;
       if (skip != null && skip.contains(id)) continue;
-      final body = compactHandbook(await textOf(id));
+      final body = boundedHandbook(compactHandbook(await textOf(id)));
       if (body.isEmpty) continue;
       b.writeln('## $title');
       b.writeln(body);

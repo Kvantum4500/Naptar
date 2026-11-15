@@ -116,6 +116,66 @@ void main() {
     });
   });
 
+  group('a file bigger than the app writes is skipped by the listings', () {
+    http.Response media(http.Request r) =>
+        r.url.path.endsWith('/big') ? _media('x' * 50) : _media('{"id":"ok"}');
+
+    test('full listing: the others come, the big one does not', () async {
+      final f = Fake((r) {
+        final p = r.url.path;
+        if (p.endsWith('/changes/startPageToken')) {
+          return _json({'startPageToken': '77'});
+        }
+        if (p.endsWith('/drive/v3/files') && r.method == 'GET') {
+          return _json({
+            'files': [
+              {'id': 'big', 'name': 'task-1.json'},
+              {'id': 'ok', 'name': 'task-2.json'},
+            ],
+          });
+        }
+        if (_isMedia(r)) return media(r);
+        return http.Response('', 404);
+      });
+      final res = await GoogleDriveRemote(
+        f.client,
+        maxReadBytes: 20,
+      ).pull(null);
+      expect([for (final x in res.files) x.id], ['ok']);
+      expect(res.nextToken, '77');
+    });
+
+    test('incremental: the same, and the token still moves on', () async {
+      final f = Fake((r) {
+        if (r.url.path.endsWith('/drive/v3/changes')) {
+          return _json({
+            'newStartPageToken': '90',
+            'changes': [
+              {
+                'fileId': 'big',
+                'removed': false,
+                'file': {'id': 'big', 'name': 'task-1.json', 'trashed': false},
+              },
+              {
+                'fileId': 'ok',
+                'removed': false,
+                'file': {'id': 'ok', 'name': 'task-2.json', 'trashed': false},
+              },
+            ],
+          });
+        }
+        if (_isMedia(r)) return media(r);
+        return http.Response('', 404);
+      });
+      final res = await GoogleDriveRemote(
+        f.client,
+        maxReadBytes: 20,
+      ).pull('80');
+      expect([for (final x in res.files) x.id], ['ok']);
+      expect(res.nextToken, '90');
+    });
+  });
+
   group('incremental changes', () {
     test(
       'maps changed, removed and trashed files; ignores foreign names',
@@ -320,6 +380,65 @@ void main() {
       expect(await GoogleDriveRemote(ok.client).read('a'), '{"k":"árvíztűrő"}');
       final gone = Fake((r) => _err(404, 'not found'));
       expect(await GoogleDriveRemote(gone.client).read('a'), isNull);
+    });
+
+    group('a file bigger than the app ever writes is not read', () {
+      GoogleDriveRemote limited(String body) =>
+          GoogleDriveRemote(Fake((r) => _media(body)).client, maxReadBytes: 10);
+
+      test('exactly the limit is read, one byte more is refused', () async {
+        expect(await limited('0123456789').read('a'), '0123456789');
+        await expectLater(
+          limited('0123456789X').read('a'),
+          throwsA(isA<DriveFileTooBig>()),
+        );
+      });
+
+      test('the limit counts bytes, not letters', () async {
+        // "é" is two bytes: five of them are ten, six are too many
+        expect(await limited('ééééé').read('a'), 'ééééé');
+        await expectLater(
+          limited('éééééé').read('a'),
+          throwsA(isA<DriveFileTooBig>()),
+        );
+      });
+
+      test(
+        'what arrives is counted when the server announced no size',
+        () async {
+          GoogleDriveRemote streamed(List<List<int>> chunks) =>
+              GoogleDriveRemote(
+                MockClient.streaming(
+                  (req, body) async => http.StreamedResponse(
+                    Stream.fromIterable(chunks),
+                    200,
+                    headers: {
+                      'content-type': 'application/json; charset=utf-8',
+                    },
+                  ),
+                ),
+                maxReadBytes: 10,
+              );
+          expect(
+            await streamed([utf8.encode('01234'), utf8.encode('56789')])
+                .read('a'),
+            '0123456789',
+          );
+          await expectLater(
+            streamed([
+              utf8.encode('01234'),
+              utf8.encode('56789'),
+              utf8.encode('X'),
+            ]).read('a'),
+            throwsA(isA<DriveFileTooBig>()),
+          );
+        },
+      );
+
+      test('the limit of the app is a few megabytes', () {
+        expect(driveMaxReadBytes, greaterThanOrEqualTo(5 * 1024 * 1024));
+        expect(driveMaxReadBytes, lessThanOrEqualTo(16 * 1024 * 1024));
+      });
     });
 
     test('create puts the file in appDataFolder with the content', () async {

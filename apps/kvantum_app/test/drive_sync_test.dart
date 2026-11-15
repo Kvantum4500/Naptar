@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/drive/drive_sync_engine.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -187,6 +188,70 @@ void main() {
         TaskView(SyncRecord.decode(drive.files[id]!.content)).notes,
         'változás',
       );
+    },
+  );
+
+  group('a stamp from years ahead is no clock error', () {
+    const day = 86400 * 1000;
+
+    SyncRecord stamped(String id, int daysAhead) =>
+        SyncRecord(id: id, kind: kindTask).edit(
+          taskFields(title: 'Távoli'),
+          ts: clock + daysAhead * day,
+          dev: 'B',
+        );
+
+    test(
+      'a record stamped years ahead is not taken, one weeks ahead is',
+      () async {
+        drive.externalWrite('task-far.json', stamped('far', 400).encode());
+        drive.externalWrite('task-near.json', stamped('near', 20).encode());
+        final r = await engine.sync();
+        expect(r.pulled, 1);
+        expect(r.skippedCorrupt, 1);
+        expect(await repo.get(kindTask, 'far'), isNull);
+        expect(await repo.get(kindTask, 'near'), isNotNull);
+      },
+    );
+
+    test('a forged copy of our own record is overwritten by ours', () async {
+      await addTask('t1', 'Helyi');
+      await engine.sync();
+      final id = drive.files.keys.single;
+      drive.externalWrite(
+        'task-t1.json',
+        SyncRecord(id: 't1', kind: kindTask)
+            .edit(
+              taskFields(title: 'Hamis'),
+              ts: clock + 800 * day,
+              dev: 'B',
+            )
+            .encode(),
+      );
+      await repo.edit(kindTask, 't1', {'notes': 'változás'});
+      await engine.sync();
+      final onDrive = TaskView(SyncRecord.decode(drive.files[id]!.content));
+      expect(onDrive.title, 'Helyi');
+      expect(onDrive.notes, 'változás');
+    });
+  });
+
+  test(
+    'a remote copy far bigger than any record is overwritten by ours',
+    () async {
+      await addTask('t1', 'Helyi');
+      await engine.sync();
+      final id = drive.files.keys.single;
+      drive.failReadOf = (n) =>
+          n == 'task-t1.json' ? const DriveFileTooBig(99999999) : null;
+      await repo.edit(kindTask, 't1', {'notes': 'változás'});
+      final r = await engine.sync();
+      expect(r.pushed, 1);
+      expect(
+        TaskView(SyncRecord.decode(drive.files[id]!.content)).notes,
+        'változás',
+      );
+      expect(drive.files.length, 1, reason: 'no second file');
     },
   );
 

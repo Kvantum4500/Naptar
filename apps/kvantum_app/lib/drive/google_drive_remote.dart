@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:googleapis/drive/v3.dart' as d;
 import 'package:http/http.dart' as http;
@@ -16,9 +17,12 @@ final _recordName = safeRecordFileNamePattern;
 /// [DriveRemote] on top of Drive API v3, limited to the hidden appDataFolder
 /// (scope `drive.appdata`: the app can see nothing else in the user's Drive).
 class GoogleDriveRemote implements DriveRemote {
-  GoogleDriveRemote(this._client);
+  GoogleDriveRemote(this._client, {this.maxReadBytes = driveMaxReadBytes});
 
   final http.Client _client;
+
+  /// The most bytes taken from one file (a parameter for the tests).
+  final int maxReadBytes;
   d.DriveApi get _api => d.DriveApi(_client);
 
   /// Runs an API call and maps its failures to the sync vocabulary, with the
@@ -61,7 +65,12 @@ class GoogleDriveRemote implements DriveRemote {
         if (f.id == null || f.name == null || !_recordName.hasMatch(f.name!)) {
           continue;
         }
-        final content = await read(f.id!);
+        final String? content;
+        try {
+          content = await read(f.id!);
+        } on DriveFileTooBig {
+          continue; // not the app's own file: nothing to take from it
+        }
         if (content != null) {
           files.add(
             DriveRecordFile(id: f.id!, name: f.name!, content: content),
@@ -103,7 +112,12 @@ class GoogleDriveRemote implements DriveRemote {
         if (f.id == null || f.name == null || !_recordName.hasMatch(f.name!)) {
           continue;
         }
-        final content = await read(f.id!);
+        final String? content;
+        try {
+          content = await read(f.id!);
+        } on DriveFileTooBig {
+          continue; // not the app's own file: nothing to take from it
+        }
         if (content != null) {
           files.add(
             DriveRecordFile(id: f.id!, name: f.name!, content: content),
@@ -131,7 +145,19 @@ class GoogleDriveRemote implements DriveRemote {
           downloadOptions: d.DownloadOptions.fullMedia,
         ),
       ) as d.Media;
-      return await utf8.decoder.bind(media.stream).join();
+      // (what the server announces, when it does; then what really arrives: a
+      // file that is bigger than anything the app writes is not read)
+      final announced = media.length;
+      if (announced != null && announced > maxReadBytes) {
+        await media.stream.listen((_) {}).cancel();
+        throw DriveFileTooBig(announced);
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in media.stream) {
+        bytes.add(chunk);
+        if (bytes.length > maxReadBytes) throw DriveFileTooBig(bytes.length);
+      }
+      return utf8.decode(bytes.takeBytes());
     } on _Gone {
       return null;
     }

@@ -212,6 +212,47 @@ void main() {
     });
   });
 
+  group('a stamp from years ahead is no clock error', () {
+    const day = 86400 * 1000;
+
+    test(
+      'stampIsAbsurd: a year is still believed, a millisecond more is not',
+      () {
+        const now = 1000;
+        expect(maxStampAhead, const Duration(days: 365));
+        expect(stampIsAbsurd(now + 365 * day, now), isFalse);
+        expect(stampIsAbsurd(now + 365 * day + 1, now), isTrue);
+        expect(stampIsAbsurd(now - 5, now), isFalse);
+        expect(stampIsAbsurd(now, now), isFalse);
+      },
+    );
+
+    test(
+      'finance: a clock weeks ahead is believed, one years ahead is not',
+      () async {
+        Future<bool> arrives(int aheadMs, String id) async {
+          final far = _Device('cccc', a.time + aheadMs);
+          await far.finance.saveTx(tx(id));
+          final m = (await far.finance.mailRecords(onlyDirty: true)).single;
+          final ok = await b.finance.applyIncoming(m.kind, m.data);
+          await far.db.close();
+          return ok;
+        }
+
+        expect(await arrives(10 * day, 'a10'), isTrue);
+        expect(await arrives(60 * day, 'a60'), isTrue);
+        expect(await arrives(365 * day, 'a365'), isTrue);
+        expect(await arrives(365 * day + 1, 'a365b'), isFalse);
+        expect(await arrives(4000 * day, 'a4000'), isFalse);
+        expect([for (final t in await b.finance.txs()) t.id]..sort(), [
+          'a10',
+          'a365',
+          'a60',
+        ]);
+      },
+    );
+  });
+
   group('a wrong clock is noticed', () {
     const day = 86400 * 1000;
 

@@ -51,7 +51,8 @@ abstract class DriveRemote {
   /// Throws [DriveTokenExpired] when the token is no longer valid.
   Future<DrivePull> pull(String? pageToken);
 
-  /// Content of a file, or null when it no longer exists.
+  /// Content of a file, or null when it no longer exists. Throws
+  /// [DriveFileTooBig] for a file larger than [driveMaxReadBytes].
   Future<String?> read(String fileId);
 
   /// Ids of record files with this exact name (oldest first when duplicated).
@@ -72,6 +73,22 @@ abstract class DriveRemote {
 }
 
 class DriveTokenExpired implements Exception {}
+
+/// The most bytes the app takes from one Drive file. Everything it writes
+/// there is far smaller (the biggest, a backup copy, is about 4 MB): a larger
+/// file is not the app's own, and is not read into memory.
+const driveMaxReadBytes = 8 * 1024 * 1024;
+
+/// A Drive file bigger than [driveMaxReadBytes] (or than the limit a remote
+/// was made with): [DriveRemote.read] refuses it. [bytes] is what was seen
+/// when it was given up on (not necessarily the whole size).
+class DriveFileTooBig implements Exception {
+  const DriveFileTooBig(this.bytes);
+  final int bytes;
+
+  @override
+  String toString() => 'DriveFileTooBig($bytes)';
+}
 
 /// Network down, rate limit, 5xx: stop, keep everything queued, retry later.
 class DriveTransientError implements Exception, RetryHint {

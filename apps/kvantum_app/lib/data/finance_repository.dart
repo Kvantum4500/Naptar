@@ -5,6 +5,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import 'db.dart';
+import 'record_repository.dart' show stampIsAbsurd;
 
 const _kTx = 'tx';
 const _kCategory = 'category';
@@ -435,6 +436,8 @@ class FinanceRepository {
   Future<bool> _applyIncoming(String kind, Object? data) async {
     final rec = _decodeRecord(kind, data);
     if (rec == null) return false;
+    // a stamp years ahead is a forged or broken record, not a clock error
+    if (stampIsAbsurd(rec.updatedAt, now())) return false;
     final existing =
         await (db.select(db.finRows)
               ..where((t) => t.kind.equals(kind) & t.id.equals(rec.id)))

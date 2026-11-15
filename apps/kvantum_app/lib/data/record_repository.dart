@@ -26,6 +26,18 @@ Duration? clockAhead(int? stampMs, int nowMs) {
   return ahead > const Duration(days: 2) ? ahead : null;
 }
 
+/// How far ahead of the clock a stamp may be before it is not believed. A
+/// device with a wrong clock stamps days or weeks ahead, and what it writes
+/// must not be lost, so a smaller lead is taken (and warned about, see
+/// [clockAhead]; the next edit is stamped after it, see [stampAfter]). A year
+/// ahead is no clock error but a forged or broken record: it would stay on
+/// top of every honest edit until the clock caught up.
+const maxStampAhead = Duration(days: 365);
+
+/// Whether [stampMs] is further ahead of [nowMs] than [maxStampAhead].
+bool stampIsAbsurd(int stampMs, int nowMs) =>
+    stampMs - nowMs > maxStampAhead.inMilliseconds;
+
 /// Local store of the Drive-synced records (tasks, check-ins).
 class RecordRepository {
   RecordRepository(this.db, {String? deviceId, int Function()? clock})

@@ -808,6 +808,23 @@ void main() {
       },
     );
 
+    test('a letter far bigger than any letter fails alone', () async {
+      await introduceAll();
+      await b.addTx('tb', 100);
+      await c.addTx('tc', 200);
+      b.now += 10;
+      c.now += 10;
+      await b.mail.sync();
+      await c.mail.sync();
+      drive.failReadOf = (n) =>
+          n.startsWith(toA) ? const DriveFileTooBig(99999999) : null;
+      final r = await a.mail.sync();
+      expect(r.failed, 1);
+      expect(r.receivedLetters, 1, reason: "C's letter was handled");
+      expect(await a.amounts(), {'tc': 200});
+      expect(waitingFor(toA), 1, reason: 'the big file is not touched');
+    });
+
     test('what failed before a stop is still counted', () async {
       await introduceAll();
       await b.addTx('tb', 100);

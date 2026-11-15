@@ -230,7 +230,14 @@ class DriveSyncEngine {
       if (existing.isNotEmpty) fileId = existing.first;
     }
     if (fileId != null) {
-      final content = await remote.read(fileId);
+      String? content;
+      try {
+        content = await remote.read(fileId);
+      } on DriveFileTooBig {
+        // not a record of ours (nothing the app writes is that big): treated
+        // like a corrupt one, and overwritten by ours
+        content = '';
+      }
       if (content == null) {
         await repo.forgetFile(fileId);
         fileId = null;
@@ -274,6 +281,10 @@ class DriveSyncEngine {
       final r = SyncRecord.decode(content);
       // The name is the identity; a mismatching body is not ours to trust.
       if (r.kind != m[1] || r.id != m[2]) return null;
+      // A stamp years ahead is no clock error but a forged or broken record
+      // (see maxStampAhead): taken like a corrupt file - not applied, and
+      // overwritten by ours when we have the record.
+      if (stampIsAbsurd(r.updatedAt, repo.now())) return null;
       return r;
     } on NewerFormatException {
       _newerNames.add(name);

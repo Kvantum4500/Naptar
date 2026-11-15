@@ -199,4 +199,73 @@ void main() {
       );
     });
   });
+
+  group('zipIsLocked: is the zip locked with a password?', () {
+    test('a plain zip is not, a locked one is', () {
+      final files = {'a.txt': 'tartalom', 'b.txt': 'másik'};
+      expect(zipIsLocked(zip(files)), isFalse);
+      expect(zipIsLocked(zip(files, password: 'Titok-2026')), isTrue);
+    });
+
+    test('a real backup, locked: yes; the same without the lock: no', () {
+      expect(
+        zipIsLocked(packBackup(data, meta, password: 'Titok-2026')),
+        isTrue,
+      );
+      expect(zipIsLocked(packBackup(data, meta)), isFalse);
+    });
+
+    test('an entry with no content is never locked, and does not count', () {
+      // (the zip format leaves an empty file unlocked, password or not)
+      final bytes = packBackup(
+        const BackupData(),
+        meta,
+        password: 'Titok-2026',
+      );
+      expect(zipIsLocked(bytes), isTrue);
+    });
+
+    test('a zip with nothing in it but empty entries is not locked', () {
+      expect(
+        zipIsLocked(zip({'a.txt': '', 'b.txt': ''}, password: 'x')),
+        isFalse,
+      );
+      expect(zipIsLocked(zip({}, password: 'x')), isFalse);
+    });
+
+    test('one entry with content that is not locked spoils it', () {
+      final bytes = Uint8List.fromList(
+        packBackup(data, meta, password: 'Titok-2026'),
+      );
+      expect(zipIsLocked(bytes), isTrue);
+      // clear the "encrypted" flag of the second entry in the central
+      // directory (the signature PK 01 02, the flags 8 bytes after it)
+      final signatures = <int>[
+        for (var i = 0; i + 4 < bytes.length; i++)
+          if (bytes[i] == 0x50 &&
+              bytes[i + 1] == 0x4b &&
+              bytes[i + 2] == 0x01 &&
+              bytes[i + 3] == 0x02)
+            i,
+      ];
+      expect(signatures.length, greaterThanOrEqualTo(3));
+      for (final entry in [0, 1, 2]) {
+        final patched = Uint8List.fromList(bytes);
+        patched[signatures[entry] + 8] &= 0xFE;
+        expect(zipIsLocked(patched), isFalse, reason: 'entry $entry');
+      }
+    });
+
+    test('what is not a zip at all is not locked', () {
+      expect(zipIsLocked(<int>[]), isFalse);
+      expect(zipIsLocked(utf8.encode('nem zip, csak szöveg')), isFalse);
+      expect(zipIsLocked(List<int>.filled(100, 0x50)), isFalse);
+    });
+
+    test('the message says what happened', () {
+      const e = BackupException(BackupProblem.notLocked);
+      expect(e.message, contains('nincs jelszóval lezárva'));
+      expect(e.message, contains('Nem állítom vissza'));
+    });
+  });
 }
