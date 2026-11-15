@@ -1,0 +1,15 @@
+# A weekly look at the versions of the GitHub Actions the workflows use. It only
+# opens a pull request (one for all of them); nothing is merged by itself. The
+# actions of other publishers are pinned to a commit with the tag in a comment
+# (`# v2.6.2`): the pull request moves both.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ['*']

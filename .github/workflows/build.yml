@@ -24,9 +24,17 @@ name: Build apps
 # upgrade): Flutter 3.50.0, and Java 21 for the Android job - the lint step of
 # the Android Gradle plugin 9.3 (the one Flutter 3.50 recommends) crashes on 17.
 #
+# No token goes into the app: the repository is public, the app finds the
+# updates without one (docs/frissito-kulcs.md).
+#
+# Actions of other publishers are pinned to a commit (the tag is in the comment
+# next to it), so that a moved tag cannot change what runs with the secrets;
+# .github/dependabot.yml proposes the newer ones, once a week.
+# Artifacts are kept for 3 days: the release job takes them within minutes, and
+# a public repository shows them to everybody.
+#
 # Repository secrets used:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   Google sign-in
-#   UPDATE_TOKEN                             read-only token the app uses to find updates
 #   UPDATE_SIGNING_KEY                       the private Ed25519 key (PEM) the releases are signed with (optional)
 #   ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
 #   ANDROID_KEY_PASSWORD                     stable Android signing key (optional)
@@ -53,7 +61,7 @@ jobs:
     defaults: { run: { working-directory: apps/kvantum_app, shell: bash } }
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with: { flutter-version: '3.50.0', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
@@ -61,7 +69,6 @@ jobs:
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
           UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
           UPDATE_REQUIRE_SIGNATURE: ${{ vars.UPDATE_REQUIRE_SIGNATURE }}
         run: |
@@ -90,9 +97,9 @@ jobs:
               exit 1
             fi
           fi
-          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" --arg t "$UPDATE_TOKEN" \
+          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" \
             --arg k "$UPDATE_PUBLIC_KEY" --arg r "$require" \
-            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
       - run: flutter build windows --release --build-number=$BUILD_NUMBER --build-name=0.2.$BUILD_NUMBER --dart-define-from-file=secrets.json
       - name: Visual C++ runtime next to the program (advisory)
         # The program is built against the dynamic Visual C++ runtime; on a PC
@@ -126,7 +133,7 @@ jobs:
         with:
           name: naptar-windows
           path: apps/kvantum_app/dist/*
-          retention-days: 14
+          retention-days: 3
 
   android:
     if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[build]')
@@ -136,7 +143,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with: { flutter-version: '3.50.0', channel: stable, cache: true }
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
@@ -165,7 +172,6 @@ jobs:
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
           UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
           UPDATE_REQUIRE_SIGNATURE: ${{ vars.UPDATE_REQUIRE_SIGNATURE }}
         run: |
@@ -194,9 +200,9 @@ jobs:
               exit 1
             fi
           fi
-          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" --arg t "$UPDATE_TOKEN" \
+          jq -n --arg i "$GOOGLE_CLIENT_ID" --arg s "$GOOGLE_CLIENT_SECRET" \
             --arg k "$UPDATE_PUBLIC_KEY" --arg r "$require" \
-            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_TOKEN:$t,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
+            '{GOOGLE_CLIENT_ID:$i,GOOGLE_CLIENT_SECRET:$s,UPDATE_PUBLIC_KEY:$k,UPDATE_REQUIRE_SIGNATURE:$r}' > secrets.json
       - run: flutter build apk --release --build-number=$BUILD_NUMBER --build-name=0.2.$BUILD_NUMBER --dart-define-from-file=secrets.json
       - name: Check the APK (advisory)
         # Looks at what the build made: alignment (4 bytes, and the 16 KB pages
@@ -256,7 +262,7 @@ jobs:
         with:
           name: naptar-android
           path: apps/kvantum_app/dist/*
-          retention-days: 14
+          retention-days: 3
 
   release:
     needs: [windows, android]
@@ -379,7 +385,7 @@ jobs:
             echo
             echo "A kiadás aláírva, a nyilvános kulcs: \`$raw\`"
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
