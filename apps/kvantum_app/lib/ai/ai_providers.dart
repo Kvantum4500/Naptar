@@ -15,6 +15,7 @@ import 'approval.dart';
 import 'assistant_service.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
+import 'local_plan_prefs.dart';
 import 'location_service.dart';
 import 'provider_catalog.dart';
 import 'weather_service.dart';
@@ -85,12 +86,18 @@ final aiClockProvider = Provider<DateTime Function()>(
 /// Colour of events the assistant creates (Google "Sage"): easy to tell apart.
 const aiEventColorId = '2';
 
+/// What the page shows as the request of a plan the program made itself (it is
+/// no text to send anywhere: the error card's "Újrapróbál" makes the plan
+/// again instead of asking the model).
+const localPlanPrompt = 'Terv AI nélkül';
+
 class AssistantState {
   const AssistantState({
     this.busy = false,
     this.outcome,
     this.error,
     this.errorNeedsSettings = false,
+    this.errorOffersLocalPlan = false,
     this.selected = const {},
     this.acceptedCount,
     this.prompt = '',
@@ -125,6 +132,11 @@ class AssistantState {
 
   /// True when the fix is in the settings (no / wrong key).
   final bool errorNeedsSettings;
+
+  /// True when the program can make the plan itself instead ("Helyi terv"):
+  /// the request was for a plan, and the model cannot be used (no key, a
+  /// refused key, no quota left).
+  final bool errorOffersLocalPlan;
   final Set<int> selected;
   final int? acceptedCount;
   final String prompt;
@@ -145,6 +157,7 @@ class AssistantState {
     String? error,
     bool clearError = false,
     bool? errorNeedsSettings,
+    bool? errorOffersLocalPlan,
     Set<int>? selected,
     int? acceptedCount,
     bool clearAccepted = false,
@@ -172,6 +185,7 @@ class AssistantState {
     outcome: clearOutcome ? null : (outcome ?? this.outcome),
     error: clearError ? null : (error ?? this.error),
     errorNeedsSettings: errorNeedsSettings ?? this.errorNeedsSettings,
+    errorOffersLocalPlan: errorOffersLocalPlan ?? this.errorOffersLocalPlan,
     selected: selected ?? this.selected,
     acceptedCount: clearAccepted ? null : (acceptedCount ?? this.acceptedCount),
     prompt: prompt ?? this.prompt,
@@ -254,7 +268,11 @@ class AssistantController extends Notifier<AssistantState> {
   /// where the user's sharing switches allow it.
   Future<void> askMore(String followUp) async {
     final answer = state.outcome?.localAnswer;
-    if (answer == null || answer.kind == LocalKind.switchedOff) return;
+    if (answer == null ||
+        answer.kind == LocalKind.switchedOff ||
+        answer.kind == LocalKind.plan) {
+      return;
+    }
     await ask(followUp, context: answer);
   }
 
@@ -297,6 +315,7 @@ class AssistantController extends Notifier<AssistantState> {
             error:
                 'Még nincs API-kulcs megadva ehhez: ${info.label}. Add meg a Beállításokban.',
             errorNeedsSettings: true,
+            errorOffersLocalPlan: _isPlanRequest(text),
           );
         }
         return;
@@ -393,6 +412,7 @@ class AssistantController extends Notifier<AssistantState> {
           prompt: text,
           error: e.message,
           errorNeedsSettings: true,
+          errorOffersLocalPlan: _isPlanRequest(text),
         );
       }
     } on LlmRateLimit catch (e) {
@@ -408,6 +428,10 @@ class AssistantController extends Notifier<AssistantState> {
           prompt: text,
           error: '${e.message}$advice',
           errorNeedsSettings: !e.transient,
+          // (a limit that clears in a minute is waited out; no quota left or
+          // no money is what the program's own plan is for)
+          errorOffersLocalPlan:
+              (e.billing || e.quotaZero || e.daily) && _isPlanRequest(text),
           errorDetail: e.detail.isEmpty ? null : e.detail,
         );
       }
@@ -433,6 +457,58 @@ class AssistantController extends Notifier<AssistantState> {
         _service = null;
       }
       ref.invalidate(aiUsageProvider);
+    }
+  }
+
+  /// Whether [text] is a request for a plan (not a question about money, not
+  /// an edit of the calendar): only then the program's own plan is an answer.
+  bool _isPlanRequest(String text) {
+    final w = toWallClock(
+      const PlanRules().tzid,
+      ref.read(aiClockProvider)().toUtc(),
+    );
+    return scopeFor(text, floating(w.year, w.month, w.day)).kind ==
+        PromptKind.plan;
+  }
+
+  /// "Terv AI nélkül" / "Helyi terv": the program plans the next days by
+  /// itself, with no model and no key, and nothing leaves the device. The
+  /// sessions come pre-selected; accepting them and taking them back is the
+  /// usual way.
+  Future<void> planLocally() async {
+    if (state.busy || ref.read(assistantApplyingProvider)) return;
+    final run = ++_run;
+    bool live() => run == _run;
+    state = const AssistantState(
+      busy: true,
+      prompt: localPlanPrompt,
+      status: 'A program tervez, modell nélkül…',
+    );
+    try {
+      final settings = await ref.read(aiSettingsProvider.future);
+      final prefs = await ref.read(localPlanPrefsProvider.future);
+      final outcome = await _newService(
+        settings,
+        providerById(settings.provider),
+        _NoProvider(),
+      ).localPlan(prefs, settings: settings);
+      if (!live()) return;
+      state = AssistantState(
+        prompt: localPlanPrompt,
+        outcome: outcome,
+        selected: {for (var i = 0; i < outcome.items.length; i++) i},
+        notice: outcome.notice,
+      );
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('ai', 'plan.local_failed', e, st);
+      // (a wish list that failed to load is read again by "Újrapróbál")
+      ref.invalidate(localPlanPrefsProvider);
+      if (live()) {
+        state = AssistantState(
+          prompt: localPlanPrompt,
+          error: errorInfoFor(e).text,
+        );
+      }
     }
   }
 
@@ -649,7 +725,11 @@ class AssistantController extends Notifier<AssistantState> {
   /// that came with it stays.
   void discardPlan() {
     final o = state.outcome;
-    final had = o?.items.isNotEmpty ?? false;
+    // (a plan the program made by itself learns nothing from a sentence: there
+    // is no "why" to ask)
+    final had =
+        (o?.items.isNotEmpty ?? false) &&
+        o?.localAnswer?.kind != LocalKind.plan;
     final rest = o?.withoutItems();
     final keep =
         rest != null && (rest.deletions.isNotEmpty || rest.moves.isNotEmpty);

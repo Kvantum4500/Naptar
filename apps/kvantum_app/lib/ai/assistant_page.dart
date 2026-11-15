@@ -137,6 +137,18 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       label: Text(q, softWrap: true, maxLines: 3),
                       onPressed: (st.busy || applying) ? null : () => _send(q),
                     ),
+                  // the program plans by itself: no key, no model, no tokens
+                  ActionChip(
+                    key: const Key('plan-local-chip'),
+                    avatar: const Icon(Icons.offline_bolt_outlined, size: 18),
+                    label: const Text(
+                      'Terv AI nélkül',
+                      softWrap: true,
+                      maxLines: 3,
+                    ),
+                    tooltip: 'A program tervez a naptáradból, modell és kulcs nélkül (a következő 7 napra)',
+                    onPressed: (st.busy || applying) ? null : ctl.planLocally,
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -193,8 +205,21 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                                 ),
                                 child: const Text('Beállítások'),
                               ),
+                            if (st.errorOffersLocalPlan)
+                              FilledButton.tonalIcon(
+                                key: const Key('plan-local-error'),
+                                onPressed: (st.busy || applying)
+                                    ? null
+                                    : ctl.planLocally,
+                                icon: const Icon(Icons.offline_bolt_outlined),
+                                label: const Text('Helyi terv'),
+                              ),
                             TextButton(
-                              onPressed: () => _send(st.prompt),
+                              // (a plan the program made itself is made again,
+                              // not asked of the model)
+                              onPressed: st.prompt == localPlanPrompt
+                                  ? ctl.planLocally
+                                  : () => _send(st.prompt),
                               child: const Text('Újrapróbál'),
                             ),
                           ],
@@ -852,7 +877,8 @@ class _LocalCardState extends State<_LocalCard> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.bodySmall;
-    final canAsk = widget.answer.kind != LocalKind.switchedOff;
+    final isPlan = widget.answer.kind == LocalKind.plan;
+    final canAsk = widget.answer.kind != LocalKind.switchedOff && !isPlan;
     return Card(
       key: const Key('local-answer'),
       margin: const EdgeInsets.only(bottom: 10),
@@ -871,7 +897,9 @@ class _LocalCardState extends State<_LocalCard> {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    'Helyi válasz, modell nélkül',
+                    isPlan
+                        ? 'Helyi terv, modell nélkül'
+                        : 'Helyi válasz, modell nélkül',
                     style: Theme.of(context).textTheme.labelLarge
                         ?.copyWith(color: scheme.primary),
                   ),

@@ -1142,14 +1142,23 @@ void main() {
       ))!;
       expect([s.sleepStartHour, s.sleepEndHour], [23, 7]);
 
-      final dropdowns = find.byType(DropdownButtonFormField<int>);
-      await tester.ensureVisible(dropdowns.first);
+      // (the two of the sleep window: the page has other whole-number
+      // dropdowns too, e.g. the weekly goal of the local plan)
+      final start = find.widgetWithText(
+        DropdownButtonFormField<int>,
+        'Alvás kezdete',
+      );
+      final end = find.widgetWithText(
+        DropdownButtonFormField<int>,
+        'Alvás vége',
+      );
+      await tester.ensureVisible(start);
       await tester.pumpAndSettle();
-      await tester.tap(dropdowns.first);
+      await tester.tap(start);
       await tester.pumpAndSettle();
       await tester.tap(find.text('08:00').last);
       await tester.pumpAndSettle();
-      await tester.tap(dropdowns.last);
+      await tester.tap(end);
       await tester.pumpAndSettle();
       await tester.tap(find.text('16:00').last);
       await tester.pumpAndSettle();

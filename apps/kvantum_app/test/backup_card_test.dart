@@ -992,7 +992,7 @@ void main() {
       await boot(
         tester,
         home: const SettingsPage(),
-        size: const Size(900, 4800),
+        size: const Size(900, 6400),
         extra: [apiKeyStoreProvider.overrideWithValue(MemoryApiKeyStore(null))],
       );
       expect(find.text('Automatikus mentés'), findsOneWidget);

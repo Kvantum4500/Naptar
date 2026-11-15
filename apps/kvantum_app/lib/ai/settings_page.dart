@@ -25,6 +25,7 @@ import 'place.dart';
 import 'settings/account_card.dart';
 import 'settings/ai_provider_card.dart';
 import 'settings/export_import_card.dart';
+import 'settings/local_plan_card.dart';
 import 'settings/settings_toast.dart';
 
 export 'settings/ai_provider_card.dart' show spaced;
@@ -366,6 +367,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   label: const Text('Kézikönyv szerkesztése'),
                 ),
               ]),
+              section('Helyi terv (AI nélkül)', const [LocalPlanBody()]),
               SettingsGroupHeader('Értesítések'),
               section('Emlékeztetők', [
                 if (!ref.watch(reminderSchedulerProvider).supported)
