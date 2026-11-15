@@ -243,7 +243,7 @@ void main() {
   });
 
   group('RemoteIdentity', () {
-    const a = RemoteIdentity(account: 'anna@gmail.com', calendar: 'cal-1');
+    const a = RemoteIdentity(account: 'anna@example.com', calendar: 'cal-1');
 
     test('is stored as one key and read back', () {
       final back = RemoteIdentity.tryParse(a.key)!;
@@ -261,19 +261,19 @@ void main() {
     test('another calendar or another account is a different identity', () {
       expect(
         a.matches(
-          const RemoteIdentity(account: 'anna@gmail.com', calendar: 'cal-2'),
+          const RemoteIdentity(account: 'anna@example.com', calendar: 'cal-2'),
         ),
         isFalse,
       );
       expect(
         a.matches(
-          const RemoteIdentity(account: 'bela@gmail.com', calendar: 'cal-1'),
+          const RemoteIdentity(account: 'bela@example.com', calendar: 'cal-1'),
         ),
         isFalse,
       );
       expect(
         a.matches(
-          const RemoteIdentity(account: 'anna@gmail.com', calendar: 'cal-1'),
+          const RemoteIdentity(account: 'anna@example.com', calendar: 'cal-1'),
         ),
         isTrue,
       );
@@ -286,7 +286,7 @@ void main() {
     });
 
     test('the address is shown with most of the name hidden', () {
-      expect(a.maskedAccount, 'a***@gmail.com');
+      expect(a.maskedAccount, 'a***@example.com');
       expect(
         const RemoteIdentity(account: '', calendar: 'c').maskedAccount,
         '(ismeretlen fiók)',
@@ -299,9 +299,9 @@ void main() {
     });
 
     test('a binding mismatch knows whether the ACCOUNT changed', () {
-      const same = RemoteIdentity(account: 'anna@gmail.com', calendar: 'cal-2');
+      const same = RemoteIdentity(account: 'anna@example.com', calendar: 'cal-2');
       const other = RemoteIdentity(
-        account: 'bela@gmail.com',
+        account: 'bela@example.com',
         calendar: 'cal-9',
       );
       expect(

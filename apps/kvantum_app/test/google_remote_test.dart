@@ -914,7 +914,7 @@ void main() {
       final client = MockClient((r) async {
         if (r.url.path.endsWith('/calendars/primary')) {
           primary++;
-          return jsonResp({'id': 'anna@gmail.com', 'timeZone': bp});
+          return jsonResp({'id': 'anna@example.com', 'timeZone': bp});
         }
         if (r.url.path.endsWith('/users/me/calendarList')) {
           return calList([
@@ -925,7 +925,7 @@ void main() {
       });
       final remote = GoogleCalendarRemote(client);
       final id = await remote.identity('naptar');
-      expect(id.account, 'anna@gmail.com');
+      expect(id.account, 'anna@example.com');
       expect(id.calendar, 'nap');
       await remote.identity('naptar');
       expect(primary, 1);

@@ -9,3 +9,27 @@ key.properties
 *.pem
 # the output of tool/coverage.dart
 coverage/
+# anything that looks like a secret or a credential must never be committed
+# (secrets.json is what the builds read: see apps/kvantum_app/secrets.example.json)
+secrets.*.json
+.env
+.env.*
+*.p12
+*.pfx
+*.p8
+*.key
+local.properties
+google-services.json
+GoogleService-Info.plist
+client_secret*.json
+service-account*.json
+id_rsa*
+id_ed25519*
+# the data of the app is personal: databases, their backups, the backup copies, the log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.bak-v*
+kvbackup-*
+diag.log*

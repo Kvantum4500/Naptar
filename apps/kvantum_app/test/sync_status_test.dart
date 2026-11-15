@@ -37,8 +37,8 @@ class _Ctl extends SyncController {
   Future<void> signOut() async => calls.add('out');
 }
 
-const _old = RemoteIdentity(account: 'anna@gmail.com', calendar: 'cal-1');
-const _new = RemoteIdentity(account: 'bela@gmail.com', calendar: 'cal-2');
+const _old = RemoteIdentity(account: 'anna@example.com', calendar: 'cal-1');
+const _new = RemoteIdentity(account: 'bela@example.com', calendar: 'cal-2');
 
 SyncState _state({
   SyncBindingMismatch? mismatch,
@@ -412,8 +412,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Másik Google-fiók'), findsOneWidget);
-        expect(find.textContaining('a***@gmail.com'), findsOneWidget);
-        expect(find.textContaining('b***@gmail.com'), findsOneWidget);
+        expect(find.textContaining('a***@example.com'), findsOneWidget);
+        expect(find.textContaining('b***@example.com'), findsOneWidget);
         expect(find.textContaining('anna'), findsNothing, reason: 'masked');
         expect(find.textContaining('bela'), findsNothing, reason: 'masked');
         expect(find.byKey(const Key('binding-later')), findsOneWidget);
@@ -426,7 +426,7 @@ void main() {
       'a calendar change in the same account is called by its own name',
       (tester) async {
         const sameAccount = RemoteIdentity(
-          account: 'anna@gmail.com',
+          account: 'anna@example.com',
           calendar: 'cal-9',
         );
         await _pump(

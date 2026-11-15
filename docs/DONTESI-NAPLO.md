@@ -202,6 +202,21 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Másik út:** több forduló engedése (a hiba csak elbújna); valós várakozás (a QA-3 döntésével ellentétes).
 - **Következmény:** a `controller_test` a szünetet nullára állítja (a többi szinkront hajtó teszt már így tett); a `no_real_waits_test` új őre megbuktat minden tesztet, amely `.signIn(` / `.syncNow(` hívással szinkront hajt, és nem említi a `syncPaceProvider`-t (a megjegyzések nem számítanak; az őr ideiglenes fájlokon önmagát is kipróbálja). A tanulság: a CI a második szem, más géppel és más sebességgel.
 
+### 2026-11-15 – A Drive-ból érkező fájl külső bemenet: olvasási korlát, őrült jövőbeli bélyeg eldobása, lezáratlan zip elutasítása, kézikönyv-hosszkorlát
+- **Miért:** a nyilvánossá tétel előtti átvizsgálás (az app a támadó szemével) négy rést talált azon, amit a program a Drive-ról olvas: nem volt méretkorlát; egy jövőbe bélyegzett rekord minden későbbi szerkesztést elnyomott volna; a jelszavas mentés sima zipre cserélhető volt (a visszaállítás a jelszót sosem kérte volna); a Drive-ból jövő kézikönyv nyersen, hossz nélkül ment a modellhez.
+- **Másik út:** a bejövő bélyeg lefogása (az audit SEC-16 javaslata): oda-vissza írná a Drive-fájlt (a két eszköz más lefogott értéket tárolna), és az óraeltérésnél adatot veszítene; helyette csak a 365 napnál messzebbi bélyeget dobja el, a kisebb eltérést (a REL-9 döntése szerint) elfogadja. A naptár-választás szigorítása (SEC-10): élő Google-ellenőrzés kell hozzá, és a meglévő kötést törhetné, ezért kimaradt.
+- **Következmény:** egy Drive-fájlból legföljebb 8 MB olvasható (`driveMaxReadBytes`; a nagyobb a pull-ban kimarad, a mentés-visszaállításnál „sérült”); a 365 napnál messzebbi bélyegű rekord (feladat, check-in, kézikönyv, pénzügyi levél) nem érvényesül; a jelszavas visszaállítás a lezáratlan zipet elutasítja (`BackupProblem.notLocked`); a kézikönyv a promptban legföljebb 12 000 karakter. Ismert maradék: egy 365 napnál kisebb, szándékos óra-előreállítás még elnyomhatja a későbbi szerkesztéseket (az óraeltérés-észlelés figyelmeztet).
+
+### 2026-11-15 – A naplótisztító ismeri a GitHub- és Google-kulcsok alakját
+- **Miért:** a Diagnosztika-jelentés és a napló hibasorai nyilvános helyre (hibajegy, üzenet) is kerülhetnek; a tisztító addig csak az `sk-`, `gsk_`, `AIza` előtagot és a 32+ karakteres hosszú sorozatot ismerte.
+- **Másik út:** csak a hosszú sorozat szabálya (a rövidebb GitHub-kulcsokat és a Google-tokenek előtagos alakját elengedné).
+- **Következmény:** új minták a `redactSecrets`-ben: `github_pat_`, `gh[pousr]_`, `GOCSPX-`, `ya29.` és a `1//0` frissítő-token előtag; a teszt azt is rögzíti, hogy a hasonló szavak és az előtag önmagában (`ghp_`, `GOCSPX-`) nem kulcs, és maradnak.
+
+### 2026-11-15 – Rendezés a nyilvánossághoz: SECURITY.md, szigorúbb `.gitignore`, példa-címek, és a nyitott biztonsági részletek kikerülnek az audit-naplóból (felhasználó)
+- **Miért:** a repó nyilvános. A naplóban a még nyitott tételek helye, támadási útja és javítási terve térkép volna annak, aki keresi őket; a tulajdonos döntése: „Kivesszük a nyitott részeket”.
+- **Másik út:** minden marad (átlátható, de térkép); az egész napló kikerül (a kész tételek története is elvész).
+- **Következmény:** a SEC-1, 6, 10, 16, 17, 18, 19 részletei külön fájlban a tulajdonosnál vannak (nem a tárolóban); a naplóban a státusz és „a részletek nem nyilvánosak” áll. A `.gitignore` titok- és adatmintái bővültek; a tesztekben a valódi tartományú példa-címek `example.com`-ra cserélődtek; `SECURITY.md` mondja meg, hogyan lehet privátban jelenteni, és mi nem hiba. A kézikönyv alapfájljai (`assets/handbook`) változatlanok.
+
 ## Függő (próba, nem döntés)
 
 ### 2026-11-14 – A `material_ui`-ra áttérés: kipróbálva, nem épült be

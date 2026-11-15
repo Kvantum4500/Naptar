@@ -321,8 +321,8 @@ void main() {
         tester,
         state: signedIn(
           mismatch: const SyncBindingMismatch(
-            stored: RemoteIdentity(account: 'anna@gmail.com', calendar: 'c1'),
-            current: RemoteIdentity(account: 'bela@gmail.com', calendar: 'c2'),
+            stored: RemoteIdentity(account: 'anna@example.com', calendar: 'c1'),
+            current: RemoteIdentity(account: 'bela@example.com', calendar: 'c2'),
           ),
         ),
       );

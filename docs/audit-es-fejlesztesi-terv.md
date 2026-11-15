@@ -1,5 +1,7 @@
 # Kvantum Naptár – teljes audit és fejlesztési terv (2026-11-10)
 
+> **Megjegyzés (2026-11-15):** ez a napló történeti: a „privát repó + olvasó token” döntések elavultak, mert a tároló 2026-11-14 óta nyilvános, és a frissítő kulcs nélkül működik (lásd [DONTESI-NAPLO.md](DONTESI-NAPLO.md), [frissito-kulcs.md](frissito-kulcs.md)). A még nyitott biztonsági tételek részletei nem szerepelnek benne.
+
 ## Context
 A felhasználó teljes ellenőrzést kért „minden oldalról” (kezelhetőség, plusz funkciók, token- és adattakarékosság, kompatibilitás stb.), hozzá ellenőrzési tervet, majd fejlesztési tervet. Az app jelenleg: Flutter (Windows + Android), kb. 23 000 sor Dart (mag ≈3 800, app ≈19 000, + 4 100 generált drift-kód), ≈405 app- és 173 mag-teszt, Build 33 kint, PR #3 (draft) a `claude/sweet-goodall-bn5pp9` ágon; a felhasználó még tesztel („Később ellenőrzőm”), a PR #3-at csak az ő jóváhagyása után merge-eljük.
 
@@ -89,25 +91,20 @@ A felhasználó teljes ellenőrzést kért „minden oldalról” (kezelhetősé
 ### B1. Biztonság és adatvédelem
 | ID | Súly | Megállapítás | Hely | Javítás | Munka | Ell. |
 |---|---|---|---|---|---|---|
-| SEC-1 | Magas | A feature-ági `[build]` is „latest” kiadás: minden eszköz jóváhagyatlan kódot kaphat; ágból a workflow szerkesztésével titkok/kiadási jog érhető el | `build.yml` (`claude/**` trigger, `release` job őr nélkül, `make_latest`) | `release` csak `main`/`v*`-ra; más ág → *prerelease* + „Előzetes csatorna” kapcsoló az appban (hogy a tesztelés megmaradjon); titkok GitHub *Environment* mögé kézi jóváhagyással; Actions SHA-pin; CODEOWNERS/ruleset a `.github/**`-ra | S | ✔ |
 | SEC-2 | Magas | Elavult egyéni URL felülír minden OpenAI-kompatibilis szolgáltatót: a Groq/Mistral/… kulcs és az események/pénzügyek a régi (akár `http://`) hosztra mennek; a kulcs-ellenőrzés közben átmegy | `ai_providers.dart:182-188`, `provider_catalog.dart:110`, `ai_settings.dart:117,148`, `settings_page.dart:78,106` (`copyWith(null)` nem töröl) | `baseUrl` csak `custom`-nál; szolgáltatóváltáskor törlés; `clearCustomBaseUrl`; regressziós teszt | S | ✔ |
 | SEC-3 | Közepes | Frissítés: integritás igen, hitelesség nem (a SHA-256 ugyanabból a kiadásból jön); a Windows-exe aláíratlan, a saját letöltés nem kap Mark-of-the-Web-et | `update_service.dart:227-273` | Ed25519 aláírás `build-N\|sha256` fölött, beégetett publikus kulccsal; az app a hiányzó/rossz aláírást elutasítja | M | ◦ |
 | SEC-4 | Közepes | A beégetett `UPDATE_TOKEN` és Google client secret kinyerhető a binárisból (a token csak olvas, de a privát repó forrását/kiadásait megnyitja; lejáratkor a frissítő megáll, kézi telepítés kell) | `update_config.dart:4`, `google_auth_service.dart:14-15` | Döntés kell (E. rész): marad + aláírás, vagy külön nyilvános kiadási repó (token nélkül); token lejárat-emlékeztető | M | ◦ |
 | SEC-5 | Közepes | Android Auto Backup: nincs `allowBackup`/`dataExtractionRules` → a DB (pénzügy!), a Wallet-sor és a secure-prefs Google-mentésbe/új telefonra kerülhet | `AndroidManifest.xml` `<application>` | `allowBackup="false"` + `dataExtractionRules` (database, sharedpref, file kizárva); lásd REL-6 | S | ✔ |
-| SEC-6 | Közepes | SQLite titkosítatlan; Windowson `Documents\kvantum.sqlite` (OneDrive-ütközés, bárki által olvasható) | `db.dart:94`, drift_flutter alapértelmezés | útvonal `%LOCALAPPDATA%`-ba egyszeri áthelyezéssel; opcionális `sqlite3mc` titkosítás, kulcs a secure storage-ból | M | ✔ |
 | SEC-7 | Közepes | Wallet-értesítések nyersen és korlátlan ideig maradnak a SharedPreferences-ben, ha az „automatikus” ki van kapcsolva (a `run()` a `drain` előtt visszatér; maszkolás csak a drain után); a `maskSensitive` csak ≥8 számjegyet és néhány kulcsszót fed | `WalletNotificationListener.kt:26-33`, `wallet_ingest.dart:102`, `wallet_parser.dart:75-83` | maszkolás/rövidítés Kotlinban sorba tétel előtt; TTL (14 nap); auto-off → sor ürítése; regex bővítés (csoportosított PAN/IBAN/telefon, „…1234”, „Kártya vége: 1234”) | S | ✔ |
 | SEC-8 | Közepes | A szabálysértési visszajelzés megkerüli a megosztási kapcsolókat és a `sanitizeText`-et: eseménycímek, műszaknevek, check-in energia megy a modellnek kikapcsolt forrásnál is | `rules.dart:105-109,144-149,154-167`, `assistant_service.dart:344,685` | kapcsoló-tudatos, általános szöveg + `sanitizeText` | S | ◦ |
 | SEC-9 | Közepes | Az AI-alapértelmezések mind BE ✔; a kézikönyv (profil: sérülések, célok) minden kérésben megy, kapcsoló nélkül; a check-in megjegyzés és a helyszín-címke is megy; a felület szövege szerint csak a kerekített koordináta távozik (ez csak az Open-Meteo-ra igaz) | `ai_settings.dart:65-71`, `assistant_context.dart:375`, `weather.dart:122-125`, `settings_page.dart:499` | egyszeri beleegyezés-ablak (szolgáltató neve + kategóriák + „a kézikönyv mindig megy”); kézikönyv-kapcsoló/figyelmeztetés; szöveg javítása; ingyenes szintek tanítási kitétele. A pénzügy alapértelmezése marad BE (a felhasználó döntése), de a beleegyezés ablakban látszik | S | ◦ |
-| SEC-10 | Közepes | A `calendar` hatókör az összes naptárat eléri; a tulajdonos-szerepű, jelölőt tartalmazó naptárat az app „sajátjának” fogadja el | `google_auth_service.dart:18-21`, `google_calendar_remote.dart:55-81` | `calendar.app.created` + calendarId a Drive appData-ban (élőben ellenőrizendő, hogy a naptárlista nélkül működik-e); addig tulajdonos+leírás+név ellenőrzés | M | ? |
 | SEC-11 | Alacsony | Az egyéni végpont `http://` és bármely host lehet; a Gemini hibaszöveg nincs szűrve (csak `sk-`/`gsk_`/`AIza` redakció) | `settings_page.dart:78-82`, `gemini_provider.dart:286-288` | https kötelező, kivéve loopback/RFC1918/.local (megerősítéssel); közös `_safeDetail` | S | ◦ |
 | SEC-12 | Alacsony | Modell-jogosultság és injekció-rések: új javaslatok előre kijelöltek; `sanitizeText` nem szűri a C1/Cf/bidi/Unicode-Tag karaktereket; `taskId`, `reason` szűretlen. (A törlés/áthelyezés kapuzása: AI-15) | `ai_providers.dart:248`, `assistant_context.dart:24-31` | alapból kijelöletlen; `\p{Cc}\p{Cf}` szűrés; azonosítók és indoklás szűrése; ≤ 20 tétel | S | ◦ |
 | SEC-13 | Közepes | **Saját hiba:** `isAuthExpired` a „failed to obtain access credentials” szövegre is illeszkedik, amit a `googleapis_auth` minden nem-200 token-válasznál ad ✔ → átmeneti Google 5xx/429 kijelentkeztet; kijelentkezéskor a token a Google-nél érvényes marad; a bejelentkezésnek nincs időkorlátja/megszakítása | `sync_controller.dart:143-148`, `googleapis_auth utils.dart:122-141`, `google_auth_service.dart:100-125` | csak HTTP 400 + `invalid_grant` = lejárt; kijelentkezéskor `oauth2.googleapis.com/revoke`; bejelentkezési időkorlát + mégse | S | ✔ |
 | SEC-14 | Alacsony | `open_filex` felesleges média-engedélyeket és root-path FileProvidert hozhat a merged manifestbe (nem ellenőrzött) | `pubspec.yaml`, plugin-manifest | `tools:node="remove"` vagy saját szűk FileProvider; merged manifest ellenőrzés a CI-ben | S | ? |
 | SEC-15 | Alacsony | Frissítő finomságok: a token hozzáadása csak host-egyezésen múlik (nincs séma/port-ellenőrzés), nincs méretkorlát, a zip teljes egészében memóriában, a temp-fájlok megmaradnak, verify és kicsomagolás közt nincs újra-hash | `update_service.dart:200-217,282-309,422-435` | https + pontos host + 443 a token előtt; méretkorlát `asset.size`-ból; temp takarítás; újra-hash | S | ◦ |
-| SEC-16 | Alacsony | Drive appData sima JSON, a levelek feladója nincs hitelesítve, az `updatedAt` megbízott (jövőbeli bélyeg minden későbbi szerkesztést elnyom) | `finance_mailbox.dart`, `finance_repository.dart:281-304` | `updatedAt` lefogása (most + 1 nap); opcionális AES-GCM boríték (kulcs QR-ral/jelszóval) | S–M | ◦ |
-| SEC-17 | Alacsony | Export fájlok (pénzügyi JSON, .ics) titkosítatlanok, a MIME `text/calendar` a JSON-ra is; nincs alkalmazászár; a pénzügyi képernyő látszik a legutóbbi alkalmazások közt | `backup_io.dart:20-25`, `MainActivity.kt` | figyelmeztetés + opcionális jelszavas export; `FLAG_SECURE` a Pénzügyek fülön; opcionális biometrikus zár | S–M | ◦ |
-| SEC-18 | Alacsony | Helyi release-build csendben debug-kulcsra esik vissza ✔; a `flutter stable` rögzítetlen; nincs Gradle checksum; `ci.yml`-ben nincs `permissions`; a release nem függ a tesztektől; a keystore-workflow (egyszer futott, artifact lejárt) a repóban maradt | `build.gradle.kts:56-60`, `build.yml`, `ci.yml`, `android-keystore.yml` | CI-n kulcs nélkül hiba; `flutter-version` rögzítés; `distributionSha256Sum`; `permissions: contents: read`; release ← tesztek; a keystore-workflow törlése a titkok titkosított offline másolata után | S | ✔ |
-| SEC-19 | Info | A `.gitignore` `secrets*` mintája a `secrets.example.json`-t is elrejti, amire a README hivatkozik; `deviceId` csak 32 bit; `update.log` a `%TEMP%`-ben | `.gitignore:3`, `record_repository.dart:24` | minta pontosítása; README | S | ◦ |
+
+> A még nyitott biztonsági tételek (SEC-1, SEC-6, SEC-10, SEC-16, SEC-17, SEC-18, SEC-19) részletei – hely, támadási út, javítási terv – nem szerepelnek ebben a nyilvános tárolóban; a tulajdonos külön őrzi őket. A nyilvánosan vállalt korlátok a README „Nyilvános repó” részében vannak.
 
 **Adatfolyam-tábla (mi hagyja el az eszközt)**
 
@@ -317,7 +314,7 @@ Először: képernyőképes bejárás a fő feladatokra (a felhasználóval), ut
 - **F – Automatikus mentés:** a kulcskezelés (jelszó vagy QR) közös alap a SEC-16 borítékkal; visszaállítási előnézet a REL-13 „újabb nyer” szabályával.
 
 ### 5. fázis – Kompatibilitás, kiadás, karbantarthatóság (2 build)
-CMP-1…7, SEC-3 (Ed25519-aláírt frissítés – döntés szerint), SEC-4 (marad a privát repó + token; lejárat-emlékeztető és a token cseréjének leírása), SEC-10 (hatókör szűkítése – élő ellenőrzéssel), SEC-14/15, QA-2…4 (CI-kapuk A3 szerint, lefedettség, szétbontás az érintett fájloknál), kiadási csatornák (stabil / előzetes), dokumentáció és döntési napló.
+CMP-1…7, SEC-3 (Ed25519-aláírt frissítés – döntés szerint), SEC-4 (marad a privát repó + token; lejárat-emlékeztető és a token cseréjének leírása), SEC-14/15, QA-2…4 (CI-kapuk A3 szerint, lefedettség, szétbontás az érintett fájloknál), kiadási csatornák (stabil / előzetes), dokumentáció és döntési napló.
 
 ### Elfogadott sorrend (a felhasználó döntése)
 **0 → 2 → 1 → 3 → 4 → 5.** Indok: a 0. fázis a legolcsóbb kockázatcsökkentés; a 2. fázis hat a mindennapi használatra (Groq-keret, megbízhatóbb javaslatok); az 1. fázis ritka, de adatvesztő eseteket zár; a 3. és 4. fázis a kényelem és a bővítés; az 5. a hosszú távú rend.
@@ -369,8 +366,8 @@ Tesztek: mag 194 (volt 173), app 441 (volt 405), az elemzők tiszták. Minden ja
 | REL-3 | kész | 30 s válasz- és 30 s tétlenségi határidő minden Google-hívásra; egyszerre egy szinkron, a közben érkezők egy követő futásba olvadnak |
 | REL-4 (minimum) | kész | az időablak előtti, helyi történet nem törlődik újraszinkronnál; a fiók-/naptárkötés az 1. fázisban |
 | REL-5 | kész | |
-| SEC-1 | részben, a CI-oldal visszavonva | az appban kész a kapcsoló az előzetes verziókhoz. A munkaági build előzetes kiadássá tétele elkészült, de **visszavontam**: a Build 34 kiadása 403-at kapott (lásd lent). **Marad a felhasználónak:** GitHub Environment a titkokhoz (D. rész 2.). |
-| SEC-18 | elhalasztva | a Flutter 3.47.9 rögzítése, a `permissions` és a `concurrency` elkészült, de a workflow-fájlok visszaálltak a `main` változatára (lásd lent). Elmaradt: Actions SHA-pin (hálózat kell a feloldáshoz), Gradle `distributionSha256Sum`; a debug-kulcsos visszaesés a CI-ben nem kerül kiadásba (`SIGNED` kapu), ezért a Gradle-t nem módosítottam. |
+| SEC-1 | részben, a CI-oldal visszavonva | az appban kész a kapcsoló az előzetes verziókhoz. A munkaági build előzetes kiadássá tétele elkészült, de **visszavontam**: a Build 34 kiadása 403-at kapott (lásd lent). |
+| SEC-18 | elhalasztva | a Flutter 3.47.9 rögzítése, a `permissions` és a `concurrency` elkészült, de a workflow-fájlok visszaálltak a `main` változatára (lásd lent). A többi a workflow-PR-ban van (#5). |
 | QA-1 | kész | README, CHANGELOG, ez a dokumentum; a `secrets.example.json` mostantól követett (a `.gitignore` nem rejti el) |
 
 **Átállás az előzetes csatornára:** a 0. fázis buildje még „latest” kiadásként jelenik meg (hogy a mostani app megtalálja). Ezután a munkaági buildek előzetesek; a Frissítés ablakban az „Előzetes verziókat is keressen” kapcsoló alapból BE van, így a tesztelés ugyanúgy megy.
@@ -776,29 +773,29 @@ Tesztek: app 2 758 (volt 2 705), mag 1 585 (volt 1 553), az elemzők és a form�
 
 A 98 azonosító (SEC 19, REL 28, AI 25, UX 13, CMP 8, QA 5) állapota a végrehajtási napló és a kód átnézése alapján: **78 kész**, **13 részben**, **3 halasztva**, **2 nem cél**, **2 információ** (nem teendő) – a 6. kör 1. része után (a REL-26 „részben”-ből „kész” lett).
 
-**Nem része a körnek (kimondva):** SEC-10 (az OAuth-hatókör szűkítése – élő ellenőrzés kell), a **G** csomag (alkalmazászár, titkosított adatbázis), a **H** csomag (helyi tartalék-tervező), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
+**Nem része a körnek (kimondva):** néhány biztonsági tétel (a részletek nem nyilvánosak), a **H** csomag (helyi tartalék-tervező), a Windows kódaláírás (korábbi döntés), a Pénzügy+ bank-formátum-minták (valódi bankfájl nincs). **A te teendőid:** a GitHub Actions / Billing rendbetétele és az „Re-run all jobs”; a workflow-PR (#5) átnézése és beolvasztása; az aláíráshoz kulcspár + titok + változó; az új funkciók élő kipróbálása; valódi Apple / Outlook / Google export és bankfájl küldése mintának.
 
 | Azonosító | Állapot | Mi az, és mi lett |
 |---|---|---|
-| SEC-1 | részben | A feature-ági [build] is „latest” kiadás: minden eszköz jóváhagyatlan … – a csatornák (stabil / előzetes) a workflow-PR-ban (#5, piszkozat; a beolvasztás a tiéd); az app „Előzetes verziók” kapcsolója kész; Environment-jóváhagyás, SHA-pin, CODEOWNERS nem készült |
+| SEC-1 | részben | (a részletek nem nyilvánosak) |
 | SEC-2 | kész | Elavult egyéni URL felülír minden OpenAI-kompatibilis szolgáltatót: a … – 0. fázis |
 | SEC-3 | kész | Frissítés: integritás igen, hitelesség nem (a SHA-256 ugyanabból a … – fokozatos Ed25519; élesítés: kulcspár + titok + változó + a workflow-PR beolvasztása + új build (a tiéd) |
 | SEC-4 | kész | A beégetett UPDATE_TOKEN és Google client secret kinyerhető a … – lejárat-figyelmeztetés + útmutató; a token a binárisban marad (döntés) |
 | SEC-5 | kész | Android Auto Backup: nincs allowBackup/dataExtractionRules → a DB … – 0. fázis |
-| SEC-6 | részben | SQLite titkosítatlan; Windowson Documents\kvantum.sqlite … – a Windows-adatbázis a %LOCALAPPDATA%-ban; a titkosítás (G csomag) kizárva |
+| SEC-6 | részben | (a részletek nem nyilvánosak) |
 | SEC-7 | kész | Wallet-értesítések nyersen és korlátlan ideig maradnak a … – 0. fázis |
 | SEC-8 | kész | A szabálysértési visszajelzés megkerüli a megosztási kapcsolókat és a … – 0. fázis |
 | SEC-9 | kész | Az AI-alapértelmezések mind BE ; a kézikönyv (profil: sérülések, célok) … – 2c: beleegyező párbeszéd, Kézikönyv-kapcsoló |
-| SEC-10 | halasztva | A calendar hatókör az összes naptárat eléri; a tulajdonos-szerepű, … – élő ellenőrzés kell (`calendar.app.created` naptárlista nélkül); nem része a körnek |
+| SEC-10 | halasztva | (a részletek nem nyilvánosak) |
 | SEC-11 | kész | Az egyéni végpont http:// és bármely host lehet; a Gemini hibaszöveg … – 0. fázis |
 | SEC-12 | kész | Modell-jogosultság és injekció-rések: új javaslatok előre kijelöltek; … – 0. fázis |
 | SEC-13 | kész | Saját hiba: isAuthExpired a „failed to obtain access credentials” … – 0. fázis |
 | SEC-14 | kész | open_filex felesleges média-engedélyeket és root-path FileProvidert … – az engedélyek törölve; a FileProvider marad (maradék-kockázat) |
 | SEC-15 | kész | Frissítő finomságok: a token hozzáadása csak host-egyezésen múlik … – zip-védelem deklarált méretekre; a memóriahasználat átírása nem készült |
-| SEC-16 | részben | Drive appData sima JSON, a levelek feladója nincs hitelesítve, az … – óraeltérés-észlelés + max(óra, meglévő + 1); a bejövő bélyeg lefogása nincs (döntés) |
-| SEC-17 | részben | Export fájlok (pénzügyi JSON, .ics) titkosítatlanok, a MIME … – a jelentés `text/plain`, az automatikus mentés jelszavas zip lehet; a kézi export titkosítatlan; zár és FLAG_SECURE: G csomag (kizárva) |
-| SEC-18 | részben | Helyi release-build csendben debug-kulcsra esik vissza ; a flutter … – Flutter-pin kész (PR #4); a CI-kapuk, jogosultságok, release ← tesztek a workflow-PR-ban (#5) |
-| SEC-19 | részben | A .gitignore secrets* mintája a secrets.example.json-t is elrejti, … – a minta és a `secrets.example.json` rendben; a `deviceId` 32 bites marad |
+| SEC-16 | részben | (a részletek nem nyilvánosak) |
+| SEC-17 | részben | (a részletek nem nyilvánosak) |
+| SEC-18 | részben | (a részletek nem nyilvánosak) |
+| SEC-19 | részben | (a részletek nem nyilvánosak) |
 | REL-1 | kész | Egyetlen nem támogatott/hibás RRULE (pl. WKST=SU – a rrule csomag csak … |
 | REL-2 | kész | Az első alkalommal látott kivétel-példány (Google-felületen … – 1a; élő Google-viselkedés nem ellenőrizve |
 | REL-3 | kész | A Calendar/Drive HTTP-hívásoknak nincs időkorlátja (a … |

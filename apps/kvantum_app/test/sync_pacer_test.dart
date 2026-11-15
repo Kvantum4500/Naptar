@@ -186,11 +186,11 @@ void main() {
     test('the linking question names the accounts and offers the way out', () {
       final account = bindingBody(
         accountChanged: true,
-        stored: 'a***@gmail.com',
-        current: 'b***@gmail.com',
+        stored: 'a***@example.com',
+        current: 'b***@example.com',
       );
-      expect(account, contains('a***@gmail.com'));
-      expect(account, contains('b***@gmail.com'));
+      expect(account, contains('a***@example.com'));
+      expect(account, contains('b***@example.com'));
       expect(account, contains('megállt'));
       final calendar = bindingBody(
         accountChanged: false,
