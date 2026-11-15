@@ -211,6 +211,25 @@ void main() {
       await feedback('calisthenics', 45, 3, daysAgo: 6);
       final out = await plan(const LocalPlanPrefs(perWeek: 1));
       expect(out.items.single.title, 'Calisthenics 45 perc');
+      // and the other way round: the one that is first in the list is not
+      // always the one planned first
+      await feedback('calisthenics', 45, 3, daysAgo: 0);
+      final again = await plan(const LocalPlanPrefs(perWeek: 1));
+      expect(again.items.single.title, 'Gym 60 perc');
+    });
+
+    test('a low check-in keeps the hard session off that day', () async {
+      for (final day in ['2026-05-05', '2026-05-06']) {
+        await records.edit(kindCheckIn, day, checkInFields(physical: 2));
+      }
+      final out = await plan(
+        const LocalPlanPrefs(
+          sports: [PlanSport(name: 'Gym', minutes: 60)],
+          perWeek: 1,
+        ),
+      );
+      // (the 5th and the 6th are out: a Gym is a hard session)
+      expect(shown(out), ['5-7 10:00 Gym 60 perc']);
     });
 
     test(
@@ -269,6 +288,47 @@ void main() {
           rules: const PlanRules(),
         ),
         isEmpty,
+      );
+    });
+
+    test('when nothing fits it says so, and why: the shifts', () async {
+      // a night shift every night of the window: the sleep after each and the
+      // distance from each leave no room for a workout
+      for (var d = 4; d <= 11; d++) {
+        await events.saveLocal(
+          CalEvent(
+            id: 'n$d',
+            calendarId: kNaptarCalendar,
+            title: 'Éjszakai műszak',
+            tzid: 'Europe/Budapest',
+            start: floating(2026, 5, d, 18),
+            end: floating(2026, 5, d + 1, 6),
+            notes: kShiftMarker,
+          ),
+        );
+      }
+      final out = await plan(const LocalPlanPrefs());
+      expect(out.items, isEmpty);
+      expect(out.summary, contains('nem fért be'));
+      expect(out.dropped, isNotEmpty);
+      expect(out.dropped.first, contains('A műszak miatt'));
+    });
+
+    test('the week after the window counts: its cap is kept', () async {
+      // Monday the 11th is the last day of the window, and its week (the 11th
+      // to the 17th) already has five workouts from the 12th on: a sixth in
+      // that week is over the cap, so the 11th is left out
+      for (var d = 12; d <= 16; d++) {
+        await events.saveLocal(
+          evt('b$d', 'Calisthenics 45 perc', floating(2026, 5, d, 18)),
+        );
+      }
+      final out = await plan(const LocalPlanPrefs());
+      expect(out.items, hasLength(3));
+      expect(
+        [for (final i in out.items) i.startWall.day],
+        isNot(contains(11)),
+        reason: 'a sixth workout in that week',
       );
     });
 
@@ -350,6 +410,53 @@ void main() {
         );
         expect(out.items.single.startWall.day, 5);
         expect(out.items.single.reason, contains('Előrejelzés nélkül'));
+      },
+    );
+
+    test(
+      'every plan reads the forecast anew: a new place, a new answer',
+      () async {
+        http.Response daily(bool rainy) {
+          final days = [for (var d = 4; d <= 18; d++) d];
+          return http.Response(
+            jsonEncode({
+              'daily': {
+                'time': [
+                  for (final d in days)
+                    '2026-05-${d.toString().padLeft(2, '0')}',
+                ],
+                'temperature_2m_max': [for (final _ in days) 20.0],
+                'temperature_2m_min': [for (final _ in days) 10.0],
+                'precipitation_sum': [for (final _ in days) rainy ? 8.0 : 0.0],
+                'precipitation_probability_max': [
+                  for (final _ in days) rainy ? 90 : 5,
+                ],
+                'wind_speed_10m_max': [for (final _ in days) 10.0],
+                'weather_code': [for (final _ in days) rainy ? 63 : 1],
+              },
+            }),
+            200,
+          );
+        }
+
+        // rain at the first place, sunshine at the second
+        final svc = service(
+          FakeLlm([]),
+          weather: WeatherService(
+            MockClient(
+              (r) async => daily(r.url.queryParameters['latitude'] == '47.50'),
+            ),
+          ),
+        );
+        final wet = await svc.localPlan(kajak, settings: withPlace);
+        expect(wet.items, isEmpty, reason: 'the kayak waits for a dry day');
+        final dry = await svc.localPlan(
+          kajak,
+          settings: AiSettings(
+            place: Place(name: 'Pécs', lat: 46.07, lon: 18.23),
+          ),
+        );
+        expect(dry.items, hasLength(1));
       },
     );
 

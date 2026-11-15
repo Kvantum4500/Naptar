@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ai/ai_providers.dart';
 import 'package:kvantum_app/ai/ai_settings.dart' show MemoryApiKeyStore;
+import 'package:kvantum_app/ai/approval.dart' show assistantApplyingProvider;
 import 'package:kvantum_app/ai/assistant_page.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
@@ -17,6 +18,7 @@ import 'package:kvantum_app/ai/settings/local_plan_card.dart'
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -331,11 +333,18 @@ void main() {
     });
 
     testWidgets('a refused key', (tester) async {
-      final llm = _Llm([(_) => const LlmAuth('A kulcs érvénytelen.')]);
+      final llm = _Llm([
+        (_) => const LlmAuth('A kulcs érvénytelen.'),
+        (_) => const LlmAuth('A kulcs érvénytelen.'),
+      ]);
       await boot(tester, const AssistantPage(), llm: llm, key: 'rossz');
       await ask(tester, 'Tervezz edzést a jövő hétre');
       expect(find.textContaining('A kulcs érvénytelen.'), findsOneWidget);
       expect(find.byKey(const Key('plan-local-error')), findsOneWidget);
+      // (a request to delete is no plan: the program has no plan to offer)
+      await ask(tester, 'Töröld a holnapi edzést');
+      expect(find.textContaining('A kulcs érvénytelen.'), findsOneWidget);
+      expect(find.byKey(const Key('plan-local-error')), findsNothing);
       await shutdown(tester, db);
     });
 
@@ -347,6 +356,7 @@ void main() {
         (_) => const LlmRateLimit('Túl sok kérés.'),
         (_) => const LlmRateLimit('Nincs egyenleg.', billing: true),
         (_) => const LlmRateLimit('Nincs ingyenes keret.', quotaZero: true),
+        (_) => const LlmRateLimit('Elfogyott a napi keret.', daily: true),
       ]);
       await boot(tester, const AssistantPage(), llm: llm, key: 'k');
       Future<void> again() async {
@@ -363,6 +373,10 @@ void main() {
       expect(find.byKey(const Key('plan-local-error')), findsOneWidget);
       await again(); // no free quota
       expect(find.byKey(const Key('plan-local-error')), findsOneWidget);
+      // the quota is gone, but this is no plan request: nothing to offer
+      await ask(tester, 'Töröld a holnapi edzést');
+      expect(find.textContaining('Elfogyott a napi keret.'), findsOneWidget);
+      expect(find.byKey(const Key('plan-local-error')), findsNothing);
       await shutdown(tester, db);
     });
 
@@ -391,14 +405,21 @@ void main() {
     ) async {
       _BrokenPrefs.built = 0;
       final llm = _Llm([]);
+      final sink = MemoryDiagSink();
       await boot(
         tester,
         const AssistantPage(),
         llm: llm,
         key: 'k',
-        extra: [localPlanPrefsProvider.overrideWith(_BrokenPrefs.new)],
+        extra: [
+          localPlanPrefsProvider.overrideWith(_BrokenPrefs.new),
+          diagLogProvider.overrideWithValue(DiagLog()..attach(sink)),
+        ],
       );
       await planWith(tester);
+      // (the failure is written down, in codes)
+      await tester.runAsync(() => ref0(tester).read(diagLogProvider).flush());
+      expect(sink.lines.join('\n'), contains('plan.local_failed'));
       expect(find.text('Újrapróbál'), findsOneWidget);
       expect(find.byKey(const Key('plan-local-error')), findsNothing);
       final first = _BrokenPrefs.built;
@@ -409,6 +430,40 @@ void main() {
       expect(_BrokenPrefs.built, greaterThan(first));
       expect(llm.requests, isEmpty);
       expect(find.text('Újrapróbál'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+  });
+
+  group('the plan and the rest of the page', () {
+    testWidgets('no plan starts while an approval is being carried out', (
+      tester,
+    ) async {
+      await boot(tester, const AssistantPage());
+      final c = ref0(tester);
+      expect(c.read(assistantApplyingProvider.notifier).begin(), isTrue);
+      await c.read(assistantControllerProvider.notifier).planLocally();
+      await tester.pumpAndSettle();
+      expect(c.read(assistantControllerProvider).busy, isFalse);
+      expect(c.read(assistantControllerProvider).outcome, isNull);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      c.read(assistantApplyingProvider.notifier).end();
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a local plan is not taken further to the model', (
+      tester,
+    ) async {
+      final llm = _Llm([]); // a call would throw
+      await boot(tester, const AssistantPage(), llm: llm, key: 'k');
+      await planWith(tester);
+      expect(find.byType(CheckboxListTile), findsNWidgets(3));
+      await ref0(tester)
+          .read(assistantControllerProvider.notifier)
+          .askMore('Mikor férne be még egy?');
+      await tester.pumpAndSettle();
+      expect(llm.requests, isEmpty);
+      expect(ref0(tester).read(assistantControllerProvider).error, isNull);
+      expect(find.byType(CheckboxListTile), findsNWidgets(3));
       await shutdown(tester, db);
     });
   });

@@ -375,7 +375,7 @@ LocalPlan planWorkoutsLocally({
     return best;
   }
 
-  var unplaced = 0;
+  var unplaced = false; // something of the wish did not fit
   for (var k = 0; k < need; k++) {
     tally = {};
     ({ProposalItem item, DateTime day, double cost})? got;
@@ -388,7 +388,7 @@ LocalPlan planWorkoutsLocally({
       }
     }
     if (got == null || used == null) {
-      unplaced = need - k;
+      unplaced = true;
       break;
     }
     final since = lastDone[used.key];
@@ -426,12 +426,12 @@ LocalPlan planWorkoutsLocally({
 
   final total = items.length + inWindow.length;
   final dropped = <String>[];
-  if (unplaced > 0) {
-    dropped.addAll(_why(unplaced, total, perWeek, span, tally, rules));
+  if (unplaced) {
+    dropped.addAll(_why(total, perWeek, span, tally, rules));
   }
   final head = items.isEmpty
       ? 'Helyi terv, modell nélkül: a következő $span napra nem fért be új edzés.'
-      : 'Helyi terv, modell nélkül: ${items.length} edzés a következő $span napra${unplaced > 0 ? ' (a heti cél $perWeek lett volna)' : ''}.';
+      : 'Helyi terv, modell nélkül: ${items.length} edzés a következő $span napra${unplaced ? ' (a heti cél $perWeek lett volna)' : ''}.';
   return LocalPlan(
     items: items,
     summary: head,
@@ -443,19 +443,19 @@ LocalPlan planWorkoutsLocally({
 
 // ---------------------------------------------------------------- helpers
 
-ProposalItem _item(PlanSport sport, DateTime startWall, PlanRules rules) {
-  final item = ProposalItem(
-    title: sport.title,
-    startWall: startWall,
-    endWall: startWall.add(Duration(minutes: sport.minutes)),
-    tzid: rules.tzid,
-    kind: 'workout',
-    hard: false,
-    reason: '',
-    outdoor: sport.outdoor,
-  );
-  return item.withHard(item.isHardSession(rules: rules));
-}
+/// One session of [sport] at [startWall]. (Whether it is hard is judged where
+/// it matters: by the rules when it is checked, and when it is handed over.)
+ProposalItem _item(PlanSport sport, DateTime startWall, PlanRules rules) =>
+    ProposalItem(
+      title: sport.title,
+      startWall: startWall,
+      endWall: startWall.add(Duration(minutes: sport.minutes)),
+      tzid: rules.tzid,
+      kind: 'workout',
+      hard: false,
+      reason: '',
+      outdoor: sport.outdoor,
+    );
 
 /// The months an outdoor sport is planned in: the handbook's seasons (kajak
 /// May–September, the others spring to autumn). The forecast, when there is
@@ -566,7 +566,6 @@ bool _touchesShift(ProposalItem item, List<Occurrence> existing, int buffer) {
 /// stood in the way most often, and, when the shifts are the main one, how many
 /// fit in all.
 List<String> _why(
-  int unplaced,
   int total,
   int perWeek,
   int span,

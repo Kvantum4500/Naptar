@@ -142,6 +142,12 @@ void main() {
         'calisthenics',
       );
       expect(const PlanSport(name: 'Kajak', minutes: 90).key, 'kajak');
+      // a known sport under a name of its own is still that sport
+      expect(const PlanSport(name: 'Súlyzós', minutes: 60).key, 'gym');
+      expect(
+        const PlanSport(name: 'Evezés', minutes: 60, outdoor: true).key,
+        'kajak',
+      );
       expect(const PlanSport(name: 'Pilates', minutes: 30).key, 'pilates');
       expect(const PlanSport(name: 'Árnyékbox', minutes: 30).key, 'arnyekbox');
     });
@@ -165,6 +171,16 @@ void main() {
       // line breaks and control characters become spaces
       expect(
         p({'name': 'Street\nWorkout', 'minutes': 45})!.name,
+        'Street Workout',
+      );
+      expect(
+        p({'name': 'Street\u0001Workout', 'minutes': 45})!.name,
+        'Street Workout',
+      );
+      expect(p({'name': 'Gym\u007F', 'minutes': 45})!.name, 'Gym');
+      // a run of spaces is one space
+      expect(
+        p({'name': 'Street     Workout', 'minutes': 45})!.name,
         'Street Workout',
       );
       expect(p({'name': 'Gym', 'minutes': 60})!.outdoor, isFalse);
@@ -342,7 +358,25 @@ void main() {
         night(6),
         event('Edzőtábor', at(7, 0), at(8, 0), allDay: true),
         booked('Fogorvos', 8, 18),
+        // (a shift whose title says "workout" is a shift: an instructor's)
+        event('Edzés oktatás', at(9, 8), at(9, 16), shift: true),
       ];
+      final p = plan(existing: ex);
+      expect(p.alreadyBooked, 0);
+      expect(p.items, hasLength(3));
+    });
+
+    test('a wish outside 1 to 7 is brought into it', () {
+      final none = plan(prefs: const LocalPlanPrefs(perWeek: 0));
+      expect(none.wanted, 1);
+      expect(none.items, hasLength(1));
+      final many = plan(prefs: const LocalPlanPrefs(perWeek: 20));
+      expect(many.wanted, 7);
+      expect(many.summary, contains('a heti cél 7 lett volna'));
+    });
+
+    test('booked workouts after the window do not count toward the wish', () {
+      final ex = [booked('Gym 60 perc', 14, 18)];
       final p = plan(existing: ex);
       expect(p.alreadyBooked, 0);
       expect(p.items, hasLength(3));
@@ -386,6 +420,38 @@ void main() {
         log: [logOf('calisthenics', 1), logOf('gym', 3)],
       );
       expect(shown(q), ['05-05 10:00 Calisthenics 45 perc']);
+    });
+
+    test('a deleted feedback and one of a workout not done are no workout', () {
+      // Gym is the later in the line; with a calisthenics session "done" on
+      // the 3rd it would come first. Neither of these two counts.
+      WorkoutLogView deleted(String sport, int d) => WorkoutLogView(
+        SyncRecord(id: 'x${_seq++}', kind: kindWorkoutLog).edit(
+          {
+            ...workoutLogFields(
+              title: sportLabel(sport),
+              date: floating(2026, 5, d),
+              minutes: 45,
+              sport: sport,
+            ),
+            'deleted': true,
+          },
+          ts: 1,
+          dev: 'A',
+        ),
+      );
+      const one = LocalPlanPrefs(perWeek: 1);
+      expect(shown(plan(prefs: one, log: [deleted('calisthenics', 3)])), [
+        '05-05 10:00 Calisthenics 45 perc',
+      ]);
+      expect(
+        shown(plan(prefs: one, log: [logOf('calisthenics', 3, done: false)])),
+        ['05-05 10:00 Calisthenics 45 perc'],
+      );
+      // (and the same entry, done and kept, sends it to the back)
+      expect(shown(plan(prefs: one, log: [logOf('calisthenics', 3)])), [
+        '05-05 10:00 Gym 60 perc',
+      ]);
     });
 
     test('a sport never done goes before one done long ago', () {
@@ -762,6 +828,41 @@ void main() {
       expect(shown(plan(prefs: long)).single, '05-05 17:00 Gym 90 perc');
     });
 
+    test('the half-hour grid reaches the early and the late hours', () {
+      // sleep ends at 05:00, the morning is wished: 06:00 is the first hour of
+      // the band (05:00 is a hour early)
+      final early = plan(
+        r: const PlanRules(sleepEndHour: 5),
+        prefs: one.copyWith(band: PlanBand.morning),
+      );
+      expect(shown(early).single, '05-05 06:00 Calisthenics 45 perc');
+      // a hard session needs 48 hours after the evening Gym of the 5th (it
+      // ended at 19:00): on the 7th only 19:00 and later will do
+      final late = plan(
+        from: floating(2026, 5, 6),
+        days: 2,
+        prefs: const LocalPlanPrefs(
+          sports: [PlanSport(name: 'Gym', minutes: 60)],
+          perWeek: 1,
+        ),
+        existing: [booked('Gym 60 perc', 5, 18)],
+      );
+      expect(shown(late).single, '05-07 19:00 Gym 60 perc');
+    });
+
+    test('the start of a free window is rounded up to five minutes', () {
+      // the meeting ends at 11:02; with the 15 minutes of buffer the room
+      // begins at 11:17: the first start tried is 11:20
+      final p = plan(
+        prefs: const LocalPlanPrefs(
+          sports: [PlanSport(name: 'Gym', minutes: 60)],
+          perWeek: 1,
+        ),
+        existing: [event('Megbeszélés', at(5, 10), at(5, 11, 2))],
+      );
+      expect(shown(p).single, '05-05 11:20 Gym 60 perc');
+    });
+
     test('when the band is full, the nearest free time is used', () {
       final ex = [booked('Munka', 5, 17, minutes: 240)]; // 17:00-21:00
       final p = plan(
@@ -775,6 +876,14 @@ void main() {
   });
 
   group('the days', () {
+    test('at least one day is planned, at most fourteen', () {
+      final one = plan(days: 0);
+      expect(one.items, hasLength(1));
+      expect(one.summary, contains('a következő 1 napra'));
+      final most = plan(days: 40);
+      expect(most.summary, contains('a következő 14 napra'));
+    });
+
     test('the sessions are spread out, not packed', () {
       final p = plan(prefs: const LocalPlanPrefs(perWeek: 2));
       expect(shown(p), [
@@ -881,6 +990,34 @@ void main() {
         p.summary,
         'Helyi terv, modell nélkül: ${p.items.length} edzés a következő 7 napra (a heti cél 6 lett volna).',
       );
+    });
+
+    test('the shortfall is explained by the two things most in the way', () {
+      const gym = LocalPlanPrefs(
+        sports: [PlanSport(name: 'Gym', minutes: 60)],
+        perWeek: 6,
+      );
+      final p = plan(prefs: gym);
+      expect(p.dropped, [
+        'A szabályok miatt ebben az időszakban (a következő 7 nap) 3 edzés fér be, a cél 6 lett volna.',
+        'Ami a legtöbbször útban volt: a két nehéz edzés közötti 48 óra pihenő, továbbá az alvási sáv.',
+      ]);
+      final full = plan(prefs: const LocalPlanPrefs(perWeek: 7));
+      expect(
+        full.dropped.last,
+        'Ami a legtöbbször útban volt: a heti legfeljebb 5 edzés, továbbá a két nehéz edzés közötti 48 óra pihenő.',
+      );
+    });
+
+    test('what is booked counts into what fits', () {
+      final ex = [
+        booked('Gym 60 perc', 6, 10),
+        booked('Calisthenics 45 perc', 9, 10),
+      ];
+      final p = plan(prefs: const LocalPlanPrefs(perWeek: 7), existing: ex);
+      // 4 new ones and the 2 booked
+      expect(p.items, hasLength(4));
+      expect(p.dropped.first, contains('6 edzés fér be, a cél 7 lett volna'));
     });
 
     test('as many as wished: no word about a shortfall', () {
