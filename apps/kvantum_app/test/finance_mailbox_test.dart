@@ -623,6 +623,44 @@ void main() {
     });
 
     test(
+      'a letter bigger than the app ever writes is one that cannot be handled',
+      () async {
+        // (somebody put it there: it is not read into memory, it is not
+        // deleted either - it is somebody else's - and the others go on)
+        await introduceAll();
+        await b.addTx('tb', 100);
+        await c.addTx('tc', 200);
+        b.now += 10;
+        c.now += 10;
+        await b.mail.sync();
+        await c.mail.sync();
+        drive.failReadOf = (n) =>
+            n.startsWith(toA) ? const DriveFileTooBig(9 * 1024 * 1024) : null;
+
+        final r = await a.mail.sync();
+        expect(r.failed, 1);
+        expect(r.stoppedEarly, isFalse);
+        expect(await a.amounts(), {'tc': 200});
+        expect(waitingFor(toA), 1, reason: 'the big one stays in Drive');
+      },
+    );
+
+    test(
+      'a note of a peer that is too big is taken like a damaged one',
+      () async {
+        await introduceAll();
+        await a.addTx('t1', 500);
+        a.now += 10;
+        drive.failReadOf = (n) => n.startsWith('fin-peer-bbbb2222')
+            ? const DriveFileTooBig(9 * 1024 * 1024)
+            : null;
+        final r = await a.mail.sync();
+        expect(r.stoppedEarly, isFalse);
+        expect(r.failed, 0);
+      },
+    );
+
+    test(
       'a letter that keeps failing is left alone after three runs',
       () async {
         await introduceAll();
