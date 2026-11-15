@@ -13,8 +13,6 @@ import 'package:kvantum_app/ai/assistant_page.dart';
 import 'package:kvantum_app/ai/handbook_store.dart';
 import 'package:kvantum_app/ai/llm_provider.dart';
 import 'package:kvantum_app/ai/local_plan_prefs.dart';
-import 'package:kvantum_app/ai/settings/local_plan_card.dart'
-    show maxPlanSports;
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
@@ -654,23 +652,68 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('any change of the wishes offers the way back', (tester) async {
+      await boot(tester, const SettingsPage());
+      Future<void> saveOnly(LocalPlanPrefs p) async {
+        await tester.runAsync(
+          () => ref0(tester).read(localPlanPrefsProvider.notifier).save(p),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      // (each wish alone: the weekly goal, the time of day, the sports)
+      await saveOnly(const LocalPlanPrefs(perWeek: 4));
+      await show(tester, find.text('Helyi terv (AI nélkül)'));
+      expect(find.byKey(const Key('plan-reset')), findsOneWidget);
+      await saveOnly(const LocalPlanPrefs(band: PlanBand.evening));
+      expect(find.byKey(const Key('plan-reset')), findsOneWidget);
+      await saveOnly(
+        const LocalPlanPrefs(sports: [PlanSport(name: 'Gym', minutes: 60)]),
+      );
+      expect(find.byKey(const Key('plan-reset')), findsOneWidget);
+      await saveOnly(const LocalPlanPrefs());
+      expect(find.byKey(const Key('plan-reset')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the sport that is tapped is the one that goes', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      await tapKey(tester, const Key('plan-sport-del-1')); // the Gym
+      expect(find.text('Gym'), findsNothing);
+      expect(find.text('Calisthenics'), findsOneWidget);
+      final p = LocalPlanPrefs.decode(await saved(tester));
+      expect(p.sports, [const PlanSport(name: 'Calisthenics', minutes: 45)]);
+      await shutdown(tester, db);
+    });
+
     testWidgets('twelve sports are the most: the add button goes', (
       tester,
     ) async {
       await boot(tester, const SettingsPage());
-      await tester.runAsync(
-        () => ref0(tester)
-            .read(localPlanPrefsProvider.notifier)
-            .save(
-              LocalPlanPrefs(
-                sports: [
-                  for (var i = 0; i < maxPlanSports; i++)
-                    PlanSport(name: 'Sport $i', minutes: 30),
-                ],
+      Future<void> saveSports(int n) async {
+        await tester.runAsync(
+          () => ref0(tester)
+              .read(localPlanPrefsProvider.notifier)
+              .save(
+                LocalPlanPrefs(
+                  sports: [
+                    for (var i = 0; i < n; i++)
+                      PlanSport(name: 'Sport $i', minutes: 30),
+                  ],
+                ),
               ),
-            ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
+      }
+
+      // eleven: there is still room for one more
+      await saveSports(11);
+      await show(tester, find.byKey(const Key('plan-sport-10')));
+      expect(find.byKey(const Key('plan-sport-add')), findsOneWidget);
+      // twelve: the most
+      await saveSports(12);
       await show(tester, find.byKey(const Key('plan-sport-11')));
       expect(find.byKey(const Key('plan-sport-add')), findsNothing);
       await shutdown(tester, db);

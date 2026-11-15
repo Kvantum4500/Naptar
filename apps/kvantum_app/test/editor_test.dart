@@ -90,6 +90,27 @@ void main() {
       },
     );
 
+    testWidgets('an end before the start is explained and nothing is stored', (
+      tester,
+    ) async {
+      await openOn(
+        tester,
+        EditTarget(
+          initialStart: floating(2026, 5, 4, 14),
+          initialEnd: floating(2026, 5, 4, 13),
+        ),
+      );
+      await rename(tester, 'Fordítva');
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('A befejezésnek a kezdés után kell lennie.'),
+        findsOneWidget,
+      );
+      expect(await all(tester), isEmpty);
+      await shutdown(tester, db);
+    });
+
     testWidgets('empty title is rejected and nothing is stored', (
       tester,
     ) async {
