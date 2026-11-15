@@ -1,3 +1,4 @@
+import 'dart:collection' show ListBase;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -262,10 +263,31 @@ void main() {
       expect(zipIsLocked(List<int>.filled(100, 0x50)), isFalse);
     });
 
+    test('bytes that cannot be read at all are not locked either', () {
+      // (the reader of the zip is not trusted to be quiet about damaged
+      // bytes: whatever it throws, the answer is "not locked")
+      expect(zipIsLocked(_Unreadable()), isFalse);
+    });
+
     test('the message says what happened', () {
       const e = BackupException(BackupProblem.notLocked);
       expect(e.message, contains('nincs jelszóval lezárva'));
       expect(e.message, contains('Nem állítom vissza'));
     });
   });
+}
+
+/// Bytes whose every access fails.
+class _Unreadable extends ListBase<int> {
+  @override
+  int get length => throw StateError('unreadable');
+
+  @override
+  set length(int newLength) => throw StateError('unreadable');
+
+  @override
+  int operator [](int index) => throw StateError('unreadable');
+
+  @override
+  void operator []=(int index, int value) => throw StateError('unreadable');
 }

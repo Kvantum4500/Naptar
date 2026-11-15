@@ -12,6 +12,7 @@ coverage/
 # anything that looks like a secret or a credential must never be committed
 # (secrets.json is what the builds read: see apps/kvantum_app/secrets.example.json)
 secrets.*.json
+!secrets.example.json
 .env
 .env.*
 *.p12

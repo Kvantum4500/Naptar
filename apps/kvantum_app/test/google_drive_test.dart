@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -434,6 +435,85 @@ void main() {
           );
         },
       );
+
+      group('the size the server announces', () {
+        /// A server that says the file is [announced] bytes long and gives
+        /// [chunks]. A refused answer is not read to its end, so [close] false
+        /// leaves the stream open: [onCancel] hears when it is let go of.
+        GoogleDriveRemote server(
+          int announced,
+          List<List<int>> chunks, {
+          int? max,
+          bool close = true,
+          void Function()? onCancel,
+        }) {
+          final body = StreamController<List<int>>(onCancel: onCancel);
+          chunks.forEach(body.add);
+          if (close) body.close();
+          final client = MockClient.streaming(
+            (req, _) async => http.StreamedResponse(
+              body.stream,
+              200,
+              // (the client reads the size from this header)
+              headers: {
+                'content-type': 'application/json; charset=utf-8',
+                'content-length': '$announced',
+              },
+            ),
+          );
+          return max == null
+              ? GoogleDriveRemote(client)
+              : GoogleDriveRemote(client, maxReadBytes: max);
+        }
+
+        test('exactly the limit is read, one byte more is refused', () async {
+          expect(
+            await server(10, [utf8.encode('0123456789')], max: 10).read('a'),
+            '0123456789',
+          );
+          await expectLater(
+            server(11, [utf8.encode('0123456789X')], max: 10).read('a'),
+            throwsA(isA<DriveFileTooBig>()),
+          );
+        });
+
+        test('a size over the limit is refused before the body is read', () {
+          // (one byte arrives, the server says eleven: the number in the
+          // exception is the announced one, not what was counted)
+          return expectLater(
+            server(11, [utf8.encode('x')], max: 10).read('a'),
+            throwsA(isA<DriveFileTooBig>().having((e) => e.bytes, 'bytes', 11)),
+          );
+        });
+
+        test('a refused answer is let go of, not left hanging', () async {
+          var cancelled = false;
+          final remote = server(
+            11,
+            [utf8.encode('x')],
+            max: 10,
+            close: false,
+            onCancel: () => cancelled = true,
+          );
+          await expectLater(remote.read('a'), throwsA(isA<DriveFileTooBig>()));
+          expect(cancelled, isTrue);
+        });
+
+        test(
+          'the limit of the app is the one a remote has by default',
+          () async {
+            // a megabyte more than the limit is announced: no limit was given
+            await expectLater(
+              server(driveMaxReadBytes + 1, [utf8.encode('x')]).read('a'),
+              throwsA(isA<DriveFileTooBig>()),
+            );
+            expect(
+              await server(driveMaxReadBytes, [utf8.encode('x')]).read('a'),
+              'x',
+            );
+          },
+        );
+      });
 
       test('the limit of the app is a few megabytes', () {
         expect(driveMaxReadBytes, greaterThanOrEqualTo(5 * 1024 * 1024));

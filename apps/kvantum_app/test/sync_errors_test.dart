@@ -299,7 +299,10 @@ void main() {
     });
 
     test('a binding mismatch knows whether the ACCOUNT changed', () {
-      const same = RemoteIdentity(account: 'anna@example.com', calendar: 'cal-2');
+      const same = RemoteIdentity(
+        account: 'anna@example.com',
+        calendar: 'cal-2',
+      );
       const other = RemoteIdentity(
         account: 'bela@example.com',
         calendar: 'cal-9',

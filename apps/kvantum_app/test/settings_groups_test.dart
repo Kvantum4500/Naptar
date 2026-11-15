@@ -322,7 +322,10 @@ void main() {
         state: signedIn(
           mismatch: const SyncBindingMismatch(
             stored: RemoteIdentity(account: 'anna@example.com', calendar: 'c1'),
-            current: RemoteIdentity(account: 'bela@example.com', calendar: 'c2'),
+            current: RemoteIdentity(
+              account: 'bela@example.com',
+              calendar: 'c2',
+            ),
           ),
         ),
       );

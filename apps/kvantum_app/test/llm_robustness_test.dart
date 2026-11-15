@@ -608,6 +608,10 @@ void main() {
         'ya29 is a number, 1//0 a fraction',
         'GOCSPX- without more',
         'a/1//path',
+        // a key has at least ten characters after its start: shorter is a word
+        'ghp_abc and gho_12345 and sk-x',
+        // a refresh token starts a word, it is not the end of another
+        'v21//0abcdefghijkl',
       ]) {
         expect(redactSecrets(text), text, reason: text);
       }

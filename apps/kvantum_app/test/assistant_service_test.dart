@@ -743,6 +743,15 @@ void main() {
         }
       });
 
+      test('a pair that ends exactly at the limit stays whole', () {
+        // the two units of the emoji are the last two before the limit
+        final text = '${'a' * (handbookPromptMaxChars - 2)}😀tovább';
+        expect(
+          boundedHandbook(text),
+          '${'a' * (handbookPromptMaxChars - 2)}😀…',
+        );
+      });
+
       test(
         'the prompt block is bounded, the editor keeps the whole text',
         () async {
