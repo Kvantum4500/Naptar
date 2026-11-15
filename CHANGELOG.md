@@ -2,6 +2,39 @@
 
 A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elöl.
 
+## 6. kör, 2. rész – a repó nyilvános: biztonsági átvilágítás
+
+**A repó 2026-11-14 óta nyilvános, ezért átnéztem a git-előzményt, a kiadási folyamatot (GitHub Actions) és az appot a támadó szemével. A forrás és az előzmény tiszta (nincs valódi jelszó, kulcs vagy aláíró kulcstár); három dolog kapott más súlyt: a kiadásokba épített GitHub-kulcs, a Drive-ról érkező fájlok megbízása és a repó beállításai.** Natív kód (Kotlin, C++, manifest) nem változott; a felületen egy új hibaüzenet és két új súgósor jelent meg.
+
+**1. A frissítő kulcs nélkül működik**
+- A kiadások nyilvánosak, ezért az app névtelenül kérdezi le őket: a `Frissítés keresése` már nem küld GitHub-kulcsot (az `UPDATE_TOKEN` opcionális marad, hogy a régi beállítás is működjön). A „nincs beállítva a frissítés” hiba megszűnt.
+- **Új üzenet:** névtelenül óránként 60 kérés jut egy hálózati címre; ha a GitHub korlátoz (429, vagy 403 + nulla maradék kérés), az app ezt mondja: „A GitHub átmenetileg korlátozza a kérések számát…”, és az **Újrapróbál** gomb kínálja a következő próbát. Kulcs nélküli build soha nem mondja, hogy „érvénytelen kulcs”.
+- **A régi buildek (a 85-ösig)** tartalmaznak egy csak olvasó GitHub-kulcsot; a kulcs megszüntetésének sorrendje (a titok törlése → új build → telepítés minden eszközre → és csak azután a kulcs visszavonása) a [`docs/frissito-kulcs.md`](docs/frissito-kulcs.md)-ben van.
+
+**2. A naplótisztító ismeri a GitHub- és Google-kulcsok alakját**
+- A Diagnosztika-jelentésből és a naplóból kimarad a `github_pat_…`, `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_…`, a `GOCSPX-…` (Google-kliens titok), a `ya29.…` (hozzáférési) és az `1//0…` (frissítő token); a hasonló szavak és az előtag önmagában nem kulcs.
+
+**3. A Drive-ból érkező fájl külső bemenet (négy védelem)**
+- **Olvasási korlát:** egy Drive-fájlból legföljebb 8 MB (a szerver hirdette méret és a tényleg érkezett bájtok szerint is); a nagyobb fájl kimarad, nem tölti be a memóriát.
+- **Őrült jövőbeli időbélyeg:** a 365 napnál messzebbi bélyegű rekord (feladat, check-in, Kézikönyv, pénzügyi levél) nem érvényesül; a kisebb óraeltérést a program továbbra is elfogadja (a REL-9 döntése: óraeltérésnél nem vész el adat).
+- **Lezáratlan mentés:** a Drive-mentés visszaállítása elutasítja a jelszóval le nem zárt zipet („Ez a Drive-másolat nincs jelszóval lezárva… Nem állítom vissza.”): a program mindig lezárva tölt fel, tehát a lezáratlan másolatot valaki más írta.
+- **Kézikönyv:** a Drive-ból érkező kézikönyv-rekord a modell felé legföljebb 12 000 karakter (a szerkesztő a teljes szöveget mutatja).
+- **A pénzügyi postaláda:** a 8 MB-nál nagyobb levelet vagy társ-jegyzetet nem olvassa be, nem is törli (nem a miénk): a levél „nem kezelhető”-ként számít (a Drive-on marad, a többi levél alkalmazódik, a kör nem áll le), a jegyzetet sérültnek veszi (két teszt).
+- **Nem készült:** a naptár-választás szigorítása (SEC-10): élő Google-ellenőrzés kell hozzá, és a meglévő kötést törhetné.
+
+**4. Rendezés a nyilvánossághoz**
+- Új [`SECURITY.md`](SECURITY.md) (privát bejelentés, mi nem hiba); README „Nyilvános repó” rész; a `.gitignore` titok- és adatmintákkal bővült (a `secrets.example.json` kivétel); a tesztekben a valódi tartományú példa-címek `example.com`-ra cserélődtek.
+- Az audit-naplóból a még nyitott biztonsági tételek (SEC-1, 6, 10, 16, 17, 18, 19) részletei – hely, támadási út, javítási terv – kikerültek; a kész tételek és az ismert korlátok maradtak.
+
+**5. A workflow-PR-ban (#5, piszkozat; a beolvasztás a tulajdonosé)**
+- A buildből kikerül az `UPDATE_TOKEN`; a harmadik féltől való akciók (`softprops/action-gh-release`, `subosito/flutter-action`, `dart-lang/setup-dart`) commit-azonosítóra vannak rögzítve (a címke megjegyzésben, ugyanaz a kód, amelyet a főverzió-címke ma is jelöl); az artifactok 3 napig élnek; az „Android keystore (egyszeri)” workflow törölve (nyilvános repóban az aláíró kulcsot egy napra letölthetővé tenné); új `dependabot.yml` (heti javaslat a GitHub-akciók újabb verzióira, magától semmit nem olvaszt be).
+
+**6. Ellenőrzés**
+- **Szándékos elrontások:** 56 (token nélküli frissítő 14, kulcs-alakok 10, Drive-olvasási korlát 9, a motor és az őrült bélyeg 8, lezáratlan zip 8, kézikönyv-korlát 7). Az első körben 48-at fogtak meg a tesztek; a 8 túlélő nyomán 6 új és 1 bővített teszt készült (a googleapis a hirdetett méretet a `content-length` FEJLÉCBŐL olvassa, ezért az eddigi tesztekben az a ág soha nem futott), és az újrafuttatás után mind az 56 elbukik.
+- **Mátrix:** friss klónok Flutter 3.47.9 és 3.50.0 / Dart 3.14.0 alatt (elemző, formázás és minden teszt zöld: app 2 795, mag 1 585; a két postaláda-teszt után app 2 797), három időzóna (Budapest, Los Angeles, Auckland) és UTC, véletlen sorrend, négy párhuzamos CPU-terhelés mellett is. A tesztnevek leltára szerint az előző állapotból kettő hiányzik, mindkettő szándékos csere: azt rögzítették, hogy kulcs nélkül „nincs beállítva a frissítés” (ez megszűnt); helyettük a kulcs nélküli ellenőrzés tesztjei vannak.
+- **A workflow-PR (#5) CI-ja** az új ágon először élesen futott, és zöld (a rögzített akciókkal, a formázás- és lefedettség-lépéssel; [futás](https://github.com/Kvantum4500/Naptar/actions/runs/43674529651)).
+- **Tanulság:** a formázás-ellenőrzés minden commit előtt fut: az example.com-os cserék két sora átlépte a 80 oszlopot, és a CI-n bukott volna.
+
 ## 6. kör, 1. rész – műszak utáni alvás, hibatűrő pénzügyi postaláda, modell-tartalék, a CI első hibája
 
 **Új: az asszisztens tudja, hogy éjszakás műszak után nappal alszol; egy hibás pénzügyi levél nem állítja meg a többit; ha a kiválasztott modell kerete elfogyott vagy a modell megszűnt, az asszisztens a szolgáltató másik modelljére vált, és megmondja.** Natív kód (Kotlin, C++, manifest) nem változott; a felület-változás csak új üzenet (lásd lent).
