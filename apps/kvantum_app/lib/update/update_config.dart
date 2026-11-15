@@ -1,7 +1,10 @@
 import 'update_signature.dart';
 
-/// Self-update settings. The token is a read-only GitHub token (Contents: read,
-/// only this repository) injected at build time with --dart-define=UPDATE_TOKEN.
+/// Self-update settings. The repository is public, so the updater needs no
+/// key: the token below is OPTIONAL (a read-only GitHub token, Contents: read,
+/// only this repository, injected at build time with --dart-define=UPDATE_TOKEN)
+/// and the builds are made without one. It stays supported for the builds that
+/// were made with one.
 class UpdateConfig {
   static const token = String.fromEnvironment('UPDATE_TOKEN');
   static const repo = String.fromEnvironment(
@@ -23,8 +26,6 @@ class UpdateConfig {
   static const requireSignature = bool.fromEnvironment(
     'UPDATE_REQUIRE_SIGNATURE',
   );
-
-  static bool get configured => token.isNotEmpty;
 }
 
 /// The settings the updater runs with: what the build has in it (see

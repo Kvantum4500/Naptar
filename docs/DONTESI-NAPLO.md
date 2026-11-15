@@ -12,7 +12,12 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 ### 2026-11-10 – Privát repó, csak olvasó token a frissítéshez (felhasználó)
 - **Miért:** nincs nyilvános kiadási csatorna; a token csak olvas.
 - **Másik út:** külön nyilvános kiadási repó (token nélkül).
-- **Következmény:** a token a binárisból kinyerhető (csak olvas, de a privát repó kiadásait megnyitja) és lejár: figyelmeztetés 14 nappal előtte, útmutató a cseréhez ([`frissito-kulcs.md`](frissito-kulcs.md)); a hitelességet az aláírás pótolja (alább).
+- **Következmény:** a token a binárisból kinyerhető (csak olvas, de a privát repó kiadásait megnyitja) és lejár: figyelmeztetés 14 nappal előtte, útmutató a cseréhez ([`frissito-kulcs.md`](frissito-kulcs.md)); a hitelességet az aláírás pótolja (alább). **Felülírta:** [2026-11-15](#2026-11-15--a-repó-nyilvános-felhasználó-a-frissítő-kulcs-nélkül-működik).
+
+### 2026-11-15 – A repó nyilvános (felhasználó); a frissítő kulcs nélkül működik
+- **Miért:** a privát repó Actions-kerete elfogyott, nyilvános repón az Actions ingyenes; a biztonsági átvizsgálás (git-előzmény, Actions, az app támadási felülete) nem talált a repóban valódi titkot.
+- **Másik út:** a repó privát marad, és a build a havi keretre vár vagy fizetős; vagy külön nyilvános kiadási repó.
+- **Következmény:** a kiadások (és bennük a beépített Google-kliens kulcsai) bárkinek letölthetők és kinyerhetők; asztali appnál ezt a Google nem tekinti titoknak, a forgatás nem old meg semmit (az új build is tartalmazza), ezért csak visszaélésnél forgatunk. A frissítő **már nem használ kulcsot** (névtelen, óránként 60 kérés egy hálózati címre; a régi buildekbe épített token még működik). Sorrend a kulcs megszüntetésénél: az `UPDATE_TOKEN` titok törlése → új build → telepítés minden eszközre → **csak azután** a GitHub-kulcs visszavonása (különben a régi app nem frissül). A kulcs nélküli frissítő kizárja a „privát repó” feltevést; az aláírt frissítés (alább) továbbra is a hitelesség egyetlen valódi védelme.
 
 ### 2026-11-10 – Falióra-idő + IANA zóna; az ismétlődés falióra-időben fut; egy megjelenítési zóna
 - **Miért:** így csinálja a Google; a nyári időszámítás magától helyes (a 12 napos műszakciklus is faliórán).

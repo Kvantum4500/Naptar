@@ -76,16 +76,20 @@ void main() {
       expect(buildFromTag('build-x'), isNull);
     });
 
-    test('no token -> clear message, no network call', () async {
-      var called = false;
-      final r = await svc((_) async {
-        called = true;
-        return _json({});
-      }, token: '').check(1);
-      expect(r, isA<UpdateFailed>());
-      expect((r as UpdateFailed).kind, UpdateErrorKind.notConfigured);
-      expect(called, isFalse);
-    });
+    test(
+      'no token: the check goes out anonymously (the repository is public)',
+      () async {
+        late http.Request seen;
+        final r = await svc((req) async {
+          seen = req;
+          return _json(release(9));
+        }, token: '').check(5);
+        expect(r, isA<UpdateAvailable>());
+        expect(seen.headers.containsKey('Authorization'), isFalse);
+        expect(seen.headers['X-GitHub-Api-Version'], '2022-11-28');
+        expect(seen.url.path, '/repos/o/r/releases/latest');
+      },
+    );
 
     test(
       'newer release is offered with the right platform asset and checksum',
@@ -145,6 +149,82 @@ void main() {
       expect(
         await kind((_) async => _json(release(9, names: ['readme.txt']))),
         UpdateErrorKind.noPackage,
+      );
+    });
+
+    test('"too many requests" is told as that, not as a bad key', () async {
+      http.Response limited(int status, {String left = '0'}) => http.Response(
+        '{}',
+        status,
+        headers: {
+          'x-ratelimit-remaining': left,
+          'content-type': 'application/json',
+        },
+      );
+      Future<UpdateFailed> fail(
+        MockClientHandler h, {
+        String token = 'tok',
+      }) async => (await svc(h, token: token).check(1)) as UpdateFailed;
+      // with a key: a 403 with no calls left, and a 429, are the limit
+      expect(
+        (await fail((_) async => limited(403))).kind,
+        UpdateErrorKind.rateLimited,
+      );
+      expect(
+        (await fail((_) async => limited(429, left: '12'))).kind,
+        UpdateErrorKind.rateLimited,
+      );
+      // a 403 with calls left is the key
+      expect(
+        (await fail((_) async => limited(403, left: '4999'))).kind,
+        UpdateErrorKind.badToken,
+      );
+      // without a key the words name the limit of the shared address
+      final anon = await fail((_) async => limited(403), token: '');
+      expect(anon.kind, UpdateErrorKind.rateLimited);
+      expect(anon.message, contains('óránként 60'));
+      final keyed = await fail((_) async => limited(403));
+      expect(keyed.message, isNot(contains('óránként 60')));
+      expect(keyed.message, contains('korlátozza'));
+    });
+
+    test(
+      'without a key a refusal is never "your key", just unexpected',
+      () async {
+        Future<UpdateErrorKind> kind(int status) async => ((await svc(
+          (_) async => _json({}, status),
+          token: '',
+        ).check(1)) as UpdateFailed).kind;
+        expect(await kind(401), UpdateErrorKind.other);
+        expect(await kind(403), UpdateErrorKind.other);
+      },
+    );
+
+    test('no release: the words depend on whether a key was sent', () async {
+      Future<String> text(
+        String token,
+        MockClientHandler h, {
+        bool previews = false,
+      }) async => ((await svc(
+        h,
+        token: token,
+      ).check(1, includePreviews: previews)) as UpdateFailed).message;
+      expect(
+        await text('', (_) async => _json({}, 404)),
+        'Még nincs kiadott verzió.',
+      );
+      expect(
+        await text('tok', (_) async => _json({}, 404)),
+        contains('hozzáférési kulcs'),
+      );
+      // the list of the releases (with previews) says it the same way
+      expect(
+        await text('', (_) async => _json([]), previews: true),
+        'Még nincs kiadott verzió.',
+      );
+      expect(
+        await text('tok', (_) async => _json([]), previews: true),
+        contains('hozzáférési kulcs'),
       );
     });
 
@@ -497,14 +577,45 @@ void main() {
       expect(find.textContaining('Naprakész vagy'), findsOneWidget);
     });
 
-    testWidgets('no token explains what is missing', (tester) async {
-      await tester.pumpWidget(host(service((_) async => _json({}), token: '')));
+    testWidgets('no token: the check still runs (the repository is public)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(service((_) async => _json(release(5)), token: '')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
+      expect(find.textContaining('nincs beállítva a frissítés'), findsNothing);
+      expect(find.textContaining('UPDATE_TOKEN'), findsNothing);
+    });
+
+    testWidgets('too many requests: told, with a retry that works later', (
+      tester,
+    ) async {
+      var limited = true;
+      await tester.pumpWidget(
+        host(
+          service((_) async {
+            if (limited) {
+              return http.Response(
+                '{}',
+                403,
+                headers: {'x-ratelimit-remaining': '0'},
+              );
+            }
+            return _json(release(5));
+          }, token: ''),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('nincs beállítva a frissítés'),
+        find.textContaining('korlátozza a kérések számát'),
         findsOneWidget,
       );
-      expect(find.textContaining('UPDATE_TOKEN'), findsNothing);
+      limited = false;
+      await tester.tap(find.text('Újrapróbál'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
     });
 
     testWidgets('expired token has its own message', (tester) async {

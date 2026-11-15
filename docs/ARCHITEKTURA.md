@@ -106,7 +106,7 @@ Helyben, modell nélkül válaszol (`local_answers`): a költségkeretre és a n
 
 ## Frissítés és aláírás
 
-Az `update_service` a csak olvasó tokennel kérdezi le a GitHub kiadásait, csak kézi indításra. A letöltés szigorú: a token csak a GitHub API-nak megy (https, azonos hoszt és port), a méret és az SHA-256 egyezik, plafon 400 MB, és a telepítés előtt újra-hash. **Aláírás (fokozatosan):** ha az appba nyilvános Ed25519-kulcs van építve és a kiadásnak van `.sig` fájlja, az érvénytelen aláírás elutasítva és a fájl törölve; kulcs nélkül minden a régi. Útmutató: [`alairt-frissites.md`](alairt-frissites.md), [`frissito-kulcs.md`](frissito-kulcs.md). A Windows-csere hibánál visszaállít.
+Az `update_service` kulcs nélkül, névtelenül kérdezi le a GitHub nyilvános kiadásait, csak kézi indításra (a kérés-korlát: óránként 60 egy hálózati címre; a 403 + `x-ratelimit-remaining: 0` és a 429 „kérés-korlát” üzenet, nem hibás kulcs). A korábbi buildekbe épített opcionális csak olvasó token továbbra is támogatott, de csak a GitHub API-nak megy (https, azonos hoszt és port). A letöltés szigorú: a méret és az SHA-256 egyezik, plafon 400 MB, és a telepítés előtt újra-hash. **Aláírás (fokozatosan):** ha az appba nyilvános Ed25519-kulcs van építve és a kiadásnak van `.sig` fájlja, az érvénytelen aláírás elutasítva és a fájl törölve; kulcs nélkül minden a régi. Útmutató: [`alairt-frissites.md`](alairt-frissites.md), [`frissito-kulcs.md`](frissito-kulcs.md). A Windows-csere hibánál visszaállít.
 
 ## Mi hagyja el az eszközt
 

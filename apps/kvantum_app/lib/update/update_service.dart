@@ -71,8 +71,8 @@ class UpdateAvailable extends UpdateStatus {
 }
 
 enum UpdateErrorKind {
-  notConfigured,
   badToken,
+  rateLimited,
   network,
   noRelease,
   noPackage,
@@ -209,10 +209,21 @@ class UpdateService {
   /// installed.
   final _verified = <String, String>{};
 
+  /// The headers every call to the API has. The token is optional: the
+  /// repository is public, so the API answers without one (60 calls an hour
+  /// for one network address); a build that still has a token sends it as
+  /// before (to the API only, see [isUpdateApiUrl]).
   Map<String, String> get _auth => {
-    'Authorization': 'Bearer $token',
+    if (token.isNotEmpty) 'Authorization': 'Bearer $token',
     'X-GitHub-Api-Version': '2022-11-28',
   };
+
+  /// What to say when there is no release (a build with a token may be
+  /// refused by the token, one without cannot).
+  String get _noReleaseText => token.isEmpty
+      ? 'Még nincs kiadott verzió.'
+      : 'Még nincs kiadott verzió (vagy a hozzáférési kulcs nem éri el a '
+            'tárolót).';
 
   /// Compares the running [currentBuild] with the latest release. With
   /// [includePreviews] the newest published build counts, pre-releases (builds
@@ -222,13 +233,6 @@ class UpdateService {
     int currentBuild, {
     bool includePreviews = false,
   }) async {
-    if (token.isEmpty) {
-      return const UpdateFailed(
-        UpdateErrorKind.notConfigured,
-        'Ebben a buildben nincs beállítva a frissítés, ezért itt nem lehet '
-        'frissíteni. Telepítsd a legújabb csomagot a kiadások oldaláról.',
-      );
-    }
     if (platform == UpdatePlatform.other) {
       return const UpdateFailed(
         UpdateErrorKind.unsupported,
@@ -263,7 +267,25 @@ class UpdateService {
         'A kiszolgáló nem válaszolt időben.',
       );
     }
-    if (res.statusCode == 401 || res.statusCode == 403) {
+    // GitHub says "too many requests" with a 429, or with a 403 that has no
+    // calls left: that is no fault of a key, it passes (without a key the
+    // limit is shared by everybody on the same network address)
+    if (res.statusCode == 429 ||
+        (res.statusCode == 403 &&
+            res.headers['x-ratelimit-remaining'] == '0')) {
+      return UpdateFailed(
+        UpdateErrorKind.rateLimited,
+        token.isEmpty
+            ? 'A GitHub átmenetileg korlátozza a kérések számát (kulcs nélkül '
+                  'óránként 60 kérés jut egy hálózati címre, és egy közös '
+                  'hálózaton mások is fogyasztják). Próbáld újra egy kicsit '
+                  'később.'
+            : 'A GitHub átmenetileg korlátozza a kérések számát. Próbáld újra '
+                  'egy kicsit később.',
+      );
+    }
+    // (only a build that sent a key can be refused for it)
+    if (token.isNotEmpty && (res.statusCode == 401 || res.statusCode == 403)) {
       return const UpdateFailed(
         UpdateErrorKind.badToken,
         'A frissítés hozzáférési kulcsa érvénytelen vagy lejárt. Új kulcsot '
@@ -271,11 +293,7 @@ class UpdateService {
       );
     }
     if (res.statusCode == 404) {
-      return const UpdateFailed(
-        UpdateErrorKind.noRelease,
-        'Még nincs kiadott verzió (vagy a hozzáférési kulcs nem éri el a '
-        'tárolót).',
-      );
+      return UpdateFailed(UpdateErrorKind.noRelease, _noReleaseText);
     }
     if (res.statusCode != 200) {
       return UpdateFailed(
@@ -298,11 +316,7 @@ class UpdateService {
         }
       }
       if (best == null) {
-        return const UpdateFailed(
-          UpdateErrorKind.noRelease,
-          'Még nincs kiadott verzió (vagy a hozzáférési kulcs nem éri el a '
-          'tárolót).',
-        );
+        return UpdateFailed(UpdateErrorKind.noRelease, _noReleaseText);
       }
       json = best;
     } else {

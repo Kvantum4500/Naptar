@@ -1,44 +1,37 @@
-# A frissítő kulcs (UPDATE_TOKEN): mi ez, mikor jár le, hogyan cseréld
+# A frissítő kulcs (UPDATE_TOKEN): már nem kell
 
-## Mi ez
+## Röviden
 
-A Kvantum Naptár privát GitHub-tárolóban van, ezért a kiadásokat (a Windows-zipet és az Android-APK-t) csak hozzáféréssel lehet letölteni. Az app a „Frissítés keresése” gombbal ezt egy **csak olvasó GitHub-kulccsal** (`UPDATE_TOKEN`) teszi. A kulcs **be van építve az appba**, ezért aki az app fájljait megnyitja, kiolvashatja. Ezért:
+A Kvantum Naptár tárolója **nyilvános** (2026-11-14 óta), ezért a kiadások kulcs nélkül is elérhetők. Az ezután készülő buildek **nem tartalmaznak** frissítő kulcsot, és az app névtelenül kérdezi le a kiadásokat a *Frissítés keresése* gombbal. Ennek ára egyetlen korlát: a GitHub névtelen kérésekből **óránként 60-at** enged egy hálózati címről (egy közös hálózaton, pl. hotspoton mások is fogyasztják). Ha eléri, az app megmondja („A GitHub átmenetileg korlátozza a kérések számát”), és az **Újrapróbál** gombbal később ismét próbálható. Az ellenőrzés csak kézi indításra fut, így ez ritkán jön szóba.
 
-- a kulcs **csak olvashat** (Contents: Read-only), és **csak ezt az egy tárolót** éri el: ha valaki kiolvassa, a tároló tartalmát (forráskód, kiadások) elolvashatja, de írni és törölni nem tud, a többi tárolódat nem éri el;
-- **lejár** (a GitHub finomhangolt kulcsai általában legföljebb egy évig élnek; a tárolóra vagy szervezetre vonatkozó szabály ezt szűkítheti), ezért időnként cserélni kell.
+## A régi buildekről (a 85-ösig)
 
-## Mi történik, ha lejár
+A korábbi buildekbe csak olvasó GitHub-kulcs (`UPDATE_TOKEN`) volt építve, mert a tároló akkor privát volt. Mivel a kiadások most nyilvánosak, **ez a kulcs a letölthető csomagokból bárkinek kinyerhető**. A hatásán a *hatóköre* múlik:
 
-A telepített appok a régi, lejárt kulcsot hordozzák, ezért utána **nem találnak új verziót** („A frissítés hozzáférési kulcsa érvénytelen vagy lejárt”). Új kulccsal készült buildet ilyenkor **kézzel** kell telepíteni minden eszközre. Ha viszont a kulcsot **a lejárat előtt** cseréled, és egy új buildet még a régi kulcs lejárta előtt kiadsz, az appok maguktól frissítenek rá, és már az új kulcsot hordozzák – semmit nem kell kézzel telepíteni.
+- a jó beállítás: *Fine-grained token*, *Repository access* = csak a `Naptar`, *Contents: Read-only* (a *Metadata: Read-only* magától bekerül), semmi más. Ilyen kulccsal egy kinyerő is csak azt olvashatja, ami már nyilvános;
+- ha ennél több (pl. más tárolók, írási jog, *Tokens (classic)*): **azonnal vond vissza** (lent), mert más privát tárolóidat is megnyithatja.
 
-## Az app figyelmeztet a lejárat előtt
+Ellenőrzés: GitHub → profilkép → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → a `kvantum-naptar-frissites` kulcs.
 
-A GitHub a lejáró kulccsal kapott válaszokban megadja a lejárat idejét. A **Frissítés keresése** ablak ezt kiolvassa, és ha a kulcs **14 napon belül** lejár (vagy lejárt), ezt írja ki, jellel és szöveggel:
+## A kulcs megszüntetése: a sorrend számít
+
+A régi appok a kulcsukat küldik minden kéréssel, és a GitHub a **visszavont** kulcsot akkor is elutasítja (401), ha az adat nyilvános. Ezért:
+
+1. A tároló oldalán *Settings* → *Secrets and variables* → *Actions* → *Secrets* → az `UPDATE_TOKEN` titkot **töröld** (a build ilyenkor üres kulcsot épít be).
+2. Új build (egy `[build]` jelölésű commit vagy a **Build apps** futás kézi indítása).
+3. Telepítsd az új buildet **minden eszközödre** (a régi kulccsal még működő *Frissítés keresése* gombbal, vagy kézzel a kiadások oldaláról; Windows: kicsomagolás előtt a zip tulajdonságainál a **Feloldás** négyzet).
+4. **Csak ezután** vond vissza a GitHub-kulcsot: *Settings* → *Developer settings* → a kulcs → *Delete* / *Revoke*.
+
+Ha a kulcsot már előbb visszavontad (vagy lejárt): a régi app az „érvénytelen vagy lejárt” üzenetet mutatja, és nem talál új verziót. Ilyenkor töltsd le a legújabb csomagot a kiadások oldaláról, és telepítsd kézzel; az már kulcs nélkül frissít.
+
+## Az app figyelmeztetése (csak a régi buildeken)
+
+Az a build, amelyikbe kulcs van építve, a GitHub válaszából kiolvassa a kulcs lejáratát (`github-authentication-token-expiration` fejléc), és 14 nappal előtte a *Frissítés keresése* ablakban figyelmeztet:
 
 > A frissítő kulcs 9 nap múlva lejár; utána az app nem talál új verziót. Új kulcs kell hozzá, és az appot utána egyszer kézzel kell újratelepíteni (leírás: docs/frissito-kulcs.md).
 
-Fontos tudni:
+A kulcs nélküli buildekben ez a figyelmeztetés soha nem jelenik meg (a GitHub csak a lejáró kulccsal kapott válaszokban küldi a fejlécet).
 
-- a figyelmeztetés csak akkor jelenik meg, ha **megnyitod** a Frissítés ablakot (a program nem keres magától);
-- csak akkor van rajta, ha a GitHub ezt a fejlécet ténylegesen elküldi – ezt élőben még nem láttam, ezért **ne csak erre építs**: írd fel a kulcs lejáratát a saját naptáradba, **két héttel előbbre** emlékeztetővel.
+## Mi védi most a frissítést?
 
-## A kulcs cseréje (lépésről lépésre)
-
-1. **Új kulcs készítése.** GitHub → a profilképed → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*.
-   - Név: `kvantum-naptar-frissites`
-   - *Expiration*: a leghosszabb, amit a GitHub enged (általában egy év); a lejáratot jegyezd fel.
-   - *Resource owner*: a saját felhasználód.
-   - *Repository access*: **Only select repositories** → csak a `Naptar`.
-   - *Permissions* → *Repository permissions* → **Contents: Read-only** (a *Metadata: Read-only* magától bekerül); semmi más.
-   - *Generate token*, majd másold ki a kulcsot (csak egyszer látszik).
-2. **A titok átírása.** A tároló oldalán *Settings* → *Secrets and variables* → *Actions* → *Secrets* → `UPDATE_TOKEN` → *Update* → illeszd be az új kulcsot.
-3. **Új build.** Egy `[build]` jelölésű commit vagy a **Build apps** futás kézi indítása. Az új build már az új kulcsot hordozza.
-4. **Telepítés.** Amíg a régi kulcs él, az appok a *Frissítés keresése* gombbal maguktól átállnak az új buildre. Ha a régi kulcs már lejárt: a kiadás oldaláról (a GitHubon belépve) töltsd le a zipet / az APK-t, és telepítsd kézzel (Windows: kicsomagolás előtt a zip tulajdonságainál a **Feloldás** négyzet).
-5. A régi kulcsot a GitHubon *Settings* → *Developer settings* alatt **töröld**, miután minden gép az újon van.
-
-## Ha nem szeretnéd, hogy az app a tárolót kulccsal érje el
-
-A kulcs kényelmi ár: a privát tároló kiadásainak elérése kulcs nélkül nem megy. Két lehetőség van (egyik sem kell most):
-
-- **Nyilvános kiadási tároló**: a csomagok egy külön, nyilvános tárolóba kerülnek (forráskód nélkül), és az app kulcs nélkül tölt le. Ekkor nincs mit kiolvasni, nincs lejárat. A kiadás ellenőrzését az [aláírt frissítés](alairt-frissites.md) adja.
-- **Az aláírás bekapcsolása**: ha a kulcsot valaki mégis kiolvassa, csak olvasni tud; az aláírt kiadást nem tudja hamisítani. Lásd: [alairt-frissites.md](alairt-frissites.md).
+Kulcs nélkül is ugyanaz a védelem érvényes, mint eddig: a csomag mérete és SHA-256 összege egyezik, a letöltés legföljebb 400 MB, és telepítés előtt újra-hash fut. A **hitelességet** (hogy tényleg te adtad ki) az [aláírt frissítés](alairt-frissites.md) adná; ez kész, de te kapcsolod be. Addig a frissítés biztonsága a GitHub-fiókodén múlik: legyen rajta passkey / kétlépcsős belépés.

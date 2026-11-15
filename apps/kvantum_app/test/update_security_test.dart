@@ -96,10 +96,11 @@ UpdateService service(
   bool require = false,
   List<String>? log,
   int cap = maxUpdatePackageBytes,
+  String token = 'tok',
 }) => UpdateService(
   client: MockClient(h),
   repo: 'o/r',
-  token: 'tok',
+  token: token,
   platform: UpdatePlatform.windows,
   publicKeys: keys,
   requireSignature: require,
@@ -509,6 +510,26 @@ void main() {
       expect(tokenOf(log, shaUrl), 'Bearer tok');
       expect(tokenOf(log, sigUrl), 'Bearer tok');
     });
+
+    test(
+      'a build without a token sends none anywhere, and still downloads',
+      () async {
+        final s = Server();
+        final f = await service(s.call, token: '').download(info(), dir);
+        expect(f.readAsBytesSync(), pkg85);
+        expect(s.log, isNotEmpty);
+        for (final r in s.log) {
+          expect(
+            r.headers.containsKey('Authorization'),
+            isFalse,
+            reason: '${r.url}',
+          );
+        }
+        // (the API keeps naming its version, the key or not)
+        final api = s.log.firstWhere((r) => r.url.toString() == pkgUrl);
+        expect(api.headers['X-GitHub-Api-Version'], '2022-11-28');
+      },
+    );
 
     test('another host does not, even one that starts like the API', () async {
       for (final url in [

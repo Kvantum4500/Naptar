@@ -354,6 +354,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         case UpdateFailed():
           content = Text(s.message);
           if (s.kind == UpdateErrorKind.network ||
+              s.kind == UpdateErrorKind.rateLimited ||
               s.kind == UpdateErrorKind.other) {
             actions = [
               TextButton(onPressed: _check, child: const Text('Újrapróbál')),
