@@ -2,13 +2,26 @@
 // user copies out of the app. Nothing here is trusted to be free of personal
 // data, so the rule is: keep the kind of thing that went wrong, drop the rest.
 
+/// Keys that start with a known word: the AI services (sk-, gsk_, AIza), the
+/// GitHub tokens (github_pat_ for the fine-grained ones; ghp_, gho_, ghu_, ghs_,
+/// ghr_ for the personal, OAuth, user, server and refresh ones) and the Google
+/// OAuth client secret (GOCSPX-).
+final _prefixedKey = RegExp(
+  r'(sk-|gsk_|AIza|github_pat_|gh[pousr]_|GOCSPX-)[0-9A-Za-z_\-]{10,}',
+);
+
+/// The tokens Google hands out: access tokens (ya29.…) and refresh tokens
+/// (1//0…); both may hold dots, dashes and underscores.
+final _googleToken = RegExp(r'(ya29\.|\b1//0)[0-9A-Za-z._\-]{10,}');
+
 /// A service message without anything that looks like a key, bounded. [key] is
 /// the key in use: it is removed wherever it appears, whatever it looks like.
 String redactSecrets(String message, {String? key, int max = 400}) {
   var m = message;
   if (key != null && key.length >= 6) m = m.replaceAll(key, '[kulcs]');
   final clean = m
-      .replaceAll(RegExp(r'(sk-|gsk_|AIza)[0-9A-Za-z_\-]{10,}'), '[kulcs]')
+      .replaceAll(_prefixedKey, '[kulcs]')
+      .replaceAll(_googleToken, '[kulcs]')
       .replaceAll(
         RegExp(r'Bearer\s+[0-9A-Za-z._\-]{10,}', caseSensitive: false),
         'Bearer [kulcs]',

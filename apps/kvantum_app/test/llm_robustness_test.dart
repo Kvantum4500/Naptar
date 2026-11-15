@@ -579,6 +579,40 @@ void main() {
       expect(out, contains('end'));
     });
 
+    test(
+      'redactSecrets: GitHub and Google tokens go too (not only AI keys)',
+      () {
+        // (made-up values of the real shapes; the second part has dashes,
+        // underscores and dots, which the 32-letter rule alone would not catch)
+        const samples = {
+          'github_pat_11ABCDEFG0abcdefghijkl_MNOPQRSTUVWXYZ': 'fine-grained',
+          'ghp_abcdefghijklmnopqrstuvwxyz0123456789': 'personal',
+          'gho_abcdefghijkl': 'OAuth',
+          'ghu_abcdefghijkl': 'user',
+          'ghs_abcdefghijkl': 'server',
+          'ghr_abcdefghijkl': 'refresh',
+          'GOCSPX-abc_DEF-ghi123': 'Google client secret',
+          'ya29.a0AfH6SMB_x-y.z1234': 'Google access token',
+          '1//0gAbCdEf-GhIjKl_MnOp': 'Google refresh token',
+        };
+        for (final e in samples.entries) {
+          final out = redactSecrets('hiba ${e.key} vége');
+          expect(out, 'hiba [kulcs] vége', reason: e.value);
+        }
+      },
+    );
+
+    test('redactSecrets: ordinary text with the same letters stays', () {
+      for (final text in [
+        'ghost_town and ghp_ alone',
+        'ya29 is a number, 1//0 a fraction',
+        'GOCSPX- without more',
+        'a/1//path',
+      ]) {
+        expect(redactSecrets(text), text, reason: text);
+      }
+    });
+
     test('redactSecrets: bounded and on one line', () {
       final out = redactSecrets('a\n\n   b ${'x ' * 400}');
       expect(out.length, lessThanOrEqualTo(401));
