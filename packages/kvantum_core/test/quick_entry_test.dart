@@ -975,6 +975,79 @@ void main() {
     }
   });
 
+  group('the minutes of an hour are not the count of a repeat', () {
+    // "18:00 hetente": the "00" before "hetente" is part of the hour, not
+    // "0 hetente" (a repeat that never happens)
+    final cases = [
+      const Case(
+        '18:00 hetente edzés',
+        e,
+        'Edzés',
+        date: '2026-11-16',
+        start: '18:00',
+        minutes: 60,
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      ),
+      const Case(
+        '18:00 naponta edzés',
+        e,
+        'Edzés',
+        date: '2026-11-16',
+        start: '18:00',
+        minutes: 60,
+        rrule: 'FREQ=DAILY',
+      ),
+      const Case(
+        'edzés 18.30 hetente',
+        e,
+        'Edzés',
+        date: '2026-11-16',
+        start: '18:30',
+        minutes: 60,
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+      ),
+      const Case(
+        'edzés 8:10 naponta',
+        e,
+        'Edzés',
+        date: '2026-11-17',
+        start: '08:10',
+        minutes: 60,
+        rrule: 'FREQ=DAILY',
+      ),
+      // a real count after an hour is still a count
+      const Case(
+        'edzés 18:00 2 hetente',
+        e,
+        'Edzés',
+        date: '2026-11-16',
+        start: '18:00',
+        minutes: 60,
+        rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO',
+      ),
+      const Case(
+        'edzés 18:00 3 naponta',
+        e,
+        'Edzés',
+        date: '2026-11-16',
+        start: '18:00',
+        minutes: 60,
+        rrule: 'FREQ=DAILY;INTERVAL=3',
+      ),
+    ];
+    for (final c in cases) {
+      test(c.input, () => check(c));
+    }
+
+    test('a count of zero is no repeat count and breaks nothing', () {
+      for (final line in ['0 naponta edzés', '0 hetente edzés']) {
+        final q = parseQuickEntry(line, now: now);
+        expect(q.rrule, isNotNull, reason: line);
+        expect(q.rrule, isNot(contains('INTERVAL')), reason: line);
+      }
+    });
+  });
+
   group('the title', () {
     final cases = [
       const Case(

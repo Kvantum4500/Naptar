@@ -368,15 +368,19 @@ QuickEntry parseQuickEntry(String input, {required DateTime now}) {
     }
   }
   if (repeat == null) {
+    // (a number glued to an hour is the minutes of the hour: "18:00 naponta";
+    // a count of zero is no count: the plain "naponta" below takes it)
     m = src.find(
-      '\\b(?:(\\d{1,2}|$_nw)\\s*-?\\s*naponta|minden\\s+(masodik|harmadik)'
+      '\\b(?:(?<![\\d:.])(\\d{1,2}|$_nw)\\s*-?\\s*naponta|minden\\s+(masodik|harmadik)'
       '\\s+nap(?:on)?)\\b',
     );
     if (m != null) {
       final n = m.group(1) != null
           ? _num(m.group(1)!)
           : (m.group(2) == 'masodik' ? 2 : 3);
-      setRepeat(RecurrenceSpec(freq: RepeatFreq.daily, interval: n), m);
+      if (n >= 1) {
+        setRepeat(RecurrenceSpec(freq: RepeatFreq.daily, interval: n), m);
+      }
     }
   }
   if (repeat == null) {
@@ -385,12 +389,14 @@ QuickEntry parseQuickEntry(String input, {required DateTime now}) {
   }
   if (repeat == null) {
     m = src.find(
-      '\\b(?:(\\d{1,2}|$_nw)\\s*-?\\s*hetente|minden\\s+masodik\\s+'
+      '\\b(?:(?<![\\d:.])(\\d{1,2}|$_nw)\\s*-?\\s*hetente|minden\\s+masodik\\s+'
       'heten)\\b',
     );
     if (m != null) {
       final n = m.group(1) != null ? _num(m.group(1)!) : 2;
-      setRepeat(RecurrenceSpec(freq: RepeatFreq.weekly, interval: n), m);
+      if (n >= 1) {
+        setRepeat(RecurrenceSpec(freq: RepeatFreq.weekly, interval: n), m);
+      }
     }
   }
   if (repeat == null) {
