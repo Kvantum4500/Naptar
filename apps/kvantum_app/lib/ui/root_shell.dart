@@ -83,6 +83,9 @@ class _RootShellState extends ConsumerState<RootShell>
   /// Once a day: forgets old deletion markers and puts right what an
   /// interrupted run left behind.
   Future<void> _housekeeping() async {
+    // (what an older version kept on this device only moves into the synced
+    // settings first, so that the backup below holds it and the sync takes it)
+    await _takeOverSettings();
     try {
       final report = await ref.read(housekeepingProvider).runIfDue();
       if (report != null && report.requeued > 0 && mounted) {
@@ -95,6 +98,18 @@ class _RootShellState extends ConsumerState<RootShell>
     // (the backup comes after the upkeep, which may have tidied the data)
     await _autoBackup();
     await _driveBackup();
+  }
+
+  /// The goals, the pay settings and the wishes of the planner that an older
+  /// version kept on this device only become synced settings (once; it does
+  /// nothing when there is nothing to take over).
+  Future<void> _takeOverSettings() async {
+    try {
+      await ref.read(syncedSettingsProvider).takeOverOldSettings();
+    } catch (e, st) {
+      // the old values stay where they are and are tried again at the next start
+      ref.read(diagLogProvider).error('app', 'settings.takeover_failed', e, st);
+    }
   }
 
   /// The weekly encrypted copy in Drive (does nothing when it is switched off,

@@ -7,27 +7,21 @@ import 'package:kvantum_core/kvantum_core.dart';
 import '../providers.dart';
 import 'a11y.dart';
 
-/// Where the pay settings are kept: on this device only. They are not a record
-/// the sync copies, the assistant is never told of them, and the backup does
-/// not hold them (they have to be entered again on a new device).
-const paySettingsKey = 'pay.settings';
-
-class PaySettingsNotifier extends AsyncNotifier<PaySettings> {
+/// The pay settings: the wage and the premiums the user entered. They live in
+/// a synced record (see [SyncedSettings]), so they are entered once and are on
+/// every device; the assistant is never told of them, and the source guard in
+/// the tests keeps it so.
+class PaySettingsNotifier extends StreamNotifier<PaySettings> {
   @override
-  Future<PaySettings> build() async => PaySettings.decode(
-    await ref.watch(recordRepoProvider).meta(paySettingsKey),
-  );
+  Stream<PaySettings> build() => ref.watch(syncedSettingsProvider).watchPay();
 
-  Future<void> save(PaySettings settings) async {
-    await ref
-        .read(recordRepoProvider)
-        .setMeta(paySettingsKey, settings.encode());
-    state = AsyncData(settings);
-  }
+  /// Saves the settings (the other devices get them with the next sync).
+  Future<void> save(PaySettings settings) =>
+      ref.read(syncedSettingsProvider).savePay(settings);
 }
 
 final paySettingsProvider =
-    AsyncNotifierProvider<PaySettingsNotifier, PaySettings>(
+    StreamNotifierProvider<PaySettingsNotifier, PaySettings>(
       PaySettingsNotifier.new,
     );
 
@@ -145,8 +139,8 @@ class ShiftPayCard extends ConsumerWidget {
               'Becslés a beosztásból, nem bérszámfejtés: nem számol túlórát, '
               'jutalmat, adót és járulékot, a pótlékok pedig a te '
               'beállításaid. Egy műszak ahhoz a hónaphoz számít, amelyikben '
-              'kezdődik. Az adatok csak ezen az eszközön vannak: nem '
-              'szinkronizálódnak, és az asszisztensnek sem mennek el.',
+              'kezdődik. A beállításaid a többi eszközödre is átmennek '
+              '(szinkronizálódnak), az asszisztensnek viszont nem mennek el.',
               style: theme.textTheme.bodySmall,
             ),
           ],

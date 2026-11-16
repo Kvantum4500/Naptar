@@ -787,6 +787,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Új esemény'), findsOneWidget);
+      await shutdown(tester, db);
     });
 
     testWidgets('the program section opens the Diagnostics page', (
@@ -805,6 +806,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(DiagnosticsPage), findsOneWidget);
       expect(find.text('Figyelmeztetések'), findsOneWidget);
+      await shutdown(tester, db);
     });
 
     testWidgets(

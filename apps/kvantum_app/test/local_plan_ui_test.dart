@@ -16,12 +16,14 @@ import 'package:kvantum_app/ai/local_plan_prefs.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/data/synced_settings.dart';
 import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_llm.dart';
 import 'support/harness.dart';
+import 'support/turns.dart';
 
 /// A model that lists one model, as the settings need.
 class _Llm extends FakeLlm {
@@ -34,20 +36,22 @@ class _Llm extends FakeLlm {
 
 /// The wishes cannot be read: the plan fails, and the error card must offer
 /// the plan again, not a question to the model.
-class _BrokenPrefs extends LocalPlanPrefsNotifier {
-  static int built = 0;
+class _BrokenStore extends SyncedSettings {
+  _BrokenStore(super.repo);
+  static int reads = 0;
   @override
-  Future<LocalPlanPrefs> build() async {
-    built++;
+  Future<LocalPlanPrefs> readPlan() async {
+    reads++;
     throw StateError('unreadable');
   }
 }
 
 /// The wishes load only when the test lets them (the plan is "working").
-class _SlowPrefs extends LocalPlanPrefsNotifier {
+class _SlowStore extends SyncedSettings {
+  _SlowStore(super.repo);
   static Completer<void> gate = Completer<void>();
   @override
-  Future<LocalPlanPrefs> build() async {
+  Future<LocalPlanPrefs> readPlan() async {
     await gate.future;
     return const LocalPlanPrefs();
   }
@@ -234,16 +238,17 @@ void main() {
     ) async {
       await boot(tester, const AssistantPage());
       // (saved earlier, as the settings page does: the plan reads it from the
-      // store)
+      // synced record)
       await tester.runAsync(
         () => ref0(tester)
             .read(recordRepoProvider)
-            .setMeta(
-              localPlanKey,
+            .edit(
+              kindSettings,
+              settingsPlanId,
               const LocalPlanPrefs(
                 sports: [PlanSport(name: 'Úszás', minutes: 30)],
                 perWeek: 2,
-              ).encode(),
+              ).toFields(),
             ),
       );
       await planWith(tester);
@@ -280,11 +285,15 @@ void main() {
     testWidgets('while it works there is a status and the "Mégse" works', (
       tester,
     ) async {
-      _SlowPrefs.gate = Completer<void>();
+      _SlowStore.gate = Completer<void>();
       await boot(
         tester,
         const AssistantPage(),
-        extra: [localPlanPrefsProvider.overrideWith(_SlowPrefs.new)],
+        extra: [
+          syncedSettingsProvider.overrideWith(
+            (ref) => _SlowStore(ref.watch(recordRepoProvider)),
+          ),
+        ],
       );
       await tester.tap(find.byKey(const Key('plan-local-chip')));
       await tester.pump();
@@ -300,7 +309,7 @@ void main() {
       await tester.pump();
       expect(find.text('A program tervez, modell nélkül…'), findsNothing);
       // the plan arrives late: it is dropped, the page stays empty
-      _SlowPrefs.gate.complete();
+      _SlowStore.gate.complete();
       await tester.pumpAndSettle();
       expect(find.byType(CheckboxListTile), findsNothing);
       expect(find.text('Helyi terv, modell nélkül'), findsNothing);
@@ -401,7 +410,7 @@ void main() {
     testWidgets('a plan that failed is tried again, not asked of the model', (
       tester,
     ) async {
-      _BrokenPrefs.built = 0;
+      _BrokenStore.reads = 0;
       final llm = _Llm([]);
       final sink = MemoryDiagSink();
       await boot(
@@ -410,7 +419,9 @@ void main() {
         llm: llm,
         key: 'k',
         extra: [
-          localPlanPrefsProvider.overrideWith(_BrokenPrefs.new),
+          syncedSettingsProvider.overrideWith(
+            (ref) => _BrokenStore(ref.watch(recordRepoProvider)),
+          ),
           diagLogProvider.overrideWithValue(DiagLog()..attach(sink)),
         ],
       );
@@ -420,12 +431,12 @@ void main() {
       expect(sink.lines.join('\n'), contains('plan.local_failed'));
       expect(find.text('Újrapróbál'), findsOneWidget);
       expect(find.byKey(const Key('plan-local-error')), findsNothing);
-      final first = _BrokenPrefs.built;
+      final first = _BrokenStore.reads;
       await tester.tap(find.text('Újrapróbál'));
       await tester.pumpAndSettle();
       // the plan was attempted again (the wishes were read again), and the
       // text "Terv AI nélkül" went nowhere
-      expect(_BrokenPrefs.built, greaterThan(first));
+      expect(_BrokenStore.reads, greaterThan(first));
       expect(llm.requests, isEmpty);
       expect(find.text('Újrapróbál'), findsOneWidget);
       await shutdown(tester, db);
@@ -475,6 +486,20 @@ void main() {
       );
       await tester.ensureVisible(f);
       await tester.pumpAndSettle();
+      // (a card that has just come into view hears of the saved wishes from
+      // the database, which takes turns of the real event loop)
+      await tester.runAsync(turns);
+      await tester.pumpAndSettle();
+    }
+
+    /// A save the screen started is a chain of database steps, and the card
+    /// hears of it through the stream of the database: a few rounds of real
+    /// turns and frames let all of it arrive (turns, not time).
+    Future<void> settleSaves(WidgetTester tester) async {
+      for (var i = 0; i < 3; i++) {
+        await tester.runAsync(turns);
+        await tester.pumpAndSettle();
+      }
     }
 
     Future<void> tapKey(WidgetTester tester, Key key) async {
@@ -484,11 +509,16 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    Future<String?> saved(WidgetTester tester) async {
-      final text = await tester.runAsync<String?>(
-        () => ref0(tester).read(recordRepoProvider).meta(localPlanKey),
-      );
-      return text;
+    /// What the settings page saved: the wishes of the synced record, or null
+    /// when there is no record (nothing was saved).
+    Future<LocalPlanPrefs?> saved(WidgetTester tester) async {
+      final prefs = await tester.runAsync<LocalPlanPrefs?>(() async {
+        final r = await ref0(tester)
+            .read(recordRepoProvider)
+            .get(kindSettings, settingsPlanId);
+        return r == null ? null : LocalPlanPrefs.fromRecord(r);
+      });
+      return prefs;
     }
 
     testWidgets(
@@ -512,27 +542,26 @@ void main() {
       },
     );
 
-    testWidgets(
-      'the weekly goal and the time of day are saved on this device',
-      (tester) async {
-        await boot(tester, const SettingsPage());
-        await show(tester, find.byKey(const ValueKey('plan-perweek-3')));
-        await tester.tap(find.byKey(const ValueKey('plan-perweek-3')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('5 edzés hetente').last);
-        await tester.pumpAndSettle();
-        await show(tester, find.byKey(const ValueKey('plan-band-any')));
-        await tester.tap(find.byKey(const ValueKey('plan-band-any')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.textContaining('Este (17–21 óra)').last);
-        await tester.pumpAndSettle();
-        final p = LocalPlanPrefs.decode(await saved(tester));
-        expect(p.perWeek, 5);
-        expect(p.band, PlanBand.evening);
-        expect(p.sports, defaultPlanSports);
-        await shutdown(tester, db);
-      },
-    );
+    testWidgets('the weekly goal and the time of day are saved', (
+      tester,
+    ) async {
+      await boot(tester, const SettingsPage());
+      await show(tester, find.byKey(const ValueKey('plan-perweek-3')));
+      await tester.tap(find.byKey(const ValueKey('plan-perweek-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('5 edzés hetente').last);
+      await tester.pumpAndSettle();
+      await show(tester, find.byKey(const ValueKey('plan-band-any')));
+      await tester.tap(find.byKey(const ValueKey('plan-band-any')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Este (17–21 óra)').last);
+      await tester.pumpAndSettle();
+      final p = (await saved(tester))!;
+      expect(p.perWeek, 5);
+      expect(p.band, PlanBand.evening);
+      expect(p.sports, defaultPlanSports);
+      await shutdown(tester, db);
+    });
 
     testWidgets('a sport is added, with its length and the outdoor mark', (
       tester,
@@ -549,7 +578,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Kajak'), findsOneWidget);
       expect(find.text('90 perc · szabadtéri'), findsOneWidget);
-      final p = LocalPlanPrefs.decode(await saved(tester));
+      final p = (await saved(tester))!;
       expect(
         p.sports.last,
         const PlanSport(name: 'Kajak', minutes: 90, outdoor: true),
@@ -602,7 +631,7 @@ void main() {
       expect(find.text('75 perc'), findsOneWidget);
       await tapKey(tester, const Key('plan-sport-del-0'));
       expect(find.text('Calisthenics'), findsNothing);
-      final p = LocalPlanPrefs.decode(await saved(tester));
+      final p = (await saved(tester))!;
       expect(p.sports, [const PlanSport(name: 'Gym', minutes: 75)]);
       await shutdown(tester, db);
     });
@@ -614,7 +643,7 @@ void main() {
       await tapKey(tester, const Key('plan-sport-del-1'));
       await tapKey(tester, const Key('plan-sport-del-0'));
       expect(find.textContaining('Nincs sport megadva'), findsOneWidget);
-      expect(LocalPlanPrefs.decode(await saved(tester)).sports, isEmpty);
+      expect((await saved(tester))!.sports, isEmpty);
       await shutdown(tester, db);
     });
 
@@ -631,7 +660,9 @@ void main() {
               ),
             ),
       );
+      await tester.runAsync(turns); // (the card hears of it from the database)
       await tester.pumpAndSettle();
+      await show(tester, find.text('Helyi terv (AI nélkül)'));
       await show(tester, find.byKey(const Key('plan-reset')));
       await tester.tap(find.byKey(const Key('plan-reset')));
       await tester.pumpAndSettle();
@@ -639,12 +670,12 @@ void main() {
       // "Mégse" changes nothing
       await tester.tap(find.text('Mégse'));
       await tester.pumpAndSettle();
-      expect(LocalPlanPrefs.decode(await saved(tester)).perWeek, 6);
+      expect((await saved(tester))!.perWeek, 6);
       await tester.tap(find.byKey(const Key('plan-reset')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('plan-reset-yes')));
-      await tester.pumpAndSettle();
-      final p = LocalPlanPrefs.decode(await saved(tester));
+      await settleSaves(tester);
+      final p = (await saved(tester))!;
       expect(p.sports, defaultPlanSports);
       expect(p.perWeek, 3);
       expect(p.band, PlanBand.any);
@@ -658,6 +689,9 @@ void main() {
         await tester.runAsync(
           () => ref0(tester).read(localPlanPrefsProvider.notifier).save(p),
         );
+        await tester.runAsync(
+          turns,
+        ); // (the card hears of it from the database)
         await tester.pumpAndSettle();
       }
 
@@ -683,7 +717,7 @@ void main() {
       await tapKey(tester, const Key('plan-sport-del-1')); // the Gym
       expect(find.text('Gym'), findsNothing);
       expect(find.text('Calisthenics'), findsOneWidget);
-      final p = LocalPlanPrefs.decode(await saved(tester));
+      final p = (await saved(tester))!;
       expect(p.sports, [const PlanSport(name: 'Calisthenics', minutes: 45)]);
       await shutdown(tester, db);
     });
@@ -705,9 +739,13 @@ void main() {
                 ),
               ),
         );
+        await tester.runAsync(
+          turns,
+        ); // (the card hears of it from the database)
         await tester.pumpAndSettle();
       }
 
+      await show(tester, find.text('Helyi terv (AI nélkül)'));
       // eleven: there is still room for one more
       await saveSports(11);
       await show(tester, find.byKey(const Key('plan-sport-10')));

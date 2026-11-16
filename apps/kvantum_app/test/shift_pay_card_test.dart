@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/data/synced_settings.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/a11y.dart' show spokenPayLine;
 import 'package:kvantum_app/ui/shift_page.dart';
@@ -60,7 +61,8 @@ void main() {
     late AppDatabase db;
     late ProviderContainer c;
 
-    /// The card alone, on a page of its own, with [stored] on the device.
+    /// The card alone, on a page of its own, with [stored] saved (as the synced
+    /// record, the way another device's settings arrive).
     Future<void> mount(
       WidgetTester tester, {
       PaySettings? stored,
@@ -74,7 +76,9 @@ void main() {
       db = await newDb();
       if (stored != null) {
         await tester.runAsync(
-          () => RecordRepository(db).setMeta(paySettingsKey, stored.encode()),
+          () =>
+              RecordRepository(db)
+                  .edit(kindSettings, settingsPayId, stored.toFields()),
         );
       }
       await tester.pumpWidget(
@@ -89,13 +93,22 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // (what is saved reaches the card from the database: turns of the real
+      // event loop, then the frame)
+      await tester.runAsync(turns);
+      await tester.pumpAndSettle();
       c = ProviderScope.containerOf(tester.element(find.byType(ShiftPayCard)));
     }
 
-    Future<String?> meta(WidgetTester tester) async {
-      String? value;
+    /// What is saved: the settings of the synced record, or null when there is
+    /// no record at all.
+    Future<PaySettings?> saved(WidgetTester tester) async {
+      PaySettings? value;
       await tester.runAsync(() async {
-        value = await c.read(recordRepoProvider).meta(paySettingsKey);
+        final r = await c
+            .read(recordRepoProvider)
+            .get(kindSettings, settingsPayId);
+        value = r == null ? null : PaySettings.fromRecord(r);
       });
       return value;
     }
@@ -142,11 +155,15 @@ void main() {
         tester.widget<Text>(find.byKey(const Key('pay-total'))).data,
         hu(32800),
       );
-      // it says what it is, and where the data stays
+      // it says what it is, and where the data goes (to the other devices, not
+      // to the assistant)
       expect(find.textContaining('nem bérszámfejtés'), findsOneWidget);
-      expect(find.textContaining('nem szinkronizálódnak'), findsOneWidget);
       expect(
-        find.textContaining('az asszisztensnek sem mennek el'),
+        find.textContaining('a többi eszközödre is átmennek'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('az asszisztensnek viszont nem mennek el'),
         findsOneWidget,
       );
       await done(tester);
@@ -302,9 +319,7 @@ void main() {
         await done(tester);
       });
 
-      testWidgets('saving keeps it on the device, and the card follows', (
-        tester,
-      ) async {
+      testWidgets('saving keeps it, and the card follows', (tester) async {
         await mount(tester, events: [night(2026, 11, 10)]);
         await open(tester);
         await tester.enterText(find.byKey(const Key('pay-hourly')), '2000');
@@ -319,7 +334,7 @@ void main() {
           formatHuf(32800),
         );
         expect(
-          PaySettings.decode(await meta(tester)),
+          await saved(tester),
           const PaySettings(hourly: 2000, eveningPct: 30, nightPct: 40),
         );
         await done(tester);
@@ -345,7 +360,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('pay-error')), findsOneWidget);
         expect(find.byType(AlertDialog), findsOneWidget);
-        expect(PaySettings.decode(await meta(tester)), set);
+        expect(await saved(tester), set);
 
         // the same for a premium, and the largest values are fine
         await tester.enterText(find.byKey(const Key('pay-hourly')), '1000000');
@@ -357,8 +372,8 @@ void main() {
         await tester.tap(find.byKey(const Key('pay-save')));
         await tester.pumpAndSettle();
         expect(find.byType(AlertDialog), findsNothing);
-        final saved = PaySettings.decode(await meta(tester));
-        expect((saved.hourly, saved.nightPct), (1000000, 1000));
+        final now = await saved(tester);
+        expect((now!.hourly, now.nightPct), (1000000, 1000));
         await done(tester);
       });
 
@@ -368,16 +383,19 @@ void main() {
         await tester.enterText(find.byKey(const Key('pay-hourly')), '1');
         await tester.tap(find.text('Mégse'));
         await tester.pumpAndSettle();
-        expect(PaySettings.decode(await meta(tester)), set);
+        expect(await saved(tester), set);
         await done(tester);
       });
 
-      testWidgets('clearing takes it all off the device', (tester) async {
+      testWidgets('clearing sets it all back to "not set" (everywhere)', (
+        tester,
+      ) async {
         await mount(tester, stored: set, events: [night(2026, 11, 10)]);
         await open(tester);
         await tester.tap(find.byKey(const Key('pay-clear')));
         await tester.pumpAndSettle();
-        expect(await meta(tester), isNull);
+        // (the record says "nothing set", so the other devices clear it too)
+        expect(await saved(tester), const PaySettings());
         expect(find.byKey(const Key('pay-set')), findsOneWidget);
         expect(find.byKey(const Key('pay-total')), findsNothing);
         await done(tester);
@@ -389,10 +407,7 @@ void main() {
         await tester.enterText(find.byKey(const Key('pay-night')), '');
         await tester.tap(find.byKey(const Key('pay-save')));
         await tester.pumpAndSettle();
-        expect(
-          PaySettings.decode(await meta(tester)),
-          set.copyWith(nightPct: 0),
-        );
+        expect(await saved(tester), set.copyWith(nightPct: 0));
         await done(tester);
       });
 
@@ -444,7 +459,8 @@ void main() {
           );
         }
         if (stored != null) {
-          await RecordRepository(db).setMeta(paySettingsKey, stored.encode());
+          await RecordRepository(db)
+              .edit(kindSettings, settingsPayId, stored.toFields());
         }
       });
       await tester.pumpWidget(
@@ -515,26 +531,48 @@ void main() {
     });
   });
 
-  group('the data stays on the device', () {
-    test('only the Shifts page and its card know of the pay settings', () {
+  group('the settings reach the other devices, and no model', () {
+    test('only the Shifts page card and the settings store know of them', () {
       // (a structural guard: whatever reads them could send them somewhere)
       final lib = Directory('lib');
       final users = <String>[];
       for (final f in lib.listSync(recursive: true).whereType<File>()) {
         if (!f.path.endsWith('.dart')) continue;
         final text = f.readAsStringSync();
-        if (text.contains('paySettingsKey') ||
-            text.contains('paySettingsProvider') ||
+        if (text.contains('paySettingsProvider') ||
+            text.contains('settingsPayId') ||
+            text.contains('legacyPaySettingsKey') ||
             text.contains('pay.settings') ||
             text.contains('PaySettings')) {
           users.add(f.path.replaceAll('\\', '/'));
         }
       }
-      expect(users..sort(), ['lib/ui/shift_pay_card.dart']);
+      expect(users..sort(), [
+        'lib/data/synced_settings.dart',
+        'lib/ui/shift_pay_card.dart',
+      ]);
     });
 
-    test('the key is the one of the notes kept only here', () {
-      expect(paySettingsKey, 'pay.settings');
+    test('nothing the assistant reads or sends can reach them', () {
+      final ai = Directory('lib/ai');
+      for (final f in ai.listSync(recursive: true).whereType<File>()) {
+        if (!f.path.endsWith('.dart')) continue;
+        final text = f.readAsStringSync();
+        for (final word in [
+          'PaySettings',
+          'paySettingsProvider',
+          'settingsPayId',
+          'kindSettings',
+          'estimatePay',
+        ]) {
+          expect(text, isNot(contains(word)), reason: '${f.path}: $word');
+        }
+      }
+    });
+
+    test('the old key and the record are the ones the take-over knows', () {
+      expect(legacyPaySettingsKey, 'pay.settings');
+      expect(settingsPayId, 'pay');
     });
   });
 }

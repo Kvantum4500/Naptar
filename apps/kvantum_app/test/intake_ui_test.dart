@@ -81,10 +81,9 @@ void main() {
       await settle(tester);
     }
     if (goals != null) {
-      await tester.runAsync(() async {
-        await c.read(intakeGoalsProvider.future);
-        await c.read(intakeGoalsProvider.notifier).save(goals);
-      });
+      await tester.runAsync(
+        () => c.read(intakeGoalsProvider.notifier).save(goals),
+      );
       await settle(tester);
     }
   }
@@ -679,13 +678,11 @@ void main() {
       await boot(tester);
       await tapKey(tester, 'intake-goals');
       expect(find.text('Napi célok'), findsOneWidget);
-      expect(find.textContaining('csak ezen az eszközön'), findsOneWidget);
+      expect(find.textContaining('szinkronizálódnak'), findsOneWidget);
       await enter(tester, 'goal-kcal', '2200');
       await enter(tester, 'goal-ml', '2500');
       await tapKey(tester, 'goals-save');
-      final g = await tester.runAsync(
-        () => scope(tester).read(intakeGoalsProvider.future),
-      );
+      final g = scope(tester).read(intakeGoalsProvider).value;
       expect((g!.kcal, g.ml), (2200, 2500));
       expect(find.text('még ${formatKcal(2200)}'), findsOneWidget);
       expect(find.text('még ${formatVolume(2500)}'), findsOneWidget);
@@ -788,9 +785,7 @@ void main() {
       await enter(tester, 'goal-kcal', '');
       await enter(tester, 'goal-ml', '');
       await tapKey(tester, 'goals-save');
-      final g = await tester.runAsync(
-        () => scope(tester).read(intakeGoalsProvider.future),
-      );
+      final g = scope(tester).read(intakeGoalsProvider).value;
       expect(g!.isEmpty, isTrue);
       expect(find.byKey(const Key('intake-kcal-bar')), findsNothing);
       await shutdown(tester, db);

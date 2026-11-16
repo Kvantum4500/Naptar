@@ -590,8 +590,8 @@ class _GoalsDialogState extends State<_GoalsDialog> {
       children: [
         Text(
           'A célokat te adod meg, a program nem javasol értéket. Amit üresen '
-          'hagysz, ahhoz nincs cél. A célok csak ezen az eszközön vannak '
-          'elmentve.',
+          'hagysz, ahhoz nincs cél. A célok a többi eszközödre is átmennek '
+          '(szinkronizálódnak).',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         _numberField(

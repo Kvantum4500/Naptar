@@ -8,6 +8,7 @@ import 'data/event_repository.dart';
 import 'data/finance_repository.dart';
 import 'data/housekeeping.dart';
 import 'data/record_repository.dart';
+import 'data/synced_settings.dart';
 import 'data/task_ops.dart';
 import 'diag/diag_log.dart';
 import 'finance/wallet_bridge.dart';
@@ -279,6 +280,16 @@ final recordRepoProvider = Provider<RecordRepository>(
   (ref) => RecordRepository(
     ref.watch(dbProvider),
     clock: epochMillisOf(ref.watch(appClockProvider)),
+  ),
+);
+
+/// The settings the user enters once and finds on every device (the pay
+/// estimate, the goals of the food and fluid log, the wishes of the local
+/// planner): see [SyncedSettings]. A change asks the sync to run.
+final syncedSettingsProvider = Provider<SyncedSettings>(
+  (ref) => SyncedSettings(
+    ref.watch(recordRepoProvider),
+    onChanged: () => ref.read(syncControllerProvider.notifier).requestSync(),
   ),
 );
 

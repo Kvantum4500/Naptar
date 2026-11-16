@@ -1,7 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kvantum_app/intake/intake_providers.dart';
+import 'package:kvantum_app/data/synced_settings.dart';
+import 'package:kvantum_core/kvantum_core.dart' show settingsGoalsId;
 
 /// The food and fluid log stays out of the assistant's reach (8th round): what
 /// was eaten and drunk is not sent to a model, and nothing that talks to one
@@ -54,18 +55,30 @@ void main() {
     expect(found, isEmpty);
   });
 
-  test('only the providers of the log know where the goals are kept', () {
+  test('only the settings store and the providers of the log know where '
+      'the goals are kept', () {
     final users = <String>[];
     for (final f in dartFiles('lib')) {
       final text = f.readAsStringSync();
-      if (text.contains('intakeGoalsKey') || text.contains('intake.goals')) {
+      if (text.contains('settingsGoalsId') ||
+          text.contains('legacyIntakeGoalsKey') ||
+          text.contains('intake.goals') ||
+          text.contains('watchIntakeGoals') ||
+          text.contains('saveIntakeGoals')) {
         users.add(norm(f));
       }
     }
-    expect(users..sort(), ['lib/intake/intake_providers.dart']);
+    expect(users..sort(), [
+      'lib/data/synced_settings.dart',
+      'lib/intake/intake_providers.dart',
+    ]);
   });
 
-  test('the goals are kept in the settings of the device, not as a record', () {
-    expect(intakeGoalsKey, 'intake.goals');
-  });
+  test(
+    'the goals are a synced setting of their own, with the old key known',
+    () {
+      expect(settingsGoalsId, 'goals');
+      expect(legacyIntakeGoalsKey, 'intake.goals');
+    },
+  );
 }

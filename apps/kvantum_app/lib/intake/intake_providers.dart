@@ -18,28 +18,20 @@ final intakeOpsProvider = Provider<IntakeOps>(
   ),
 );
 
-/// Where the goals are kept: on this device only. They are not a record the
-/// sync copies, the assistant is never told of them, and the backup does not
-/// hold them (they have to be entered again on a new device).
-const intakeGoalsKey = 'intake.goals';
-
-class IntakeGoalsNotifier extends AsyncNotifier<IntakeGoals> {
+/// The goals of the log: what the user set, on every device (see
+/// [SyncedSettings]). The assistant is never told of them.
+class IntakeGoalsNotifier extends StreamNotifier<IntakeGoals> {
   @override
-  Future<IntakeGoals> build() async => IntakeGoals.decode(
-    await ref.watch(recordRepoProvider).meta(intakeGoalsKey),
-  );
+  Stream<IntakeGoals> build() =>
+      ref.watch(syncedSettingsProvider).watchIntakeGoals();
 
-  /// Saves the goals; goals that say nothing remove the stored text.
-  Future<void> save(IntakeGoals goals) async {
-    await ref
-        .read(recordRepoProvider)
-        .setMeta(intakeGoalsKey, goals.isEmpty ? null : goals.encode());
-    state = AsyncData(goals);
-  }
+  /// Saves the goals; a goal that is left out is taken away on every device.
+  Future<void> save(IntakeGoals goals) =>
+      ref.read(syncedSettingsProvider).saveIntakeGoals(goals);
 }
 
 final intakeGoalsProvider =
-    AsyncNotifierProvider<IntakeGoalsNotifier, IntakeGoals>(
+    StreamNotifierProvider<IntakeGoalsNotifier, IntakeGoals>(
       IntakeGoalsNotifier.new,
     );
 

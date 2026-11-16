@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/data/synced_settings.dart';
 import 'package:kvantum_app/intake/intake_ops.dart';
 import 'package:kvantum_app/intake/intake_providers.dart';
 import 'package:kvantum_app/providers.dart';
@@ -350,6 +351,8 @@ void main() {
     ProviderContainer make() {
       final c = ProviderContainer(overrides: baseOverrides(db));
       addTearDown(c.dispose);
+      // (as the page of the log does: a provider nobody listens to is paused)
+      c.listen(intakeGoalsProvider, (_, _) {});
       return c;
     }
 
@@ -358,38 +361,49 @@ void main() {
       expect((await c.read(intakeGoalsProvider.future)).isEmpty, isTrue);
     });
 
-    test('are kept on this device, in the settings, not as a record', () async {
-      final c = make();
-      await c.read(intakeGoalsProvider.future);
-      const goals = IntakeGoals(kcal: 2200, protein: 150, ml: 2500);
-      await c.read(intakeGoalsProvider.notifier).save(goals);
-      expect(c.read(intakeGoalsProvider).value, goals);
-      expect(await repo.meta(intakeGoalsKey), goals.encode());
-      expect(await repo.watch(kindIntake).first, isEmpty);
-      // (a new start reads them back)
-      final again = make();
-      expect(await again.read(intakeGoalsProvider.future), goals);
-    });
+    test(
+      'are kept as a synced setting, not in the records of the log',
+      () async {
+        final c = make();
+        await c.read(intakeGoalsProvider.future);
+        const goals = IntakeGoals(kcal: 2200, protein: 150, ml: 2500);
+        await c.read(intakeGoalsProvider.notifier).save(goals);
+        await pumpEventQueue();
+        expect(c.read(intakeGoalsProvider).value, goals);
+        final r = await repo.get(kindSettings, settingsGoalsId);
+        expect(IntakeGoals.fromRecord(r), goals);
+        expect(await repo.watch(kindIntake).first, isEmpty);
+        // (a new start reads them back)
+        final again = make();
+        expect(await again.read(intakeGoalsProvider.future), goals);
+      },
+    );
 
-    test('saved empty they remove the stored text', () async {
+    test('saved empty they take every goal away (on every device)', () async {
       final c = make();
       await c.read(intakeGoalsProvider.future);
       await c
           .read(intakeGoalsProvider.notifier)
           .save(const IntakeGoals(kcal: 2000));
       await c.read(intakeGoalsProvider.notifier).save(const IntakeGoals());
-      expect(await repo.meta(intakeGoalsKey), isNull);
+      await pumpEventQueue();
       expect(c.read(intakeGoalsProvider).value!.isEmpty, isTrue);
+      final r = await repo.get(kindSettings, settingsGoalsId);
+      expect(r!['kcal'], isNull);
     });
 
-    test('a stored text that is no goals is no goals', () async {
-      await repo.setMeta(intakeGoalsKey, 'not json');
+    test('a record that is no goals is no goals', () async {
+      await repo.edit(kindSettings, settingsGoalsId, {'kcal': 'x', 'ml': -4});
       final c = make();
       expect((await c.read(intakeGoalsProvider.future)).isEmpty, isTrue);
     });
 
-    test('the key is the one the docs name', () {
-      expect(intakeGoalsKey, 'intake.goals');
+    test('goals an older version kept on the device are taken over', () async {
+      const goals = IntakeGoals(kcal: 1900, ml: 2000);
+      await repo.setMeta(legacyIntakeGoalsKey, goals.encode());
+      await SyncedSettings(repo).takeOverOldSettings();
+      final c = make();
+      expect(await c.read(intakeGoalsProvider.future), goals);
     });
   });
 

@@ -21,7 +21,6 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
-import 'package:kvantum_app/intake/intake_providers.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
 import 'package:kvantum_app/ui/diagnostics_page.dart';
@@ -273,15 +272,16 @@ void main() {
     ]) {
       await records.edit(kindIntake, intakeMonthId(w.day), w.fields);
     }
-    await records.setMeta(
-      intakeGoalsKey,
+    await records.edit(
+      kindSettings,
+      settingsGoalsId,
       const IntakeGoals(
         kcal: 2200,
         protein: 150,
         carbs: 250,
         fat: 70,
         ml: 2500,
-      ).encode(),
+      ).toFields(),
     );
     final food = {'cat-food': 'Nagybevásárlás a hétvégére', 'cat-fun': 'Mozi'};
     var n = 0;

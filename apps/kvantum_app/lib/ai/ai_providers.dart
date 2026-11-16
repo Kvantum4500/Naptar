@@ -15,7 +15,6 @@ import 'approval.dart';
 import 'assistant_service.dart';
 import 'handbook_store.dart';
 import 'llm_provider.dart';
-import 'local_plan_prefs.dart';
 import 'location_service.dart';
 import 'provider_catalog.dart';
 import 'weather_service.dart';
@@ -486,7 +485,10 @@ class AssistantController extends Notifier<AssistantState> {
     );
     try {
       final settings = await ref.read(aiSettingsProvider.future);
-      final prefs = await ref.read(localPlanPrefsProvider.future);
+      // (read from the store itself, once: nothing listens to the provider of
+      // the wishes here, and a provider nobody listens to is paused, so it
+      // would never give its first value)
+      final prefs = await ref.read(syncedSettingsProvider).readPlan();
       final outcome = await _newService(
         settings,
         providerById(settings.provider),
@@ -500,9 +502,8 @@ class AssistantController extends Notifier<AssistantState> {
         notice: outcome.notice,
       );
     } catch (e, st) {
-      ref.read(diagLogProvider).error('ai', 'plan.local_failed', e, st);
       // (a wish list that failed to load is read again by "Újrapróbál")
-      ref.invalidate(localPlanPrefsProvider);
+      ref.read(diagLogProvider).error('ai', 'plan.local_failed', e, st);
       if (live()) {
         state = AssistantState(
           prompt: localPlanPrompt,

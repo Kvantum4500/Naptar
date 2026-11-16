@@ -180,7 +180,7 @@ class LocalPlanBody extends ConsumerWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Ezek a beállítások csak ezen az eszközön vannak: nem szinkronizálódnak, nem kerülnek a mentésbe, és a modell sem tud róluk. A szabadtéri sport csak a szezonjában kerül a tervbe (kajak: május–szeptember, a többi: április–október), és ha van előrejelzés, az dönt a napról. A 45 perces vagy hosszabb edzés a műszaktól legalább 8 órára kerül (ez a szabályok része).',
+          'Ezek a beállítások a többi eszközödre is átmennek (szinkronizálódnak), a mentésbe is bekerülnek, a modell viszont nem tud róluk. A szabadtéri sport csak a szezonjában kerül a tervbe (kajak: május–szeptember, a többi: április–október), és ha van előrejelzés, az dönt a napról. A 45 perces vagy hosszabb edzés a műszaktól legalább 8 órára kerül (ez a szabályok része).',
           style: small,
         ),
       ],
