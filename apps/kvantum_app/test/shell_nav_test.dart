@@ -10,6 +10,8 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/home_page.dart';
+import 'package:kvantum_app/ui/intake/intake_page.dart';
+import 'package:kvantum_app/ui/journal/journal_tab.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/ui/shell_tab.dart';
 import 'package:kvantum_app/ui/tasks_page.dart';
@@ -42,6 +44,7 @@ void main() {
     WidgetTester tester, {
     Size size = const Size(360, 800),
     List<Override> extra = const [],
+    double? textScale,
   }) async {
     useSize(tester, size: size);
     db = await newDb();
@@ -50,6 +53,7 @@ void main() {
         const RootShell(),
         db,
         extra: [walletBridgeProvider.overrideWithValue(FakeWallet()), ...extra],
+        textScale: textScale,
       ),
     );
     await tester.pumpAndSettle();
@@ -64,6 +68,25 @@ void main() {
     matching: find.text(label),
   );
 
+  /// The assistant is opened from "Több".
+  Future<void> openAssistant(WidgetTester tester) async {
+    await tester.tap(dest('Több'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('more-assistant')));
+    await tester.pumpAndSettle();
+  }
+
+  /// Which destination of the bar or the rail is the chosen one.
+  int selected(WidgetTester tester) {
+    final bar = find.byType(NavigationBar);
+    if (bar.evaluate().isNotEmpty) {
+      return tester.widget<NavigationBar>(bar).selectedIndex;
+    }
+    return tester
+        .widget<NavigationRail>(find.byType(NavigationRail))
+        .selectedIndex!;
+  }
+
   group('the destinations', () {
     testWidgets('a phone gets a bottom bar: four pages and "Több"', (
       tester,
@@ -71,15 +94,14 @@ void main() {
       await boot(tester);
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.byType(NavigationRail), findsNothing);
-      for (final l in [
-        'Naptár',
-        'Feladatok',
-        'Asszisztens',
-        'Pénzügyek',
-        'Több',
-      ]) {
+      for (final l in ['Naptár', 'Feladatok', 'Napló', 'Pénzügyek', 'Több']) {
         expect(dest(l), findsOneWidget, reason: l);
       }
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).destinations,
+        hasLength(5),
+        reason: 'as many buttons as before: the assistant went to "Több"',
+      );
       await shutdown(tester, db);
     });
 
@@ -89,16 +111,36 @@ void main() {
       await boot(tester, size: const Size(1280, 800));
       expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
-      for (final l in [
-        'Naptár',
-        'Feladatok',
-        'Asszisztens',
-        'Pénzügyek',
-        'Több',
-      ]) {
+      for (final l in ['Naptár', 'Feladatok', 'Napló', 'Pénzügyek', 'Több']) {
         expect(dest(l), findsOneWidget, reason: l);
       }
       await shutdown(tester, db);
+    });
+
+    testWidgets('the assistant has no button of its own, in either frame', (
+      tester,
+    ) async {
+      await boot(tester);
+      expect(dest('Asszisztens'), findsNothing);
+      expect(find.byKey(const Key('nav-assistant')), findsNothing);
+      await shutdown(tester, db);
+      await boot(tester, size: const Size(1280, 800));
+      expect(dest('Asszisztens'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    test('the buttons are the pages that have one, in this order', () {
+      expect(ShellTab.bar, [
+        ShellTab.calendar,
+        ShellTab.tasks,
+        ShellTab.journal,
+        ShellTab.finance,
+      ]);
+      expect(ShellTab.assistant.inBar, isFalse);
+      expect(
+        [for (final t in ShellTab.bar) t.label],
+        ['Naptár', 'Feladatok', 'Napló', 'Pénzügyek'],
+      );
     });
 
     testWidgets('the rail begins at 760 px, the bar below', (tester) async {
@@ -153,8 +195,12 @@ void main() {
       expect(c.read(shellTabProvider), ShellTab.tasks);
       expect(find.byType(TasksPage), findsOneWidget);
 
-      await tester.tap(dest('Asszisztens'));
+      await tester.tap(dest('Napló'));
       await tester.pumpAndSettle();
+      expect(c.read(shellTabProvider), ShellTab.journal);
+      expect(find.byType(JournalTab), findsOneWidget);
+
+      await openAssistant(tester);
       expect(c.read(shellTabProvider), ShellTab.assistant);
       expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
 
@@ -188,7 +234,12 @@ void main() {
       tester,
     ) async {
       await boot(tester);
-      for (final l in ['Feladatok', 'Asszisztens', 'Pénzügyek', 'Naptár']) {
+      for (final l in ['Feladatok', 'Napló']) {
+        await tester.tap(dest(l));
+        await tester.pumpAndSettle();
+      }
+      await openAssistant(tester);
+      for (final l in ['Pénzügyek', 'Naptár']) {
         await tester.tap(dest(l));
         await tester.pumpAndSettle();
       }
@@ -202,7 +253,7 @@ void main() {
           )
           .where((e) => e.excluding)
           .length;
-      expect(excluded, 3, reason: 'all but the calendar');
+      expect(excluded, 4, reason: 'all but the calendar');
       await shutdown(tester, db);
     });
 
@@ -210,7 +261,12 @@ void main() {
       tester,
     ) async {
       await boot(tester);
-      for (final l in ['Feladatok', 'Asszisztens', 'Pénzügyek', 'Naptár']) {
+      for (final l in ['Feladatok', 'Napló']) {
+        await tester.tap(dest(l));
+        await tester.pumpAndSettle();
+      }
+      await openAssistant(tester);
+      for (final l in ['Pénzügyek', 'Naptár']) {
         await tester.tap(dest(l));
         await tester.pumpAndSettle();
       }
@@ -223,7 +279,7 @@ void main() {
           )
           .where((t) => !t.enabled)
           .length;
-      expect(stopped, greaterThanOrEqualTo(3), reason: 'all but the calendar');
+      expect(stopped, greaterThanOrEqualTo(4), reason: 'all but the calendar');
       await shutdown(tester, db);
     });
 
@@ -287,6 +343,91 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('offers the assistant, which stays a page of the shell', (
+      tester,
+    ) async {
+      final c = await boot(tester);
+      await openAssistant(tester);
+      expect(c.read(shellTabProvider), ShellTab.assistant);
+      expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
+      expect(find.byType(NavigationBar), findsOneWidget, reason: 'no new page');
+      expect(find.byKey(const Key('more-assistant')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('lists its entries in this order', (tester) async {
+      await boot(tester);
+      await tester.tap(dest('Több'));
+      await tester.pumpAndSettle();
+      final keys = [
+        'more-quick',
+        'more-assistant',
+        'more-progress',
+        'more-shifts',
+        'more-settings',
+      ];
+      final tops = [
+        for (final k in keys) tester.getTopLeft(find.byKey(Key(k))).dy,
+      ];
+      expect(tops.toSet(), hasLength(5));
+      expect([...tops]..sort(), tops, reason: 'from the top down');
+      expect(find.text('Asszisztens'), findsWidgets);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is the chosen button while the assistant shows', (
+      tester,
+    ) async {
+      await boot(tester);
+      expect(selected(tester), 0);
+      await openAssistant(tester);
+      expect(selected(tester), 4, reason: '"Több" is the fifth button');
+      await tester.tap(dest('Pénzügyek'));
+      await tester.pumpAndSettle();
+      expect(selected(tester), 3);
+      await tester.tap(dest('Naptár'));
+      await tester.pumpAndSettle();
+      expect(selected(tester), 0);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('does the same in the rail of a wide window', (tester) async {
+      await boot(tester, size: const Size(1280, 800));
+      await openAssistant(tester);
+      expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
+      expect(selected(tester), 4);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('scrolls when its entries do not fit the screen', (
+      tester,
+    ) async {
+      // (at this height and the largest text the five entries are taller than
+      // the sheet: without the scroll the last would be cut off)
+      await boot(tester, size: const Size(360, 420), textScale: 2);
+      await tester.tap(dest('Több'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final sheet = find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(Scrollable),
+      );
+      expect(
+        tester.state<ScrollableState>(sheet).position.maxScrollExtent,
+        greaterThan(0),
+        reason: 'there is more than fits',
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('more-settings')),
+        100,
+        scrollable: sheet,
+      );
+      await tester.tap(find.byKey(const Key('more-settings')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Beállítások'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
     testWidgets('works from the rail of a wide window too', (tester) async {
       await boot(tester, size: const Size(1280, 800));
       await tester.tap(dest('Több'));
@@ -301,6 +442,16 @@ void main() {
       final c = await boot(tester);
       await tester.tap(dest('Pénzügyek'));
       await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(c.read(shellTabProvider), ShellTab.calendar);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('from the assistant goes to the calendar, too', (tester) async {
+      final c = await boot(tester);
+      await openAssistant(tester);
+      expect(c.read(shellTabProvider), ShellTab.assistant);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(c.read(shellTabProvider), ShellTab.calendar);
@@ -333,8 +484,7 @@ void main() {
           assistantControllerProvider.overrideWith(_CountingAssistant.new),
         ],
       );
-      await tester.tap(dest('Asszisztens'));
-      await tester.pumpAndSettle();
+      await openAssistant(tester);
       expect(_CountingAssistant.cancels, 0);
       await tester.tap(dest('Pénzügyek'));
       await tester.pumpAndSettle();
@@ -352,10 +502,8 @@ void main() {
           assistantControllerProvider.overrideWith(_CountingAssistant.new),
         ],
       );
-      await tester.tap(dest('Asszisztens'));
-      await tester.pumpAndSettle();
-      await tester.tap(dest('Asszisztens'));
-      await tester.pumpAndSettle();
+      await openAssistant(tester);
+      await openAssistant(tester);
       expect(_CountingAssistant.cancels, 0);
       await shutdown(tester, db);
     });
@@ -368,11 +516,47 @@ void main() {
           assistantControllerProvider.overrideWith(_CountingAssistant.new),
         ],
       );
-      for (final l in ['Feladatok', 'Pénzügyek', 'Naptár']) {
+      for (final l in ['Feladatok', 'Napló', 'Pénzügyek', 'Naptár']) {
         await tester.tap(dest(l));
         await tester.pumpAndSettle();
       }
       expect(_CountingAssistant.cancels, 0);
+      await shutdown(tester, db);
+    });
+  });
+
+  group('the Napló tab', () {
+    testWidgets('has the entries and the food log as its two pages', (
+      tester,
+    ) async {
+      final c = await boot(tester);
+      await tester.tap(dest('Napló'));
+      await tester.pumpAndSettle();
+      expect(c.read(shellTabProvider), ShellTab.journal);
+      expect(find.widgetWithText(AppBar, 'Napló'), findsOneWidget);
+      expect(find.byKey(const Key('journal-tab-entries')), findsOneWidget);
+      expect(find.byKey(const Key('journal-tab-intake')), findsOneWidget);
+      expect(find.byType(IntakePage), findsNothing, reason: 'the first page');
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      expect(find.byType(IntakePage), findsOneWidget);
+      expect(find.byKey(const Key('intake-kcal')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('keeps the page that was chosen while another one shows', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tester.tap(dest('Napló'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      await tester.tap(dest('Feladatok'));
+      await tester.pumpAndSettle();
+      await tester.tap(dest('Napló'));
+      await tester.pumpAndSettle();
+      expect(find.byType(IntakePage), findsOneWidget);
       await shutdown(tester, db);
     });
   });

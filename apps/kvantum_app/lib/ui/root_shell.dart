@@ -13,6 +13,7 @@ import '../widget/widget_sync.dart';
 import 'breakpoints.dart';
 import 'finance/finance_page.dart';
 import 'home_page.dart';
+import 'journal/journal_tab.dart';
 import 'progress_page.dart';
 import 'quick_entry_dialog.dart';
 import 'shell_tab.dart';
@@ -20,10 +21,12 @@ import 'shift_page.dart';
 import 'tasks_page.dart';
 import 'text_scale.dart';
 
-/// What "Több" offers: the quick entry, and pages that are visited now and
-/// then (the progress, the shifts, the settings).
+/// What "Több" offers: the quick entry, the assistant (a page of the shell), and
+/// pages that are visited now and then (the progress, the shifts, the
+/// settings).
 enum _More {
   quick('Gyors felvitel', Icons.bolt),
+  assistant('Asszisztens', Icons.auto_awesome_outlined),
   progress('Haladás', Icons.show_chart),
   shifts('Beosztás', Icons.event_repeat),
   settings('Beállítások', Icons.settings_outlined);
@@ -33,7 +36,7 @@ enum _More {
   final IconData icon;
 }
 
-/// The frame of the app: the four main pages stay alive while switching (the
+/// The frame of the app: the main pages stay alive while switching (the
 /// calendar keeps its view and scroll position), each is built the first time
 /// it is shown. At the bottom (phone) or at the side (wide window) are the
 /// destinations, and "Több" for the rest.
@@ -130,18 +133,24 @@ class _RootShellState extends ConsumerState<RootShell>
   static Widget _page(ShellTab tab) => switch (tab) {
     ShellTab.calendar => const HomePage(),
     ShellTab.tasks => const TasksPage(),
+    ShellTab.journal => const JournalTab(),
     ShellTab.assistant => const AssistantPage(),
     ShellTab.finance => const FinancePage(),
   };
 
-  /// The index of "Több" in the bar: after the four pages.
-  static final _moreIndex = ShellTab.values.length;
+  /// The index of "Több" in the bar: after the pages that have a button.
+  static final _moreIndex = ShellTab.bar.length;
+
+  /// The button that stands for [tab]: its own, or "Több" for a page that is
+  /// opened from there (the assistant).
+  static int _barIndex(ShellTab tab) =>
+      tab.inBar ? ShellTab.bar.indexOf(tab) : _moreIndex;
 
   void _onSelected(int i) {
     if (i == _moreIndex) {
       _openMore();
     } else {
-      ref.read(shellTabProvider.notifier).select(ShellTab.values[i]);
+      ref.read(shellTabProvider.notifier).select(ShellTab.bar[i]);
     }
   }
 
@@ -149,18 +158,23 @@ class _RootShellState extends ConsumerState<RootShell>
     final choice = await showModalBottomSheet<_More>(
       context: context,
       showDragHandle: true,
+      // (the menu scrolls: five entries at the largest text size are taller
+      // than the sheet may be)
+      isScrollControlled: true,
       builder: (c) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final m in _More.values)
-              ListTile(
-                key: Key('more-${m.name}'),
-                leading: Icon(m.icon),
-                title: Text(m.label),
-                onTap: () => Navigator.pop(c, m),
-              ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in _More.values)
+                ListTile(
+                  key: Key('more-${m.name}'),
+                  leading: Icon(m.icon),
+                  title: Text(m.label),
+                  onTap: () => Navigator.pop(c, m),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -169,13 +183,18 @@ class _RootShellState extends ConsumerState<RootShell>
       await showQuickEntry(context, ref);
       return;
     }
+    if (choice == _More.assistant) {
+      ref.read(shellTabProvider.notifier).select(ShellTab.assistant);
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => switch (choice) {
           _More.progress => const ProgressPage(),
           _More.shifts => const ShiftPage(),
           _More.settings => const SettingsPage(),
-          _More.quick => const SizedBox.shrink(), // (handled above)
+          // (handled above)
+          _More.quick || _More.assistant => const SizedBox.shrink(),
         },
       ),
     );
@@ -214,11 +233,11 @@ class _RootShellState extends ConsumerState<RootShell>
         body: Row(
           children: [
             NavigationRail(
-              selectedIndex: tab.index,
+              selectedIndex: _barIndex(tab),
               labelType: NavigationRailLabelType.all,
               onDestinationSelected: _onSelected,
               destinations: [
-                for (final t in ShellTab.values)
+                for (final t in ShellTab.bar)
                   NavigationRailDestination(
                     icon: Icon(t.icon),
                     selectedIcon: Icon(t.selectedIcon),
@@ -239,7 +258,7 @@ class _RootShellState extends ConsumerState<RootShell>
       frame = Scaffold(
         body: body,
         bottomNavigationBar: NavigationBar(
-          selectedIndex: tab.index,
+          selectedIndex: _barIndex(tab),
           onDestinationSelected: _onSelected,
           // Five labels do not fit side by side at a large text size: then
           // only the chosen one is written (the others are still read out
@@ -248,7 +267,7 @@ class _RootShellState extends ConsumerState<RootShell>
               ? NavigationDestinationLabelBehavior.onlyShowSelected
               : NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
-            for (final t in ShellTab.values)
+            for (final t in ShellTab.bar)
               NavigationDestination(
                 key: Key('nav-${t.name}'),
                 icon: Icon(t.icon),

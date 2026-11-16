@@ -21,11 +21,14 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/intake/intake_providers.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
 import 'package:kvantum_app/ui/diagnostics_page.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/home_page.dart';
+import 'package:kvantum_app/ui/intake/intake_page.dart';
+import 'package:kvantum_app/ui/journal/journal_tab.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/ui/search_page.dart';
 import 'package:kvantum_app/ui/setup_guide.dart';
@@ -210,6 +213,75 @@ void main() {
         sleep: 5,
         note: 'Kicsit fáradt voltam az éjszakás műszak után',
       ),
+    );
+    // the food and fluid log: a long name, macros, drinks, goals
+    final today = DateTime.utc(2026, 11, 12);
+    for (final f in [
+      FoodEntry.checked(
+        id: 'f1',
+        day: today,
+        minute: 7 * 60 + 30,
+        meal: Meal.breakfast,
+        name: 'Zabkása tejjel, banánnal és mogyoróvajjal',
+        kcal: 520,
+        protein: 22,
+        carbs: 68,
+        fat: 18,
+      ),
+      FoodEntry.checked(
+        id: 'f2',
+        day: today,
+        minute: 12 * 60 + 15,
+        meal: Meal.lunch,
+        name: 'Töltött káposzta tejföllel és friss kenyérrel',
+        kcal: 950,
+      ),
+      FoodEntry.checked(
+        id: 'f3',
+        day: today,
+        minute: 16 * 60,
+        meal: Meal.snack,
+        kcal: 180,
+      ),
+      FoodEntry.checked(
+        id: 'f4',
+        day: DateTime.utc(2026, 11, 11),
+        minute: 19 * 60,
+        meal: Meal.dinner,
+        name: 'Rakott krumpli',
+        kcal: 2300,
+      ),
+    ]) {
+      await records.edit(kindIntake, intakeMonthId(f.day), f.fields);
+    }
+    for (final w in [
+      FluidEntry.checked(id: 'w1', day: today, minute: 8 * 60, ml: 300),
+      FluidEntry.checked(
+        id: 'w2',
+        day: today,
+        minute: 9 * 60 + 40,
+        ml: 250,
+        kind: DrinkKind.coffee,
+      ),
+      FluidEntry.checked(
+        id: 'w3',
+        day: today,
+        minute: 14 * 60,
+        ml: 500,
+        kind: DrinkKind.tea,
+      ),
+    ]) {
+      await records.edit(kindIntake, intakeMonthId(w.day), w.fields);
+    }
+    await records.setMeta(
+      intakeGoalsKey,
+      const IntakeGoals(
+        kcal: 2200,
+        protein: 150,
+        carbs: 250,
+        fat: 70,
+        ml: 2500,
+      ).encode(),
     );
     final food = {'cat-food': 'Nagybevásárlás a hétvégére', 'cat-fun': 'Mozi'};
     var n = 0;
@@ -411,6 +483,64 @@ void main() {
     sceneAt('"Több" menu', (tester, size) async {
       await show(tester, const RootShell(), size: size);
       await tester.tap(find.text('Több'));
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('the Napló tab', () {
+    sceneAt('the entries', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+    });
+    sceneAt('food and fluids', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+    }, sizes: const [_phoneTall, _wide]);
+    sceneAt('food and fluids, dark', (tester, size) async {
+      await show(tester, const JournalTab(), size: size, dark: true);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+    }, sizes: const [_phoneTall]);
+    sceneAt('a month of food and fluids', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('trend-30')));
+      await tester.pumpAndSettle();
+    }, sizes: const [_phoneTall]);
+    sceneAt('the food form', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('intake-add-food')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('food-macros-toggle')));
+      await tester.pumpAndSettle();
+    });
+    sceneAt('the drink form', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      // (the list builds what is near: scroll to the quick buttons)
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('drink-other')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byType(IntakePage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('drink-other')));
+      await tester.pumpAndSettle();
+    });
+    sceneAt('the goals form', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.tap(find.byKey(const Key('journal-tab-intake')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('intake-goals')));
       await tester.pumpAndSettle();
     });
   });
