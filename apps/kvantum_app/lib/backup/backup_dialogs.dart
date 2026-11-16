@@ -24,6 +24,7 @@ String backupCountsText(Map<String, int> counts) {
     (kindHandbook, 'kézikönyv-fájl'),
     (kindWorkoutLog, 'edzésnapló-bejegyzés'),
     (kindIntake, 'étkezési hónap'),
+    (kindJournal, 'napló-bejegyzés'),
     (kindSettings, 'beállítás-csoport'),
   ];
   final parts = [

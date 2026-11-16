@@ -15,6 +15,7 @@ export 'src/handbook.dart';
 export 'src/hu_calendar.dart';
 export 'src/ics.dart';
 export 'src/intake.dart';
+export 'src/journal.dart';
 export 'src/local_answers.dart';
 export 'src/local_plan.dart';
 export 'src/models.dart';

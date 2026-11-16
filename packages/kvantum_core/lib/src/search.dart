@@ -1,11 +1,12 @@
 import 'event.dart';
 import 'finance.dart';
+import 'journal.dart';
 import 'models.dart';
 import 'recurrence.dart';
 import 'shift_pattern.dart';
 import 'text_safety.dart';
 
-// Search over the calendar, the tasks and the money log. Pure functions: the
+// Search over the calendar, the tasks, the money log and the diary. Pure functions: the
 // app feeds them what it has in memory and shows what they return.
 //
 // A search reads like the assistant's requests do: lower case and without
@@ -219,6 +220,35 @@ TxSearch searchTx(
     return c != 0 ? c : b.updatedAt.compareTo(a.updatedAt);
   });
   return TxSearch(
+    found.take(limit).toList(),
+    found.length > limit ? found.length - limit : 0,
+  );
+}
+
+// -------------------------------------------------------------------- diary
+
+class JournalSearch {
+  const JournalSearch(this.hits, this.more);
+  const JournalSearch.none() : hits = const [], more = 0;
+  final List<JournalEntry> hits;
+  final int more;
+}
+
+/// Diary entries whose title or text match, in the order they were given (the
+/// list the app keeps has the newest first). The pictures are not searched: a
+/// picture has no words.
+JournalSearch searchJournal(
+  List<JournalEntry> entries,
+  String query, {
+  int limit = 30,
+}) {
+  final terms = searchTerms(query);
+  if (terms.isEmpty) return const JournalSearch.none();
+  final found = [
+    for (final e in entries)
+      if (_hasAll(foldHu('${e.title}\n${e.text}'), terms)) e,
+  ];
+  return JournalSearch(
     found.take(limit).toList(),
     found.length > limit ? found.length - limit : 0,
   );

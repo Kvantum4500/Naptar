@@ -167,6 +167,7 @@ final diagSnapshotProvider = FutureProvider.autoDispose<DiagSnapshot>((
       'workoutlog' => 'edzésnapló',
       'handbook' => 'kézikönyv-fájl',
       'intake' => 'étkezési hónap',
+      'journal' => 'napló-bejegyzés',
       'settings' => 'beállítás-csoport',
       final other => other,
     };

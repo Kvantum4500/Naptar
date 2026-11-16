@@ -11,6 +11,9 @@ const kindWorkoutLog = 'workoutlog';
 /// The food and fluid log: one record per month (see intake.dart).
 const kindIntake = 'intake';
 
+/// The diary: one record per entry (see journal.dart).
+const kindJournal = 'journal';
+
 /// The settings the user wants on every device they use, so that they are
 /// entered once: three small records, one per group of settings ([settingsPayId],
 /// [settingsGoalsId], [settingsPlanId]). Every setting is a field of its own,
@@ -33,6 +36,7 @@ const syncedKinds = [
   kindHandbook,
   kindWorkoutLog,
   kindIntake,
+  kindJournal,
   kindSettings,
 ];
 
