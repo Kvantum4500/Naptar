@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'intake.dart' show minuteText;
 import 'models.dart';
 import 'sync_record.dart';
 
@@ -31,6 +30,10 @@ const maxJournalPhotos = 12;
 /// The largest size a picture is believed to have (bytes): a record that says
 /// more is damaged or forged.
 const maxPhotoBytes = 64 * 1024 * 1024;
+
+/// How long the first line of a text may be to serve as the head of an entry
+/// that has no title (a longer one is cut, and shown whole under the head).
+const _headLength = 60;
 
 /// The largest side a picture is believed to have (pixels).
 const maxPhotoSide = 30000;
@@ -90,9 +93,14 @@ int? _intIn(Object? v, int lo, int hi) {
   return (n == null || n < lo || n > hi) ? null : n;
 }
 
+/// "08:15" (the diary has a clock of its own: it must not lean on the food
+/// log, which is another kind of data).
+String _hhmm(DateTime at) =>
+    '${at.hour.toString().padLeft(2, '0')}:'
+    '${at.minute.toString().padLeft(2, '0')}';
+
 /// "2026-11-16T08:15" for a floating time.
-String journalAtText(DateTime at) =>
-    '${isoDay(at)}T${minuteText(at.hour * 60 + at.minute)}';
+String journalAtText(DateTime at) => '${isoDay(at)}T${_hhmm(at)}';
 
 /// A floating time out of "2026-11-16T08:15"; null when it is not a real time
 /// ("2026-02-30T08:15" is none).
@@ -286,7 +294,7 @@ class JournalEntry {
   DateTime get day => DateTime.utc(at.year, at.month, at.day);
 
   /// "08:15".
-  String get timeText => minuteText(at.hour * 60 + at.minute);
+  String get timeText => _hhmm(at);
 
   /// What a list shows as the head: the title, else the first line of the text
   /// (cut short), else what the entry is made of.
@@ -294,7 +302,8 @@ class JournalEntry {
     if (title.isNotEmpty) return title;
     for (final line in text.split('\n')) {
       final l = _oneLine(line);
-      if (l.isNotEmpty) return _cut(l, 60);
+      if (l.isEmpty) continue;
+      return l.length > _headLength ? '${_cut(l, _headLength)}…' : l;
     }
     return photos.isEmpty
         ? 'Üres bejegyzés'
@@ -385,6 +394,32 @@ String journalExcerpt(String text, {int maxLines = 3, int maxChars = 240}) {
     cut = true;
   }
   return cut ? '$out…' : out;
+}
+
+/// What a list shows under the head of an entry: the first lines of its text.
+/// An entry without a title has the first line of its text as its head, and
+/// then that line is left out here (it is not said twice) - unless the head
+/// had to cut it short, then the line is shown whole.
+String journalPreview(
+  JournalEntry entry, {
+  int maxLines = 3,
+  int maxChars = 240,
+}) {
+  final text = entry.text;
+  if (text.isEmpty) return '';
+  if (entry.title.isNotEmpty) {
+    return journalExcerpt(text, maxLines: maxLines, maxChars: maxChars);
+  }
+  final lines = text.split('\n');
+  final i = lines.indexWhere((l) => l.trim().isNotEmpty);
+  if (i < 0 || _oneLine(lines[i]).length > _headLength) {
+    return journalExcerpt(text, maxLines: maxLines, maxChars: maxChars);
+  }
+  return journalExcerpt(
+    lines.skip(i + 1).join('\n'),
+    maxLines: maxLines,
+    maxChars: maxChars,
+  );
 }
 
 /// What the user began to write and has not saved: kept on the device (not a

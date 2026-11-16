@@ -537,6 +537,41 @@ void main() {
     });
   });
 
+  group('what a list shows under the head', () {
+    JournalEntry make(String title, String text) =>
+        JournalEntry.checked(id: 'e', at: nov16, title: title, text: text);
+
+    test('is the first lines of the text, when there is a title', () {
+      expect(
+        journalPreview(make('Cím', 'Egy\nKettő\nHárom\nNégy')),
+        'Egy\nKettő\nHárom…',
+      );
+      expect(journalPreview(make('Cím', '')), '');
+    });
+
+    test('leaves out the first line when that is the head already', () {
+      expect(
+        journalPreview(make('', 'Fejléc\nMásodik\nHarmadik')),
+        'Második\nHarmadik',
+      );
+      expect(journalPreview(make('', 'Csak egy sor')), '');
+      expect(journalPreview(make('', '\n\nFejléc\nRest')), 'Rest');
+    });
+
+    test('shows a long first line whole: the head cut it short', () {
+      final long = 'szó ' * 30; // 119 characters
+      final e = make('', '${long.trim()}\nMásik');
+      expect(e.heading.endsWith('…'), isTrue);
+      expect(journalPreview(e).startsWith('szó szó'), isTrue);
+      expect(journalPreview(e).contains('Másik'), isTrue);
+    });
+
+    test('is nothing for an entry of pictures only', () {
+      final e = JournalEntry.checked(id: 'e', at: nov16, photos: [photo('p')]);
+      expect(journalPreview(e), '');
+    });
+  });
+
   group('the search', () {
     final list = journalEntries([
       rec(
