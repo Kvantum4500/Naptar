@@ -412,7 +412,8 @@ class _BackupBodyState extends ConsumerState<BackupBody> {
       children: [
         Text(
           'Teljes mentés a naptárról, a pénzügyekről, a feladatokról, a '
-          'check-inekről, a kézikönyvről és az edzésnaplóról. A program '
+          'check-inekről, a kézikönyvről, az edzésnaplóról és az étkezési '
+          'naplóról. A program '
           'indulásakor, legfeljebb naponta egyszer készül; az utolsó 7 nap '
           'mentéséből a napi legfrissebb, előtte 4 hétre hetente egy marad meg.',
         ),

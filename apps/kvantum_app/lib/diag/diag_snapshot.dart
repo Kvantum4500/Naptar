@@ -166,6 +166,7 @@ final diagSnapshotProvider = FutureProvider.autoDispose<DiagSnapshot>((
       'checkin' => 'check-in',
       'workoutlog' => 'edzésnapló',
       'handbook' => 'kézikönyv-fájl',
+      'intake' => 'étkezési hónap',
       final other => other,
     };
     counts[label] = row.read<int>('n');

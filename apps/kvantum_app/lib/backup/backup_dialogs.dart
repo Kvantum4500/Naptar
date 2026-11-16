@@ -23,6 +23,7 @@ String backupCountsText(Map<String, int> counts) {
     (kindCheckIn, 'napi check-in'),
     (kindHandbook, 'kézikönyv-fájl'),
     (kindWorkoutLog, 'edzésnapló-bejegyzés'),
+    (kindIntake, 'étkezési hónap'),
   ];
   final parts = [
     for (final (key, label) in labels)
@@ -42,17 +43,19 @@ String backupHeadline(BackupPreview p) {
 
 /// Asks for the password a backup file is to be locked with. Returns null when
 /// the user cancels; a result whose password is null means "no password".
-Future<({String? password})?> askSavePassword(BuildContext context) =>
-    askNewPassword(
-      context,
-      title: 'Mentés fájlba',
-      intro:
-          'A fájlba minden belekerül: a naptár, a pénzügyek, a feladatok, a '
-          'check-inek, a kézikönyv és az edzésnapló. Jelszóval zárhatod '
-          '(AES-256-os zip, bármely tömörítő megnyitja a jelszóval); hagyd '
-          'üresen, ha nem kérsz jelszót.',
-      required: false,
-    );
+Future<({String? password})?> askSavePassword(
+  BuildContext context,
+) => askNewPassword(
+  context,
+  title: 'Mentés fájlba',
+  intro:
+      'A fájlba minden belekerül: a naptár, a pénzügyek, a feladatok, a '
+      'check-inek, a kézikönyv, az edzésnapló és az étkezési napló. Jelszóval '
+      'zárhatod '
+      '(AES-256-os zip, bármely tömörítő megnyitja a jelszóval); hagyd '
+      'üresen, ha nem kérsz jelszót.',
+  required: false,
+);
 
 /// Asks for a new password, twice. With [required] it must be given (at least
 /// 8 characters); otherwise an empty answer means "no password". Returns null
@@ -348,7 +351,10 @@ class _RestoreDialog extends StatelessWidget {
           const SizedBox(height: 6),
           line('Naptár', eventsText()),
           line('Pénzügyek', financeText()),
-          line('Feladatok, check-inek, kézikönyv, edzésnapló', recordsText()),
+          line(
+            'Feladatok, check-inek, kézikönyv, edzésnapló, étkezés',
+            recordsText(),
+          ),
           if (changed > 0) ...[
             const SizedBox(height: 4),
             Text(
