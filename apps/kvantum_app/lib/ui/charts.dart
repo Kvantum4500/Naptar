@@ -48,6 +48,63 @@ int niceMoneyMax(int largest) {
   }
 }
 
+/// A round upper end for a scale of a count (calories, millilitres): 1, 1.5,
+/// 2, 2.5, 3, 4, 5, 6 or 8 times a power of ten (at least 1000), the first of
+/// them that holds [largest].
+int niceCountMax(int largest) {
+  for (var step = 1000; ; step *= 10) {
+    for (final tenths in const [10, 15, 20, 25, 30, 40, 50, 60, 80]) {
+      final top = step * tenths ~/ 10;
+      if (top >= largest) return top;
+    }
+  }
+}
+
+/// The height of the line of a goal on the plot of a bar chart that runs from
+/// 0 to [max]; null when there is no goal.
+double? goalY(Rect plot, double? goal, double max) =>
+    goal == null || goal <= 0 ? null : valueY(plot, goal, 0, max);
+
+/// The label of the goal line: at the right end, just above the line, or just
+/// under it when the line is so near the top of the picture that the label
+/// would be cut off.
+ChartLabel goalLabelAt(Rect plot, double y, String text) => ChartLabel(
+  text,
+  Offset(plot.right, y - 8 < plot.top - 4 ? y + 8 : y - 8),
+  right: true,
+);
+
+/// The dashes of a line from [from] to [to] (x), each [dash] long with a [gap]
+/// between; the last one is cut at [to].
+List<(double, double)> dashSegments(
+  double from,
+  double to, {
+  double dash = 6,
+  double gap = 4,
+}) {
+  final out = <(double, double)>[];
+  for (var x = from; x < to; x += dash + gap) {
+    out.add((x, math.min(x + dash, to)));
+  }
+  return out;
+}
+
+/// The indexes of the bars that are above the goal (none without a goal).
+List<int> overGoal(List<double> values, double? goal) => goal == null
+    ? const []
+    : [
+        for (var i = 0; i < values.length; i++)
+          if (values[i] > goal) i,
+      ];
+
+/// The corners of the little arrow over a bar that is above the goal: it points
+/// up, its base 3 above the bar and its tip 9.
+List<Offset> overMarker(Rect bar) => [
+  Offset(bar.center.dx - 3.5, bar.top - 3),
+  Offset(bar.center.dx + 3.5, bar.top - 3),
+  Offset(bar.center.dx, bar.top - 9),
+];
+
 /// How wide [text] is when it is drawn in [style] at the text size [scaler]
 /// gives.
 double labelWidth(String text, TextStyle style, TextScaler scaler) {
@@ -248,6 +305,10 @@ class BarChartPainter extends CustomPainter {
     required this.firstLabel,
     required this.lastLabel,
     this.plotLeft = defaultPlotLeft,
+    this.goal,
+    this.goalLabel,
+    this.goalColor = const Color(0xFF616161),
+    this.overColor = const Color(0xFFB3261E),
   });
 
   final List<double> values;
@@ -263,6 +324,14 @@ class BarChartPainter extends CustomPainter {
   /// The margin at the left, for the labels of the scale ([plotLeftFor]).
   final double plotLeft;
 
+  /// A goal to draw as a dashed line across the plot (with [goalLabel] at its
+  /// right end); a bar above it gets a little arrow over it, so that the
+  /// difference is not told by colour alone. No goal, no line.
+  final double? goal;
+  final String? goalLabel;
+  final Color goalColor;
+  final Color overColor;
+
   @override
   void paint(Canvas canvas, Size size) {
     final plot = plotRect(size, left: plotLeft);
@@ -274,7 +343,8 @@ class BarChartPainter extends CustomPainter {
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), grid);
     }
     final paint = Paint()..color = barColor;
-    for (final bar in barRects(plot, values, maxValue)) {
+    final rects = barRects(plot, values, maxValue);
+    for (final bar in rects) {
       if (bar.height <= 0) continue;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
@@ -284,6 +354,44 @@ class BarChartPainter extends CustomPainter {
         ),
         paint,
       );
+    }
+    final goalAt = goalY(plot, goal, maxValue);
+    if (goalAt != null) {
+      final dashes = Path();
+      for (final (from, to) in dashSegments(plot.left, plot.right)) {
+        dashes
+          ..moveTo(from, goalAt)
+          ..lineTo(to, goalAt);
+      }
+      canvas.drawPath(
+        dashes,
+        Paint()
+          ..color = goalColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+      final over = overGoal(values, goal);
+      if (over.isNotEmpty) {
+        final arrows = Path();
+        for (final i in over) {
+          final corners = overMarker(rects[i]);
+          arrows
+            ..moveTo(corners[0].dx, corners[0].dy)
+            ..lineTo(corners[1].dx, corners[1].dy)
+            ..lineTo(corners[2].dx, corners[2].dy)
+            ..close();
+        }
+        canvas.drawPath(arrows, Paint()..color = overColor);
+      }
+      final text = goalLabel;
+      if (text != null) {
+        _paintLabel(
+          canvas,
+          goalLabelAt(plot, goalAt, text),
+          labelStyle,
+          textScaler,
+        );
+      }
     }
     for (final label in barLabels(
       plot,
@@ -306,7 +414,11 @@ class BarChartPainter extends CustomPainter {
       old.maxLabel != maxLabel ||
       old.firstLabel != firstLabel ||
       old.lastLabel != lastLabel ||
-      old.plotLeft != plotLeft;
+      old.plotLeft != plotLeft ||
+      old.goal != goal ||
+      old.goalLabel != goalLabel ||
+      old.goalColor != goalColor ||
+      old.overColor != overColor;
 }
 
 /// Lines on a scale from [min] to [max] (the answers of a check-in: 1 … 5).
@@ -438,6 +550,8 @@ class BarChart extends StatelessWidget {
     required this.semanticLabel,
     this.height = 170,
     this.color,
+    this.goal,
+    this.goalLabel,
   });
 
   final List<double> values;
@@ -450,6 +564,10 @@ class BarChart extends StatelessWidget {
 
   /// The colour of the bars; the primary colour of the theme when null.
   final Color? color;
+
+  /// A goal drawn as a dashed line, with its label (see [BarChartPainter]).
+  final double? goal;
+  final String? goalLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -478,6 +596,10 @@ class BarChart extends StatelessWidget {
               firstLabel: firstLabel,
               lastLabel: lastLabel,
               plotLeft: plotLeftFor(labelWidth(maxLabel, style, scaler)),
+              goal: goal,
+              goalLabel: goalLabel,
+              goalColor: theme.colorScheme.onSurfaceVariant,
+              overColor: theme.colorScheme.error,
             ),
           ),
         ),
