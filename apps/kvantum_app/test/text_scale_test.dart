@@ -21,12 +21,15 @@ import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/journal/journal_draft_store.dart';
+import 'package:kvantum_app/journal/photo_files.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
 import 'package:kvantum_app/ui/diagnostics_page.dart';
 import 'package:kvantum_app/ui/finance/finance_page.dart';
 import 'package:kvantum_app/ui/home_page.dart';
 import 'package:kvantum_app/ui/intake/intake_page.dart';
+import 'package:kvantum_app/ui/journal/entry_editor.dart';
 import 'package:kvantum_app/ui/journal/journal_tab.dart';
 import 'package:kvantum_app/ui/root_shell.dart';
 import 'package:kvantum_app/ui/search_page.dart';
@@ -39,6 +42,7 @@ import 'package:kvantum_app/ui/workout_feedback.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import 'support/diary.dart';
 import 'support/fake_llm.dart';
 import 'support/fake_wallet.dart';
 import 'support/harness.dart';
@@ -135,6 +139,7 @@ void main() {
   late EventRepository events;
   late RecordRepository records;
   late FinanceRepository fin;
+  late MemoryPhotoFiles photos;
 
   /// A busy week around Thursday 2026-11-12, with long Hungarian names.
   Future<void> seedAll() async {
@@ -337,6 +342,60 @@ void main() {
         amount: 150000,
       ),
     );
+    // the diary: long head, a first line that is too long for the head, a
+    // picture-only entry, pictures that are here and ones that are not
+    PhotoRef pic(String id, {bool here = true}) {
+      // ('p4' -> 4: every picture its own colour)
+      if (here) photos.put('$id.jpg', colorfulJpeg(int.parse(id.substring(1))));
+      return PhotoRef(id: id, width: 1600, height: 1067, bytes: 400000);
+    }
+
+    for (final e in [
+      JournalEntry.checked(
+        id: 'd1',
+        at: DateTime.utc(2026, 11, 12, 7, 40),
+        title: 'Reggeli futás a Duna-parton, utána hosszú, nyugodt reggeli',
+        text:
+            'Ma korán keltem, és végigfutottam a rakpartot a Margit hídig. '
+            'Nagyon jó volt a levegő.\nUtána a kedvenc pékségben reggeliztem, '
+            'és megbeszéltük Gáborral a hétvégi túrát.\nEste még mesélek róla.',
+        photos: [
+          pic('p1'),
+          pic('p2'),
+          pic('p3'),
+          pic('p4', here: false),
+          pic('p5', here: false),
+          pic('p6', here: false),
+        ],
+      ),
+      JournalEntry.checked(
+        id: 'd2',
+        at: DateTime.utc(2026, 11, 11, 21, 15),
+        text:
+            'Hosszú este volt: a lakásfelújításról tárgyaltunk a kivitelezővel '
+            'és a tervezővel, majd még átnéztük a költségvetést.\nHolnap '
+            'folytatjuk.',
+      ),
+      JournalEntry.checked(
+        id: 'd3',
+        at: DateTime.utc(2026, 11, 11, 19),
+        title: 'Vacsora a barátokkal',
+        text: 'Finom volt.',
+        photos: [pic('p7')],
+      ),
+      JournalEntry.checked(
+        id: 'd4',
+        at: DateTime.utc(2026, 11, 9, 8, 5),
+        title: 'Fogorvos',
+      ),
+      JournalEntry.checked(
+        id: 'd5',
+        at: DateTime.utc(2026, 11, 8, 15),
+        photos: [pic('p8'), pic('p9', here: false)],
+      ),
+    ]) {
+      await records.edit(kindJournal, e.id, e.fields);
+    }
   }
 
   Future<void> show(
@@ -354,6 +413,7 @@ void main() {
     events = EventRepository(db);
     records = RecordRepository(db);
     fin = FinanceRepository(db);
+    photos = MemoryPhotoFiles();
     if (seed) await tester.runAsync(seedAll);
     await tester.pumpWidget(
       RepaintBoundary(
@@ -374,6 +434,7 @@ void main() {
               () => DateTime.utc(2026, 11, 12, 9),
             ),
             midnightTimerProvider.overrideWithValue(ManualTimers().make),
+            photoFilesProvider.overrideWithValue(photos),
             setupGuideProvider.overrideWithValue(guide),
             walletBridgeProvider.overrideWithValue(FakeWallet()),
             apiKeyStoreProvider.overrideWithValue(MemoryApiKeyStore(apiKey)),
@@ -471,6 +532,12 @@ void main() {
       await tester.enterText(find.byType(TextField), 'edzés');
       await tester.pumpAndSettle();
     });
+    sceneAt('search, the diary', (tester, size) async {
+      await show(tester, const SearchPage(), size: size);
+      await tester.enterText(find.byType(TextField), 'reggeli');
+      await tester.runAsync(() => pumpEventQueue(times: 100));
+      await tester.pumpAndSettle();
+    }, sizes: const [_phone]);
     sceneAt('the shift page', (tester, size) async {
       await show(tester, const ShiftPage(), size: size);
     }, sizes: const [_phoneTall, _wideTall]);
@@ -488,9 +555,95 @@ void main() {
   });
 
   group('the Napló tab', () {
+    /// The diary is read from the database for real: let it arrive, then draw.
+    // (two rounds: the first one reads the files, the second one decodes the
+    // pictures the first one put on screen)
+    Future<void> arrive(WidgetTester tester) async {
+      for (var round = 0; round < 2; round++) {
+        await tester.runAsync(() => pumpEventQueue(times: 100));
+        await tester.pumpAndSettle();
+      }
+    }
+
     sceneAt('the entries', (tester, size) async {
       await show(tester, const JournalTab(), size: size);
+      await arrive(tester);
+    }, sizes: const [_small, _phoneTall, _wide]);
+    sceneAt('the entries, dark', (tester, size) async {
+      await show(tester, const JournalTab(), size: size, dark: true);
+      await arrive(tester);
+    }, sizes: const [_phoneTall]);
+    sceneAt('the entries, empty', (tester, size) async {
+      await show(tester, const JournalTab(), size: size, seed: false);
+      await arrive(tester);
+    }, sizes: const [_phone]);
+    sceneAt('a new entry', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('journal-add')));
+      await arrive(tester);
     });
+    sceneAt('an entry with pictures', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('entry-d1')));
+      await arrive(tester);
+    }, sizes: const [_phoneTall, _wideTall]);
+    sceneAt('an entry with pictures, dark', (tester, size) async {
+      await show(tester, const JournalTab(), size: size, dark: true);
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('entry-d1')));
+      await arrive(tester);
+    }, sizes: const [_phoneTall]);
+    sceneAt('the question about leaving an entry', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('journal-add')));
+      await arrive(tester);
+      await tester.enterText(find.byKey(const Key('entry-title')), 'Cím');
+      // (a frame between typing and going back, as there always is)
+      await tester.pump();
+      await tester.tap(find.byType(BackButton));
+      await arrive(tester);
+      expect(find.byKey(const Key('discard-dialog')), findsOneWidget);
+    });
+    sceneAt('the question about a draft', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await tester.runAsync(
+        () => records.setMeta(
+          journalDraftKey,
+          JournalDraft(
+            id: 'draft-1',
+            at: DateTime.utc(2026, 11, 11, 20),
+            title: 'Egy hosszú című, félbehagyott bejegyzés a hétvégéről',
+            text: 'Itt hagytam abba.',
+          ).encode(),
+        ),
+      );
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('journal-add')));
+      await arrive(tester);
+    });
+    sceneAt('the pictures, full screen', (tester, size) async {
+      await show(tester, const JournalTab(), size: size);
+      await arrive(tester);
+      await tester.tap(find.byKey(const Key('entry-d1')));
+      await arrive(tester);
+      // (the editor is a lazy list: scroll down to the pictures)
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('entry-photo-p4')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byType(JournalEntryEditor),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('entry-photo-p4')));
+      await arrive(tester);
+    }, sizes: const [_phone, _wide]);
     sceneAt('food and fluids', (tester, size) async {
       await show(tester, const JournalTab(), size: size);
       await tester.tap(find.byKey(const Key('journal-tab-intake')));

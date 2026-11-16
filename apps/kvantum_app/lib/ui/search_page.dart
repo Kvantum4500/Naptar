@@ -3,11 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../journal/journal_providers.dart';
 import '../providers.dart';
 import 'day_utils.dart';
 import 'event_editor.dart';
 import 'finance/finance_editors.dart';
 import 'format.dart';
+import 'journal/entry_editor.dart';
 import 'palette.dart';
 import 'quick_entry_dialog.dart';
 import 'quick_entry_ops.dart' show quickWhen;
@@ -34,20 +36,25 @@ final _searchEventsProvider = StreamProvider.autoDispose<List<CalEvent>>(
   (ref) => ref.watch(repoProvider).watchAll(),
 );
 
-/// What a search found, in the three places it looks.
+/// What a search found, in the four places it looks.
 class SearchResults {
-  const SearchResults(this.events, this.tasks, this.tx);
+  const SearchResults(this.events, this.tasks, this.tx, this.journal);
   const SearchResults.none()
     : events = const EventSearch.none(),
       tasks = const TaskSearch.none(),
-      tx = const TxSearch.none();
+      tx = const TxSearch.none(),
+      journal = const JournalSearch.none();
 
   final EventSearch events;
   final TaskSearch tasks;
   final TxSearch tx;
+  final JournalSearch journal;
 
   bool get isEmpty =>
-      events.hits.isEmpty && tasks.hits.isEmpty && tx.hits.isEmpty;
+      events.hits.isEmpty &&
+      tasks.hits.isEmpty &&
+      tx.hits.isEmpty &&
+      journal.hits.isEmpty;
 }
 
 final searchResultsProvider = Provider.autoDispose<SearchResults>((ref) {
@@ -58,10 +65,12 @@ final searchResultsProvider = Provider.autoDispose<SearchResults>((ref) {
   final tasks = ref.watch(tasksProvider).value ?? const <TaskView>[];
   final txs = ref.watch(finTxProvider).value ?? const <FinTx>[];
   final cats = ref.watch(finCategoriesProvider).value ?? const <FinCategory>[];
+  final diary = ref.watch(journalEntriesProvider).value ?? const [];
   return SearchResults(
     searchEvents(events, q, now: now),
     searchTasks(tasks, q),
     searchTx(txs, q, categoryName: (id) => categoryName(cats, id)),
+    searchJournal(diary, q),
   );
 });
 
@@ -114,8 +123,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final Widget body;
     if (!searching) {
       body = const _Note(
-        'Írj be legalább két betűt. Az eseményekben, a feladatokban és a '
-        'pénzügyi tételekben keres, kis- és nagybetűre, ékezetre nem kényes.',
+        'Írj be legalább két betűt. Az eseményekben, a feladatokban, a '
+        'pénzügyi tételekben és a napló bejegyzéseiben keres, kis- és '
+        'nagybetűre, ékezetre nem kényes.',
       );
     } else if (results.isEmpty) {
       body = _Note('Nincs találat: „${q.trim()}”.');
@@ -138,6 +148,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             _Header('Pénzügyek', results.tx.hits.length),
             for (final t in results.tx.hits) _TxTile(tx: t),
             _More(results.tx.more),
+          ],
+          if (results.journal.hits.isNotEmpty) ...[
+            _Header('Napló', results.journal.hits.length),
+            for (final e in results.journal.hits) _JournalTile(entry: e),
+            _More(results.journal.more),
           ],
         ],
       );
@@ -394,6 +409,31 @@ class _TxTile extends ConsumerWidget {
         ),
       ),
       onTap: () => editTx(context, existing: tx),
+    );
+  }
+}
+
+class _JournalTile extends ConsumerWidget {
+  const _JournalTile({required this.entry});
+  final JournalEntry entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preview = journalPreview(entry, maxLines: 1, maxChars: 120);
+    return ListTile(
+      key: ValueKey('hit-journal-${entry.id}'),
+      leading: const Icon(Icons.menu_book_outlined),
+      title: Text(entry.heading, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          '${fmtDateLong(entry.day)} ${entry.timeText}',
+          if (preview.isNotEmpty) preview.replaceAll('\n', ' '),
+          if (entry.photos.isNotEmpty) '${entry.photos.length} kép',
+        ].join(' · '),
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+      ),
+      onTap: () => openEntryEditor(context, entry: entry),
     );
   }
 }

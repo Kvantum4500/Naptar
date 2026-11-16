@@ -11,6 +11,7 @@ import 'package:kvantum_app/data/record_repository.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_editors.dart';
 import 'package:kvantum_app/ui/home_page.dart';
+import 'package:kvantum_app/ui/journal/entry_editor.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
@@ -404,6 +405,117 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(TxEditor), findsOneWidget);
       expect(find.text('Tétel szerkesztése'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+  });
+
+  group('the diary', () {
+    Future<void> seedEntry(
+      WidgetTester tester,
+      String id,
+      String title,
+      String text,
+    ) => tester.runAsync(
+      () => records.edit(
+        kindJournal,
+        id,
+        JournalEntry.checked(
+          id: id,
+          at: DateTime.utc(2026, 11, 10, 18, 30),
+          title: title,
+          text: text,
+        ).fields,
+      ),
+    );
+
+    testWidgets('is looked at too, in a group of its own', (tester) async {
+      await boot(tester);
+      await seedEntry(tester, 'e1', 'Fogorvos', 'Nem fájt, de sokáig tartott.');
+      await seedTask(tester, 't1', 'Fogorvos időpont');
+      await openSearch(tester);
+      await type(tester, 'fogorvos');
+      expect(find.text('Napló (1)'), findsOneWidget);
+      expect(find.text('Feladatok (1)'), findsOneWidget);
+      expect(find.byKey(const ValueKey('hit-journal-e1')), findsOneWidget);
+      expect(find.textContaining('Nem fájt'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is found by the text, without accents or case', (
+      tester,
+    ) async {
+      await boot(tester);
+      await seedEntry(
+        tester,
+        'e1',
+        '',
+        'A Börzsönyben túráztunk, SZÉP idő volt.',
+      );
+      await openSearch(tester);
+      await type(tester, 'borzsony szep');
+      expect(find.byKey(const ValueKey('hit-journal-e1')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('says when it was, and how many pictures it holds', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tester.runAsync(
+        () => records.edit(
+          kindJournal,
+          'e2',
+          JournalEntry.checked(
+            id: 'e2',
+            at: DateTime.utc(2026, 11, 10, 18, 30),
+            title: 'Séta a Dunán',
+            photos: const [
+              PhotoRef(id: 'a'),
+              PhotoRef(id: 'b'),
+            ],
+          ).fields,
+        ),
+      );
+      await openSearch(tester);
+      await type(tester, 'seta');
+      expect(find.textContaining('18:30'), findsOneWidget);
+      expect(find.textContaining('2 kép'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a deleted entry is not found', (tester) async {
+      await boot(tester);
+      await seedEntry(tester, 'e1', 'Törölt bejegyzés', 'x');
+      await tester.runAsync(() => records.delete(kindJournal, 'e1'));
+      await openSearch(tester);
+      await type(tester, 'torolt');
+      expect(find.byKey(const ValueKey('hit-journal-e1')), findsNothing);
+      expect(find.textContaining('Nincs találat'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a tap opens the entry', (tester) async {
+      await boot(tester);
+      await seedEntry(tester, 'e1', 'Fogorvos', 'Nem fájt.');
+      await openSearch(tester);
+      await type(tester, 'fogorvos');
+      await tester.tap(find.byKey(const ValueKey('hit-journal-e1')));
+      await tester.pumpAndSettle();
+      expect(find.byType(JournalEntryEditor), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('entry-title')))
+            .controller!
+            .text,
+        'Fogorvos',
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the hint of the empty search names it', (tester) async {
+      await boot(tester);
+      await openSearch(tester);
+      expect(find.textContaining('napló bejegyzéseiben'), findsOneWidget);
       await shutdown(tester, db);
     });
   });

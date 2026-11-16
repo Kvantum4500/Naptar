@@ -58,12 +58,24 @@ void main() {
   }
 
   for (final size in [const Size(360, 800), const Size(1280, 900)]) {
-    for (final tab in [ShellTab.calendar, ShellTab.tasks, ShellTab.finance]) {
-      testWidgets('the bar does not cover the round button on ${tab.label} at '
+    for (final (tab, inner) in <(ShellTab, String?)>[
+      (ShellTab.calendar, null),
+      (ShellTab.tasks, null),
+      // (the diary tab has a round button on both its pages)
+      (ShellTab.journal, 'journal-tab-entries'),
+      (ShellTab.journal, 'journal-tab-intake'),
+      (ShellTab.finance, null),
+    ]) {
+      testWidgets('the bar does not cover the round button on ${tab.label}'
+          '${inner == null ? '' : ' ($inner)'} at '
           '${size.width.toInt()} px', (tester) async {
         final c = await boot(tester, size);
         c.read(shellTabProvider.notifier).select(tab);
         await tester.pumpAndSettle();
+        if (inner != null) {
+          await tester.tap(find.byKey(Key(inner)));
+          await tester.pumpAndSettle();
+        }
         if (tab == ShellTab.finance) {
           // (the overview has no round button; the transactions have one)
           await tester.tap(find.text('Tételek'));
