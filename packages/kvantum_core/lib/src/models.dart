@@ -8,8 +8,17 @@ const kindHandbook = 'handbook';
 /// The feedback after a workout (how hard it was, the energy, how it felt).
 const kindWorkoutLog = 'workoutlog';
 
+/// The food and fluid log: one record per month (see intake.dart).
+const kindIntake = 'intake';
+
 /// Kinds that are stored as record files in Drive.
-const syncedKinds = [kindTask, kindCheckIn, kindHandbook, kindWorkoutLog];
+const syncedKinds = [
+  kindTask,
+  kindCheckIn,
+  kindHandbook,
+  kindWorkoutLog,
+  kindIntake,
+];
 
 /// Drive file name of a record (one file per task / per check-in day).
 String recordFileName(String kind, String id) => '$kind-$id.json';
