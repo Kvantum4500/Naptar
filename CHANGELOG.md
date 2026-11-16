@@ -36,6 +36,12 @@ A build-számok a GitHub-kiadások (`build-<szám>`) számai. A legfrissebb elö
 - **Egyenértékű / nem érdemes:** a szolgáltatás `nowUtc` átadása (az ablak mindig holnap kezdődik, a múltba nem tervezhet; a mag függvény külön tesztelve a mai kezdetre) · a műszak-ok osztályozásának puffere és az egésznapos műszak szűrése (a szabály maga is kihagyja az egésznapos eseményt; az eltérés csak az indoklás egyik szava).
 - **Tanulság:** a Beállítások oldal két meglévő tesztje a lusta lista és a „minden `DropdownButtonFormField<int>`” keresése miatt tört, amikor az oldal hosszabb lett és új, egész számos lista került rá (a keresők most a címke szerint választanak).
 
+**5. Kiadás – Build 88, az első kulcs nélküli build**
+- **Honnan:** a `be4f32a` commitból, kézi indítással ([futás](https://github.com/Kvantum4500/Naptar/actions/runs/43841719258)): a Windows-, az Android- és a kiadás-feltöltő job is zöld. A kiadás: [`build-88`](https://github.com/Kvantum4500/Naptar/releases/tag/build-88) (Windows-zip és Android-APK, mindkettő `.sha256` fájllal).
+- **Nincs benne GitHub-kulcs:** az `UPDATE_TOKEN` titkot a build előtt törölted, és a kész csomagok ezt igazolják: az APK-ban (a három `libapp.so`) és a Windows-zipben (`data/app.so`) a `github_pat_…` (20+ karakter) és a `ghp_…` alakú szövegek száma **0**. Ugyanez a keresés a 85-ös buildben 3, illetve 1 találatot ad, tehát a vizsgálat lát. (A puszta `github_pat_` szöveg benne van: ez a naplótisztító saját mintája, nem kulcs.)
+- **Épség és frissíthetőség:** a letöltött fájlok SHA-256-ja egyezik a GitHub által megadottal és a `.sha256` fájlokkal; az APK aláíró tanúsítványa (SHA-256: `b76b4857d9837abc53db23f3dd8de41b5eb663b198a6d01ee68d0a34ce736aa9`) azonos a 85-ösével, ezért a telefon frissítésként fogadja.
+- **Sorrend:** telepítés **mindkét** eszközre, és csak azután a régi GitHub-kulcs visszavonása ([`docs/frissito-kulcs.md`](docs/frissito-kulcs.md)).
+
 ## 6. kör, 2. rész – a repó nyilvános: biztonsági átvilágítás
 
 **A repó 2026-11-14 óta nyilvános, ezért átnéztem a git-előzményt, a kiadási folyamatot (GitHub Actions) és az appot a támadó szemével. A forrás és az előzmény tiszta (nincs valódi jelszó, kulcs vagy aláíró kulcstár); három dolog kapott más súlyt: a kiadásokba épített GitHub-kulcs, a Drive-ról érkező fájlok megbízása és a repó beállításai.** Natív kód (Kotlin, C++, manifest) nem változott; a felületen egy új hibaüzenet és két új súgósor jelent meg.

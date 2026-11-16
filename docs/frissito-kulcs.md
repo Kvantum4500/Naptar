@@ -2,7 +2,7 @@
 
 ## Röviden
 
-A Kvantum Naptár tárolója **nyilvános** (2026-11-14 óta), ezért a kiadások kulcs nélkül is elérhetők. Az ezután készülő buildek **nem tartalmaznak** frissítő kulcsot, és az app névtelenül kérdezi le a kiadásokat a *Frissítés keresése* gombbal. Ennek ára egyetlen korlát: a GitHub névtelen kérésekből **óránként 60-at** enged egy hálózati címről (egy közös hálózaton, pl. hotspoton mások is fogyasztják). Ha eléri, az app megmondja („A GitHub átmenetileg korlátozza a kérések számát”), és az **Újrapróbál** gombbal később ismét próbálható. Az ellenőrzés csak kézi indításra fut, így ez ritkán jön szóba.
+A Kvantum Naptár tárolója **nyilvános** (2026-11-14 óta), ezért a kiadások kulcs nélkül is elérhetők. Az ezután készülő buildek **nem tartalmaznak** frissítő kulcsot (az első ilyen a [`build-88`](https://github.com/Kvantum4500/Naptar/releases/tag/build-88); a csomagjaiban nincs GitHub-kulcs alakú szöveg, ellenőrizve), és az app névtelenül kérdezi le a kiadásokat a *Frissítés keresése* gombbal. Ennek ára egyetlen korlát: a GitHub névtelen kérésekből **óránként 60-at** enged egy hálózati címről (egy közös hálózaton, pl. hotspoton mások is fogyasztják). Ha eléri, az app megmondja („A GitHub átmenetileg korlátozza a kérések számát”), és az **Újrapróbál** gombbal később ismét próbálható. Az ellenőrzés csak kézi indításra fut, így ez ritkán jön szóba.
 
 ## A régi buildekről (a 85-ösig)
 
