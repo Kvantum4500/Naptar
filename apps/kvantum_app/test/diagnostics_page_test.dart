@@ -376,7 +376,7 @@ void main() {
       await tester.ensureVisible(find.byKey(const Key('diag-clear')));
       await tester.tap(find.byKey(const Key('diag-clear')));
       await tester.pumpAndSettle();
-      expect(find.text('Törlöd a naplót?'), findsOneWidget);
+      expect(find.text('Törlöd a hibanaplót?'), findsOneWidget);
       await tester.tap(find.byKey(const Key('diag-clear-cancel')));
       await tester.pumpAndSettle();
       expect(find.textContaining('app/start'), findsOneWidget);
@@ -386,7 +386,7 @@ void main() {
       await tester.tap(find.byKey(const Key('diag-clear-go')));
       await tester.pumpAndSettle();
       expect(find.textContaining('app/start'), findsNothing);
-      expect(find.text('A napló üres.'), findsOneWidget);
+      expect(find.text('A hibanapló üres.'), findsOneWidget);
       expect(await tail(tester), isEmpty);
     });
   });

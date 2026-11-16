@@ -413,7 +413,7 @@ String renderReport(DiagSnapshot s) {
   }
   b
     ..writeln()
-    ..writeln('== Napló (utolsó ${s.log.length} bejegyzés, UTC) ==');
+    ..writeln('== Hibanapló (utolsó ${s.log.length} bejegyzés, UTC) ==');
   if (s.log.isEmpty) {
     b.writeln('üres');
   } else {

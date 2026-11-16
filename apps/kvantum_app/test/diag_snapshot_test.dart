@@ -107,7 +107,7 @@ void main() {
         '1. módosítás, 5. próba, a Google nem fogadta el (kód: 400, invalid) [feladva]',
         '2026-11-12 Naptár: 40 hívás · 37 rendben · 1 elutasítva · 2 korlátozva',
         '- A Google ma 2 alkalommal korlátozta a kéréseket.',
-        '== Napló (utolsó 1 bejegyzés, UTC) ==',
+        '== Hibanapló (utolsó 1 bejegyzés, UTC) ==',
         '11-12 13:55:01Z sync/calendar.parked parked=1 · StateError: Bad state: x',
       ]) {
         expect(r, contains(part), reason: part);

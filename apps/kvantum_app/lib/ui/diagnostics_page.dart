@@ -208,9 +208,9 @@ class _Body extends ConsumerWidget {
           // ----------------------------------------------------- requests
           section('Google-kérések', _requestLines(s, ref)),
           // ----------------------------------------------------------- log
-          section('Napló (utolsó ${s.log.length})', [
+          section('Hibanapló (utolsó ${s.log.length})', [
             if (s.log.isEmpty)
-              const Text('A napló üres.')
+              const Text('A hibanapló üres.')
             else
               for (final e in s.log.reversed)
                 Padding(
@@ -229,7 +229,7 @@ class _Body extends ConsumerWidget {
             const Text(
               'A jelentésben számok, kódok, magyar mondatok és a hibák rövid, '
               'megtisztított első sora van; esemény-cím, összeg, jegyzet, '
-              'e-mail-cím és kulcs nem kerül bele. A napló csak ezen az '
+              'e-mail-cím és kulcs nem kerül bele. A hibanapló csak ezen az '
               'eszközön van; te döntöd el, kinek mutatod meg.',
             ),
             const SizedBox(height: 8),
@@ -253,7 +253,7 @@ class _Body extends ConsumerWidget {
                   key: const Key('diag-clear'),
                   onPressed: () => _clearLog(context, ref),
                   icon: const Icon(Icons.delete_outline),
-                  label: const Text('Napló törlése…'),
+                  label: const Text('Hibanapló törlése…'),
                 ),
               ],
             ),
@@ -349,9 +349,9 @@ class _Body extends ConsumerWidget {
     final go = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Törlöd a naplót?'),
+        title: const Text('Törlöd a hibanaplót?'),
         content: const Text(
-          'A napló csak ezen az eszközön van. Törlés után a hibakeresés '
+          'A hibanapló csak ezen az eszközön van. Törlés után a hibakeresés '
           'nehezebb lehet, ha valami ismétlődik.',
         ),
         actions: [

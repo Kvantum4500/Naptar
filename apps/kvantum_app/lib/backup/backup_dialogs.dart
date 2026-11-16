@@ -52,7 +52,9 @@ Future<({String? password})?> askSavePassword(
   title: 'Mentés fájlba',
   intro:
       'A fájlba minden belekerül: a naptár, a pénzügyek, a feladatok, a '
-      'check-inek, a kézikönyv, az edzésnapló és az étkezési napló. Jelszóval '
+      'check-inek, a kézikönyv, az edzésnapló, az étkezési napló és a napló '
+      'bejegyzéseinek szövege, a beállításaid (bér, célok, terv-kívánságok); '
+      'a napló képei nem (azok csak azon az eszközön vannak). Jelszóval '
       'zárhatod '
       '(AES-256-os zip, bármely tömörítő megnyitja a jelszóval); hagyd '
       'üresen, ha nem kérsz jelszót.',
@@ -354,7 +356,8 @@ class _RestoreDialog extends StatelessWidget {
           line('Naptár', eventsText()),
           line('Pénzügyek', financeText()),
           line(
-            'Feladatok, check-inek, kézikönyv, edzésnapló, étkezés',
+            'Feladatok, check-inek, kézikönyv, edzésnapló, étkezés, napló, '
+            'beállítások',
             recordsText(),
           ),
           if (changed > 0) ...[
