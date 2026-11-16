@@ -13,6 +13,9 @@ import 'data/task_ops.dart';
 import 'diag/diag_log.dart';
 import 'finance/wallet_bridge.dart';
 import 'finance/wallet_ingest.dart';
+import 'journal/journal_draft_store.dart';
+import 'journal/photo_files.dart';
+import 'journal/photo_sweep.dart';
 import 'sync/sync_controller.dart';
 import 'ui/day_utils.dart';
 
@@ -267,12 +270,32 @@ final monthOccurrencesProvider =
           ref.watch(rangeOccurrencesProvider(ref.watch(monthRangeProvider))),
     );
 
+/// Where the pictures of the diary are kept: a folder on this device (the
+/// app gives it in `main.dart`; until then, and in tests, they are kept in
+/// memory). They are not records and do not travel.
+final photoFilesProvider = Provider<PhotoFiles>((_) => MemoryPhotoFiles());
+
+/// The unsaved start of a new diary entry (on this device only).
+final journalDraftStoreProvider = Provider<JournalDraftStore>(
+  (ref) => JournalDraftStore(ref.watch(recordRepoProvider)),
+);
+
+/// The tidying of the picture folder (see [PhotoSweep]).
+final photoSweepProvider = Provider<PhotoSweep>(
+  (ref) => PhotoSweep(
+    files: ref.watch(photoFilesProvider),
+    records: ref.watch(recordRepoProvider),
+    drafts: ref.watch(journalDraftStoreProvider),
+  ),
+);
+
 /// Quiet upkeep of the local data (see [Housekeeping]).
 final housekeepingProvider = Provider<Housekeeping>(
   (ref) => Housekeeping(
     events: ref.watch(repoProvider),
     finance: ref.watch(financeRepoProvider),
     now: ref.watch(appClockProvider),
+    sweepPhotos: ref.watch(photoSweepProvider).run,
   ),
 );
 

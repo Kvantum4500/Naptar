@@ -16,8 +16,9 @@ import 'data/db.dart';
 import 'data/startup.dart';
 import 'diag/diag_log.dart';
 import 'diag/guarded.dart';
+import 'journal/photo_files.dart';
 import 'notify/windows_autostart.dart';
-import 'providers.dart' show dbPathProvider, dbProvider;
+import 'providers.dart' show dbPathProvider, dbProvider, photoFilesProvider;
 import 'ui/root_shell.dart';
 import 'ui/setup_guide.dart' show setupGuideProvider;
 import 'ui/startup_problem.dart';
@@ -95,6 +96,12 @@ Future<void> _start(DiagLog log) async {
         // the daily backup, in a folder next to the database
         backupStoreProvider.overrideWithValue(
           FileBackupStore(Directory(p.join(p.dirname(start.path), 'backups'))),
+        ),
+        // the pictures of the diary, in a folder next to the database
+        photoFilesProvider.overrideWithValue(
+          DirPhotoFiles(
+            Directory(p.join(p.dirname(start.path), 'journal', 'photos')),
+          ),
         ),
         autoBackupRunsProvider.overrideWithValue(true),
         backupKeyStoreProvider.overrideWithValue(SecureBackupKeyStore()),

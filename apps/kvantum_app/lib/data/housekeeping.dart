@@ -16,6 +16,7 @@ class HousekeepingReport {
     this.requeued = 0,
     this.removed = 0,
     this.staleQueue = 0,
+    this.photos = 0,
   });
 
   /// Markers of deleted finance records that were old enough to go.
@@ -30,13 +31,17 @@ class HousekeepingReport {
   /// Queue entries of events that no longer exist, removed.
   final int staleQueue;
 
-  bool get any => finance + requeued + removed + staleQueue > 0;
+  /// Pictures of the diary that no entry refers to any more, removed.
+  final int photos;
+
+  bool get any => finance + requeued + removed + staleQueue + photos > 0;
 
   Map<String, int> toJson() => {
     'finance': finance,
     'requeued': requeued,
     'removed': removed,
     'staleQueue': staleQueue,
+    'photos': photos,
   };
 }
 
@@ -48,10 +53,15 @@ class Housekeeping {
     required this.events,
     required this.finance,
     required this.now,
+    this.sweepPhotos,
   });
 
   final EventRepository events;
   final FinanceRepository finance;
+
+  /// Removes the pictures of the diary nobody refers to (and says how many);
+  /// null where there are none to tidy. A failure here does not stop the rest.
+  final Future<int> Function(DateTime now)? sweepPhotos;
 
   /// The clock (replaced by tests).
   final DateTime Function() now;
@@ -69,11 +79,18 @@ class Housekeeping {
       at.millisecondsSinceEpoch - tombstoneRetention.inMilliseconds,
     );
     final ev = await events.purgeOrphans();
+    var photos = 0;
+    try {
+      photos = await sweepPhotos?.call(at) ?? 0;
+    } catch (_) {
+      // (a folder that cannot be read is tried again tomorrow)
+    }
     final report = HousekeepingReport(
       finance: fin,
       requeued: ev.requeued,
       removed: ev.removed,
       staleQueue: ev.stale,
+      photos: photos,
     );
     await events.setMeta(lastKey, jsonEncode({'day': day, ...report.toJson()}));
     await events.setMeta(dayKey, day);
