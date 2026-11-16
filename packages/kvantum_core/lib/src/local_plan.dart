@@ -20,6 +20,7 @@ import 'event.dart';
 import 'free_slots.dart';
 import 'models.dart';
 import 'rules.dart';
+import 'sync_record.dart';
 import 'text_safety.dart';
 import 'time.dart';
 import 'weather.dart';
@@ -124,7 +125,8 @@ class PlanBand {
   String toString() => 'PlanBand($id)';
 }
 
-/// What the user told the local planner (stored on the device only).
+/// What the user told the local planner. It lives in the synced record
+/// `settings/plan` ([kindSettings]), so it is entered once for every device.
 class LocalPlanPrefs {
   const LocalPlanPrefs({
     this.sports = defaultPlanSports,
@@ -139,6 +141,9 @@ class LocalPlanPrefs {
   /// count): 1–7.
   final int perWeek;
   final PlanBand band;
+
+  /// The most sports taken from what is read (a longer list is cut).
+  static const maxSports = 12;
 
   LocalPlanPrefs copyWith({
     List<PlanSport>? sports,
@@ -157,8 +162,27 @@ class LocalPlanPrefs {
     'band': band.id,
   });
 
-  /// Reads what [encode] wrote. Whatever is missing or damaged is the default
-  /// (a list of sports the user emptied stays empty: that is their wish).
+  /// The wishes out of what was read: [rawSports] is the decoded list of
+  /// sports, the others the plain values. Whatever is missing or damaged is
+  /// the default (a list of sports the user emptied stays empty: that is their
+  /// wish). One place for the device text and the synced record.
+  static LocalPlanPrefs _read(
+    Object? rawSports,
+    Object? perWeek,
+    Object? band,
+  ) => LocalPlanPrefs(
+    sports: rawSports is List
+        ? [
+            for (final s in rawSports.take(maxSports))
+              if (PlanSport.tryParse(s) case final PlanSport p) p,
+          ]
+        : defaultPlanSports,
+    perWeek: perWeek is int ? perWeek.clamp(1, 7) : 3,
+    band: PlanBand.byId(band is String ? band : null),
+  );
+
+  /// Reads what [encode] wrote. (Where the wishes were kept before they were
+  /// synced: read once, to take them over.)
   static LocalPlanPrefs decode(String? text) {
     if (text == null || text.trim().isEmpty) return const LocalPlanPrefs();
     final Object? j;
@@ -168,20 +192,51 @@ class LocalPlanPrefs {
       return const LocalPlanPrefs();
     }
     if (j is! Map) return const LocalPlanPrefs();
-    final raw = j['sports'];
-    final sports = raw is List
-        ? [
-            for (final s in raw.take(12))
-              if (PlanSport.tryParse(s) case final PlanSport p) p,
-          ]
-        : defaultPlanSports;
-    final n = j['perWeek'];
-    return LocalPlanPrefs(
-      sports: sports,
-      perWeek: n is int ? n.clamp(1, 7) : 3,
-      band: PlanBand.byId(j['band'] is String ? j['band'] as String : null),
-    );
+    return _read(j['sports'], j['perWeek'], j['band']);
   }
+
+  /// The wishes of the synced record `settings/plan` ([kindSettings]); no
+  /// record, or a field that is missing or damaged, is the default. Never
+  /// throws: the record may come from another device.
+  static LocalPlanPrefs fromRecord(SyncRecord? record) {
+    if (record == null) return const LocalPlanPrefs();
+    Object? rawSports;
+    final text = record['sports'];
+    if (text is String) {
+      try {
+        rawSports = jsonDecode(text);
+      } on FormatException {
+        rawSports = null;
+      }
+    }
+    return _read(rawSports, record['perWeek'], record['band']);
+  }
+
+  /// What to write into the record, field by field. The sports are ONE field (a
+  /// JSON text): the list is one wish, and its order must not be mixed from two
+  /// devices.
+  Map<String, Object?> toFields() => {
+    'sports': jsonEncode([for (final s in sports) s.toJson()]),
+    'perWeek': perWeek,
+    'band': band.id,
+  };
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! LocalPlanPrefs ||
+        other.perWeek != perWeek ||
+        other.band != band ||
+        other.sports.length != sports.length) {
+      return false;
+    }
+    for (var i = 0; i < sports.length; i++) {
+      if (other.sports[i] != sports[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(perWeek, band, Object.hashAll(sports));
 }
 
 /// What the local planner came up with.

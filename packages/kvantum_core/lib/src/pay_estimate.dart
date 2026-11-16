@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'hu_calendar.dart';
 import 'shift_pattern.dart';
+import 'sync_record.dart';
 
 /// A gross estimate of what the shifts of a month pay, from the hourly wage and
 /// the premiums the user enters. It is an ESTIMATE from the plan, not a payroll:
@@ -71,28 +72,50 @@ class PaySettings {
     'holiday': holidayPct,
   };
 
-  /// What a text of the device holds; anything unreadable is "not set".
+  /// The settings out of the values [value] gives by field name; whatever is
+  /// missing, not a number or out of range is "not set" (0) or the largest
+  /// value taken. One place for the device text and the synced record, so the
+  /// two cannot read the same numbers differently.
+  static PaySettings _read(Object? Function(String field) value) {
+    int whole(Object? v, int max) =>
+        v is num && v.isFinite ? v.round().clamp(0, max) : 0;
+    return PaySettings(
+      hourly: whole(value('hourly'), maxHourly),
+      eveningPct: whole(value('evening'), maxPercent),
+      nightPct: whole(value('night'), maxPercent),
+      saturdayPct: whole(value('saturday'), maxPercent),
+      sundayPct: whole(value('sunday'), maxPercent),
+      holidayPct: whole(value('holiday'), maxPercent),
+    );
+  }
+
+  /// What a text of the device holds; anything unreadable is "not set". (Where
+  /// the settings were kept before they were synced: read once, to take them
+  /// over.)
   static PaySettings decode(String? text) {
     if (text == null || text.isEmpty) return const PaySettings();
     try {
       final j = jsonDecode(text);
       if (j is! Map) return const PaySettings();
-      int whole(Object? v, int max) =>
-          v is num && v.isFinite ? v.round().clamp(0, max) : 0;
-      return PaySettings(
-        hourly: whole(j['hourly'], maxHourly),
-        eveningPct: whole(j['evening'], maxPercent),
-        nightPct: whole(j['night'], maxPercent),
-        saturdayPct: whole(j['saturday'], maxPercent),
-        sundayPct: whole(j['sunday'], maxPercent),
-        holidayPct: whole(j['holiday'], maxPercent),
-      );
+      return _read((field) => j[field]);
     } catch (_) {
       return const PaySettings();
     }
   }
 
-  /// The text to keep on the device; null when nothing is set.
+  /// The settings of the synced record `settings/pay` ([kindSettings]); no
+  /// record, or one that says nothing, is "not set". Never throws: the record
+  /// may come from another device.
+  static PaySettings fromRecord(SyncRecord? record) =>
+      record == null ? const PaySettings() : _read((field) => record[field]);
+
+  /// What to write into the record, field by field (a write of a field that did
+  /// not change keeps its stamp, so only what was edited can win over the other
+  /// device's edit).
+  Map<String, Object?> toFields() => toJson();
+
+  /// The text to keep on the device; null when nothing is set. (The old home of
+  /// the settings; kept for the tests of the take-over.)
   String? encode() => this == const PaySettings() ? null : jsonEncode(toJson());
 
   @override

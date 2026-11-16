@@ -590,18 +590,40 @@ class IntakeGoals {
   });
 
   /// Reads the stored goals; a value that is not usable is simply not set.
+  /// (Where the goals were kept before they were synced: read once, to take
+  /// them over.)
   static IntakeGoals decode(String? text) {
     if (text == null) return const IntakeGoals();
     final j = _object(text);
     if (j == null) return const IntakeGoals();
-    return IntakeGoals(
-      kcal: _intIn(j['kcal'], minKcal, maxKcal),
-      protein: _intIn(j['protein'], minGrams, maxGrams),
-      carbs: _intIn(j['carbs'], minGrams, maxGrams),
-      fat: _intIn(j['fat'], minGrams, maxGrams),
-      ml: _intIn(j['ml'], minMl, maxMl),
-    );
+    return IntakeGoals._read((field) => j[field]);
   }
+
+  /// The goals of the synced record `settings/goals` ([kindSettings]); no
+  /// record, or a field that is missing, null or out of range, is "not set".
+  /// Never throws: the record may come from another device.
+  static IntakeGoals fromRecord(SyncRecord? record) => record == null
+      ? const IntakeGoals()
+      : IntakeGoals._read((field) => record[field]);
+
+  static IntakeGoals _read(Object? Function(String field) value) => IntakeGoals(
+    kcal: _intIn(value('kcal'), minKcal, maxKcal),
+    protein: _intIn(value('protein'), minGrams, maxGrams),
+    carbs: _intIn(value('carbs'), minGrams, maxGrams),
+    fat: _intIn(value('fat'), minGrams, maxGrams),
+    ml: _intIn(value('ml'), minMl, maxMl),
+  );
+
+  /// What to write into the record, field by field. A goal that is not set is
+  /// written as null: that is how a goal is taken away on every device (a field
+  /// that is left out would keep its old value).
+  Map<String, Object?> toFields() => {
+    'kcal': kcal,
+    'protein': protein,
+    'carbs': carbs,
+    'fat': fat,
+    'ml': ml,
+  };
 
   @override
   bool operator ==(Object other) =>

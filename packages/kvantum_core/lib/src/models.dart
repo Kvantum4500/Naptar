@@ -11,6 +11,21 @@ const kindWorkoutLog = 'workoutlog';
 /// The food and fluid log: one record per month (see intake.dart).
 const kindIntake = 'intake';
 
+/// The settings the user wants on every device they use, so that they are
+/// entered once: three small records, one per group of settings ([settingsPayId],
+/// [settingsGoalsId], [settingsPlanId]). Every setting is a field of its own,
+/// so a wage changed on one device and a premium changed on another both stay.
+const kindSettings = 'settings';
+
+/// The pay estimate: the hourly wage and the premiums (see pay_estimate.dart).
+const settingsPayId = 'pay';
+
+/// The goals of the food and fluid log (see intake.dart).
+const settingsGoalsId = 'goals';
+
+/// The wishes of the local workout planner (see local_plan.dart).
+const settingsPlanId = 'plan';
+
 /// Kinds that are stored as record files in Drive.
 const syncedKinds = [
   kindTask,
@@ -18,6 +33,7 @@ const syncedKinds = [
   kindHandbook,
   kindWorkoutLog,
   kindIntake,
+  kindSettings,
 ];
 
 /// Drive file name of a record (one file per task / per check-in day).
