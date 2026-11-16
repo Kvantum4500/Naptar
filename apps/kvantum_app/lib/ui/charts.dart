@@ -65,14 +65,33 @@ int niceCountMax(int largest) {
 double? goalY(Rect plot, double? goal, double max) =>
     goal == null || goal <= 0 ? null : valueY(plot, goal, 0, max);
 
-/// The label of the goal line: at the right end, just above the line, or just
-/// under it when the line is so near the top of the picture that the label
-/// would be cut off.
-ChartLabel goalLabelAt(Rect plot, double y, String text) => ChartLabel(
+/// The room over the plot that holds the label of the goal, when there is one:
+/// at the right end, with a little dashed stroke before it that stands for the
+/// line (a label by the line itself would lie over the bars, and over the
+/// arrows of the days that passed the goal).
+const double goalStrip = 18;
+
+/// The plot of a bar chart: the usual one, lower by the [goalStrip] when a
+/// label of the goal has to be written over it.
+Rect barPlotRect(
+  Size size, {
+  double left = defaultPlotLeft,
+  bool withGoalLabel = false,
+}) => plotRect(size, left: left, top: withGoalLabel ? 10 + goalStrip : 10);
+
+/// The label of the goal: in the strip over the plot, ending at its right edge.
+ChartLabel goalLabelAt(Rect plot, String text) => ChartLabel(
   text,
-  Offset(plot.right, y - 8 < plot.top - 4 ? y + 8 : y - 8),
+  Offset(plot.right, plot.top - 10 - goalStrip / 2),
   right: true,
 );
+
+/// The little dashed stroke before the label of the goal: [width] of the label
+/// is already known, so it ends 6 before the label's first letter.
+List<(double, double)> goalKeySegments(Rect plot, double labelWidth) {
+  final end = plot.right - labelWidth - 6;
+  return dashSegments(end - 24, end);
+}
 
 /// The dashes of a line from [from] to [to] (x), each [dash] long with a [gap]
 /// between; the last one is cut at [to].
@@ -334,7 +353,8 @@ class BarChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final plot = plotRect(size, left: plotLeft);
+    final hasLabel = goalLabel != null && goal != null && goal! > 0;
+    final plot = barPlotRect(size, left: plotLeft, withGoalLabel: hasLabel);
     final grid = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -385,11 +405,24 @@ class BarChartPainter extends CustomPainter {
       }
       final text = goalLabel;
       if (text != null) {
-        _paintLabel(
-          canvas,
-          goalLabelAt(plot, goalAt, text),
-          labelStyle,
-          textScaler,
+        final label = goalLabelAt(plot, text);
+        _paintLabel(canvas, label, labelStyle, textScaler);
+        // (the stroke that tells the line the label is about)
+        final key = Path();
+        for (final (from, to) in goalKeySegments(
+          plot,
+          labelWidth(text, labelStyle, textScaler),
+        )) {
+          key
+            ..moveTo(from, label.at.dy)
+            ..lineTo(to, label.at.dy);
+        }
+        canvas.drawPath(
+          key,
+          Paint()
+            ..color = goalColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5,
         );
       }
     }

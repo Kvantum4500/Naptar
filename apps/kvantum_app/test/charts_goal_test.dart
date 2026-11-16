@@ -68,18 +68,34 @@ void main() {
       expect(goalY(plot, -5, 120), isNull);
     });
 
-    test('its label is at the right end, above the line', () {
-      final l = goalLabelAt(plot, 80, 'cél 2 200');
+    test('its label is in the strip over the plot, at the right end', () {
+      final p = barPlotRect(size, withGoalLabel: true);
+      final l = goalLabelAt(p, 'cél 2 200');
       expect(l.text, 'cél 2 200');
       expect(l.right, isTrue);
-      expect(l.at, Offset(plot.right, 72));
+      expect(l.at, Offset(p.right, p.top - 10 - goalStrip / 2));
+      expect(l.at.dy, closeTo(9, 0.01), reason: 'the middle of the strip');
     });
 
-    test('and under the line when it is so near the top', () {
-      final l = goalLabelAt(plot, plot.top, 'cél');
-      expect(l.at, Offset(plot.right, plot.top + 8));
-      expect(goalLabelAt(plot, plot.top + 3, 'cél').at.dy, plot.top + 11);
-      expect(goalLabelAt(plot, plot.top + 22, 'cél').at.dy, plot.top + 14);
+    test('the plot is lower by the strip when a label is to be written', () {
+      final usual = plotRect(size);
+      expect(barPlotRect(size), usual);
+      final p = barPlotRect(size, withGoalLabel: true);
+      expect(p.top, usual.top + goalStrip);
+      expect(
+        (p.left, p.right, p.bottom),
+        (usual.left, usual.right, usual.bottom),
+      );
+      expect(barPlotRect(size, left: 50, withGoalLabel: true).left, 50);
+      expect(barPlotRect(size, left: 50).left, 50);
+    });
+
+    test('the little stroke before the label ends 6 before its letters', () {
+      final p = barPlotRect(size, withGoalLabel: true);
+      final dashes = goalKeySegments(p, 80);
+      expect(dashes, hasLength(3));
+      expect(dashes.last.$2, closeTo(p.right - 80 - 6, 0.01));
+      expect(dashes.first.$1, closeTo(p.right - 80 - 6 - 24, 0.01));
     });
   });
 
@@ -207,6 +223,8 @@ void main() {
 
     test('the goal line is above the grid and the bars, not under them', () {
       final names = [for (final c in record(bars(goal: 60))) c.memberName];
+      // (three bars, two of them with a height: those are the rounded rects)
+      expect(names.where((n) => n == #drawRRect), hasLength(2));
       expect(names.lastIndexOf(#drawRRect), lessThan(names.indexOf(#drawPath)));
       expect(names.lastIndexOf(#drawLine), lessThan(names.indexOf(#drawPath)));
     });
@@ -239,28 +257,70 @@ void main() {
       expect(arrows, hasLength(3), reason: 'bars 0, 2 and 4');
     });
 
-    test('the goal label is drawn at the right end of the line', () {
-      final calls = record(bars(goal: 60, goalLabel: 'cél 2 200'));
-      final texts = only(calls, #drawParagraph);
-      expect(texts, hasLength(5));
-      // (the goal's label comes first: it is part of the goal's drawing)
-      final p = TextPainter(
-        text: const TextSpan(text: 'cél 2 200', style: style),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final at = goalLabelAt(plot, goalY(plot, 60, 120)!, 'cél 2 200').at;
-      final offset = texts[0].positionalArguments[1] as Offset;
-      expect(offset.dx, closeTo(at.dx - p.width, 0.01));
-      expect(offset.dy, closeTo(at.dy - p.height / 2, 0.01));
-      p.dispose();
+    test(
+      'the goal label is drawn in the strip, with a key stroke before it',
+      () {
+        final calls = record(bars(goal: 100, goalLabel: 'cél 2 200'));
+        final p = barPlotRect(size, withGoalLabel: true);
+        final texts = only(calls, #drawParagraph);
+        expect(texts, hasLength(5));
+        // (the goal's label comes first: it is part of the goal's drawing)
+        final painter = TextPainter(
+          text: const TextSpan(text: 'cél 2 200', style: style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final at = goalLabelAt(p, 'cél 2 200').at;
+        final offset = texts[0].positionalArguments[1] as Offset;
+        expect(offset.dx, closeTo(at.dx - painter.width, 0.01));
+        expect(offset.dy, closeTo(at.dy - painter.height / 2, 0.01));
+        // the stroke: dashes at the height of the label, ending before it
+        final paths = only(calls, #drawPath);
+        expect(paths, hasLength(2), reason: 'the line and the key stroke');
+        final key = paths.last.positionalArguments[0] as Path;
+        final paint = paths.last.positionalArguments[1] as Paint;
+        expect(paint.color, isSameColorAs(dark));
+        expect(paint.style, PaintingStyle.stroke);
+        final box = key.getBounds();
+        expect(box.top, closeTo(at.dy, 0.01));
+        expect(box.bottom, closeTo(at.dy, 0.01));
+        expect(box.right, closeTo(at.dx - painter.width - 6, 0.01));
+        expect(
+          key.computeMetrics().length,
+          goalKeySegments(p, painter.width).length,
+        );
+        painter.dispose();
+      },
+    );
+
+    test('the strip lowers the grid and the bars under it', () {
+      final withLabel = record(bars(goal: 100, goalLabel: 'cél'));
+      final p = barPlotRect(size, withGoalLabel: true);
+      final lines = only(withLabel, #drawLine);
+      expect(lines, hasLength(3));
+      expect(lines.first.positionalArguments[0], Offset(p.left, p.bottom));
+      expect(lines.last.positionalArguments[0], Offset(p.left, p.top));
+      expect(p.top, plot.top + goalStrip);
+      // (without a label the plot is the usual one)
+      final plain = only(record(bars(goal: 100)), #drawLine);
+      expect(plain.last.positionalArguments[0], Offset(plot.left, plot.top));
+    });
+
+    test('the arrows of the bars over the goal are not under the label', () {
+      // (the label is above the plot, the arrows stay in it: even the tallest
+      // bar's arrow, which rises 9 above the plot's edge, is under the strip)
+      final p = barPlotRect(size, withGoalLabel: true);
+      final tallest = overMarker(barRects(p, const [120.0], 120).single);
+      final label = goalLabelAt(p, 'cél');
+      expect(tallest[2].dy, greaterThan(label.at.dy + 7));
     });
 
     test('a label with no goal is not drawn', () {
       final calls = record(bars(goalLabel: 'cél 2 200'));
       expect(only(calls, #drawParagraph), hasLength(4));
+      expect(only(calls, #drawPath), isEmpty);
     });
 
-    test('a goal with no label has its line and no extra words', () {
+    test('a goal with no label has its line, no strip and no extra words', () {
       final calls = record(bars(goal: 100));
       expect(only(calls, #drawPath), hasLength(1));
       expect(only(calls, #drawParagraph), hasLength(4));

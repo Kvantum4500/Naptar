@@ -127,8 +127,8 @@ class IntakeTrendSection extends ConsumerWidget {
           padding: const EdgeInsets.only(top: 4),
           child: Text(
             'Napokra bontva; a jobb szélső oszlop a mai nap, még nem kész.'
-            '${hasGoal ? ' A szaggatott vonal a célod, a ▲ jel a cél '
-                      'fölötti napot mutatja.' : ''}',
+            '${hasGoal ? ' A szaggatott vonal a célod, az oszlop fölötti kis '
+                      'nyíl a cél fölötti napot mutatja.' : ''}',
             key: const Key('intake-trend-note'),
             style: theme.textTheme.bodySmall,
           ),

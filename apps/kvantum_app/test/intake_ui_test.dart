@@ -866,7 +866,8 @@ void main() {
       expect(f.goal, 2500);
       expect(f.goalLabel, 'cél ${formatVolume(2500)}');
       expect(find.byKey(const Key('intake-trend-note')), findsOneWidget);
-      expect(find.textContaining('▲'), findsOneWidget);
+      expect(find.textContaining('kis nyíl'), findsOneWidget);
+      expect(find.textContaining('▲'), findsNothing, reason: 'no glyph');
       await shutdown(tester, db);
     });
 
