@@ -15,20 +15,21 @@ A számok a generált kód (a drift `db.g.dart`-ja: 4 118 sor) nélkül, az üre
 
 | Hely | Fájl | Sor | Mi van benne |
 |---|---:|---:|---|
-| `packages/kvantum_core/lib/src` | 46 | ≈ 10 900 | tiszta Dart: idő és zónák (`time`), ismétlődés (`recurrence`, `rrule_convert`), `.ics` (`ics`), egyeztetés (`reconcile`), az AI szabályai és adatblokkjai (`rules`, `assistant_context`, `assistant_models`, `free_slots`, `local_answers`), a gyors felvitel értelmezője (`quick_entry`), pénzügy (`finance*`, `bank_import`, `csv_parse`, `subscriptions`), bérbecslés, keret-értesítés, magyar ünnepek (`hu_calendar`), keresés |
-| `apps/kvantum_app/lib/ui` | 49 (ebből 7 a `finance/`-ban) | ≈ 13 700 | képernyők, szerkesztők, nézetek (hónap, hét, nap, napirend), navigáció (`root_shell`), visszavonás (`undo_service`) |
+| `packages/kvantum_core/lib/src` | 48 | ≈ 12 300 | tiszta Dart: idő és zónák (`time`), ismétlődés (`recurrence`, `rrule_convert`), `.ics` (`ics`), egyeztetés (`reconcile`), az AI szabályai és adatblokkjai (`rules`, `assistant_context`, `assistant_models`, `free_slots`, `local_answers`), a gyors felvitel értelmezője (`quick_entry`), pénzügy (`finance*`, `bank_import`, `csv_parse`, `subscriptions`), bérbecslés, keret-értesítés, magyar ünnepek (`hu_calendar`), keresés (a Napló csoporttal), az étkezés és folyadék (`intake`), a napló (`journal`) és a beállítás-rekordok |
+| `apps/kvantum_app/lib/ui` | 58 (ebből 7 a `finance/`-ban, 4 az `intake/`-ban, 5 a `journal/`-ban) | ≈ 16 700 | képernyők, szerkesztők, nézetek (hónap, hét, nap, napirend), navigáció (`root_shell`), visszavonás (`undo_service`) |
 | `…/lib/ai` | 34 | ≈ 8 200 | asszisztens (`assistant_service` + `service/`), szolgáltatók (`gemini_`, `openai_provider`), Kézikönyv, időjárás, Beállítások (`settings_page` + `settings/`) |
-| `…/lib/data` | 10 | ≈ 2 800 | drift-adatbázis, az eseményekhez / rekordokhoz / pénzügyhöz tartozó tárak (`*_repository`), takarítás, indulás |
+| `…/lib/data` | 11 | ≈ 3 000 | drift-adatbázis, az eseményekhez / rekordokhoz / pénzügyhöz tartozó tárak (`*_repository`), takarítás, indulás, a szinkronizált beállítások (`synced_settings`) |
+| `…/lib/intake`, `journal` | 10 | ≈ 900 | az étkezés- és napló-adat szolgáltatói és műveletei, a képtár (kicsinyítés, import, fájlok, árva-takarítás) és a piszkozat |
 | `…/lib/sync` | 11 | ≈ 2 300 | a naptár-szinkron motorja, ütemezése, hibaosztályozása, a vezérlő (`sync_controller`) |
-| `…/lib/backup` | 10 | ≈ 2 200 | automatikus és kézi mentés, titkosított zip, Drive-példány |
+| `…/lib/backup` | 10 | ≈ 2 300 | automatikus és kézi mentés, titkosított zip, Drive-példány |
 | `…/lib/notify` | 8 | ≈ 1 700 | emlékeztetők (Android, Windows), reggeli összefoglaló, keret-értesítés, automatikus indítás |
-| `…/lib/update` | 4 | ≈ 1 300 | önfrissítés, aláírás-ellenőrzés |
-| `…/lib/diag` | 6 | ≈ 1 200 | napló, kérésszámláló, a Diagnosztika jelentése |
-| `…/lib/drive`, `google`, `finance`, `widget` | 12 | ≈ 2 500 | Drive-rekordok és a pénzügyi postaláda, a Google-kliensek, a Wallet-híd, a főképernyő-widget |
+| `…/lib/update` | 4 | ≈ 1 400 | önfrissítés, aláírás-ellenőrzés |
+| `…/lib/diag` | 6 | ≈ 1 200 | hibanapló, kérésszámláló, a Diagnosztika jelentése |
+| `…/lib/drive`, `google`, `finance`, `widget` | 12 | ≈ 2 700 | Drive-rekordok és a pénzügyi postaláda, a Google-kliensek, a Wallet-híd, a főképernyő-widget |
 | `…/lib` (gyökér) | 2 | ≈ 500 | `main.dart` (indulás, hibakampók), `providers.dart` (a Riverpod-szolgáltatók, köztük az egy óra: `appClockProvider`) |
 | Android (`android/…/kotlin`) | 5 | – | Wallet-értesítés figyelő, főképernyő-widget |
 | Windows (`windows/runner`) | 4 | – | ablak (legkisebb méret, megjegyzett hely), egypéldányosság |
-| Tesztek | 162 | ≈ 76 200 | app: 122 fájl (≈ 57 700 sor), mag: 40 fájl (≈ 18 500 sor) |
+| Tesztek | 189 | ≈ 87 700 | app: 143 fájl (≈ 65 800 sor), mag: 46 fájl (≈ 21 900 sor) |
 
 ## Az áttekintő ábra
 
@@ -54,7 +55,7 @@ flowchart LR
   AIs --> CORE
   S --> R
   S -->|"események"| GC["Google Calendar\n(„Naptar” naptár)"]
-  S -->|"feladat · check-in · kézikönyv ·\nedzés-napló · pénzügyi levelek"| GD["Drive appData"]
+  S -->|"feladat · check-in · kézikönyv · edzés-napló ·\nnapló · étkezés · beállítások · pénzügyi levelek"| GD["Drive appData"]
   AIs -->|"csak a kért adat, kulccsal"| LLM["Gemini / Groq / Mistral /\nOpenRouter / OpenAI / egyéni"]
   AIs -->|"kerekített koordináta"| OM["Open-Meteo"]
   U -->|"csak kézi indításra"| GH["GitHub kiadások"]
@@ -68,9 +69,12 @@ flowchart LR
 | Feladatok, napi check-in, edzés-visszajelzés, Kézikönyv | helyi `record_rows` | Drive `appData`, egy fájl rekordonként (`<fajta>-<azonosító>.json`), mezőnként újabb nyer |
 | Pénzügy (tételek, kategóriák, keretek, célok, ismétlődők) | helyi `fin_rows` | **nincs teljes másolat a Drive-on:** a gépek közti rövid életű „levelek” (`fin-…`), a megérkezett levél törlődik; ezért kell a rendszeres mentés |
 | Beállítások, amiket egyszer adsz meg: bér (órabér + pótlékok), étkezési célok, a helyi terv kívánságai | helyi `record_rows`, fajta `settings`: három kis rekord (`pay`, `goals`, `plan`), mezőnként újabb nyer | Drive `appData` (`settings-<csoport>.json`) és a mentés; **az asszisztensnek sehová** (forrásőr-tesztek) |
+| Étkezés és folyadék (étel, ital) | helyi `record_rows`, fajta `intake`: havonta egy rekord (`intake-2026-11.json`, azonosító `yyyy-MM`), a tételek külön mezők (`f.<azonosító>` étel, `w.<azonosító>` ital, kompakt JSON; a törlés a mező törlése) | Drive `appData` és a mentés; mezőnként újabb nyer, ezért a két eszközön egyszerre felvett tételek **mind megmaradnak**; **az asszisztensnek sehová** |
+| A Napló bejegyzései (szöveg) | helyi `record_rows`, fajta `journal`: bejegyzésenként egy rekord (idő, cím, szöveg, a képek hivatkozásai: azonosító és méret) | Drive `appData` (`journal-<azonosító>.json`) és a mentés; **az asszisztensnek sehová** (forrásőr-teszt) |
+| A Napló képei | `journal/photos/<azonosító>.<kiterjesztés>` az adatbázis mellett (legföljebb 1600 képpontra kicsinyítve, EXIF nélkül; a fájlnév soha nem az eredeti név); a félbehagyott bejegyzés piszkozata a `meta` táblában | **sehová:** nincs a Drive-on és a mentésben; a másik eszközön a hely jelölve marad („Ez a kép a másik eszközön van.”) |
 | API-kulcsok, tokenek | a rendszer biztonságos tárolója (Windows DPAPI / Android Keystore) | sehová |
 | Mentések | `backups/` az adatbázis mellett; opcionálisan jelszavas zip a Drive-on | a „Mentés fájlba” és a Drive-példány |
-| Napló, kérésszámláló | az adatbázis mellett (`diag/`) | sehová; csak a „Másolás / Mentés fájlba” gombra |
+| Hibanapló, kérésszámláló | az adatbázis mellett (`diag/`) | sehová; csak a „Másolás / Mentés fájlba” gombra |
 
 **Idő:** falióra-idő + IANA zóna (mint a Google); az ismétlődés falióra-időben fut (nyári időszámítás-biztos), az esemény időtartama valós eltelt idő. A megjelenítési zóna egy (Europe/Budapest), a „ma” is abban számolódik. **Az alkalmazás órája egy:** `appClockProvider` (alapból a valódi óra); az asszisztens, a szinkron, az edzés-kérdések órája és a tárak bélyege ezt követi, így egy teszt egyetlen helyen állítja az időt.
 
@@ -81,7 +85,7 @@ flowchart LR
 Három csatorna, egy vezérlő (`sync_controller`):
 
 1. **Naptár** (`sync_engine` ↔ `google_calendar_remote`): kimenő sor (`outbox_rows`), lehúzás `syncToken`-nel. Az egyeztetés (`reconcile`): tárolt link → `appEventId` (saját írás visszhangja) → iCalUID → új; a kivétel-példányt csak link vagy (sorozat + eredeti kezdés) köti. Szerkesztésnél olvasás + összefésülés (`get` → saját mezők → `update` `If-Match`-csel), hogy a Google-oldali emlékeztető, vendég, Meet-link ne vesszen el.
-2. **Drive-rekordok** (`drive_sync_engine`): feladat, check-in, Kézikönyv, edzés-napló; a fájlnév-minta egy helyen (`syncedKinds` a magban).
+2. **Drive-rekordok** (`drive_sync_engine`): feladat, check-in, Kézikönyv, edzés-napló, étkezés és folyadék, napló, beállítások; a fájlnév-minta egy helyen (`syncedKinds` a magban).
 3. **Pénzügyi postaláda** (`finance_mailbox`): a változások levélként a többi eszköznek; jelenlét-jegyzet 12 óránként; csak akkor fut, ha a Drive változáslistája `fin-` fájlt jelzett, van küldendő módosítás, vagy minden 5. csendes ütemnél. Egy hibás levél vagy társeszköz nem állítja meg a többit: a levelek és a társeszközök külön hibakezelést kapnak (a hálózati hiba és a lejárt bejelentkezés az egész kört érinti, ezek továbbmennek), a sikertelen levél a Drive-on marad (egy futásban legfeljebb 3 próba), a sikertelen társeszköz állapota és a piszkos jelzők nem változnak; a `MailReport.failed` a számuk.
 
 **A Drive-ból érkező fájl külső bemenet** (aki a fiókhoz hozzáfér, át tudja írni): egy fájlból legföljebb 8 MB olvasható (`driveMaxReadBytes`: a szerver hirdette méret és a tényleg érkezett bájtok szerint is; a nagyobb a lehúzásban kimarad, a motorban sérült fájlként a sajátunkra íródik át); a 365 napnál messzebbi jövőbe bélyegzett rekord (`stampIsAbsurd`) nem érvényesül, a kisebb óraeltérés viszont igen (az eltérés-észlelés figyelmeztet, adat nem vész el); a Drive-mentés visszaállítása a jelszóval le nem zárt zipet elutasítja (`zipIsLocked`: a program mindig lezárva tölt fel); a kézikönyv-rekord a modell felé legföljebb 12 000 karakter (`boundedHandbook`).
@@ -119,14 +123,14 @@ Az `update_service` kulcs nélkül, névtelenül kérdezi le a GitHub nyilvános
 | a kérésed (≤ 500 karakter), a beépített szabályok, a Kézikönyv (kapcsolható), a bekapcsolt adatkategóriák (események, feladatok, check-in összegzés, pénzügyi összesítés, időjárás-előrejelzés) | a választott AI-szolgáltató | minden asszisztens-kérésnél; az első kulcsnál a beleegyező párbeszéd elmondja |
 | kerekített koordináta (kb. 1 km) | Open-Meteo | időjárás-lekérésnél |
 | események | Google Calendar | szinkronkor |
-| feladatok, check-in (megjegyzéssel), Kézikönyv, edzés-napló, pénzügyi levelek, jelenlét | Drive `appData` | szinkronkor |
-| token, IP | GitHub | a kézi frissítés-keresésnél |
+| feladatok, check-in (megjegyzéssel), Kézikönyv, edzés-napló, a napló szövege, étkezés és folyadék, a bér-, cél- és terv-beállítások, pénzügyi levelek, jelenlét | Drive `appData` (rejtett mappa, a Google-fiókodon belül) | szinkronkor |
+| a kérés IP-címe (token nélkül, névtelenül) | GitHub | a kézi frissítés-keresésnél |
 
-**Az AI-szolgáltatóhoz soha nem megy el:** a check-in megjegyzése, a helyszín neve, a bér-beállítás, a napló és a diagnosztika; az egyes pénzügyi tételek is csak akkor, ha a pénzügyi kapcsoló be van kapcsolva, és a modell egy hónap részleteit kéri. **Sehová nem megy el:** a bér-beállítás (a Drive-ra és a mentésbe sem kerül), a napló és a diagnosztika (csak a *Másolás* / *Mentés fájlba* gombodra, címek és e-mail nélkül); az API-kulcs csak a saját szolgáltatója kérésének fejlécébe kerül.
+**Az AI-szolgáltatóhoz soha nem megy el:** a check-in megjegyzése, a helyszín neve, a bér-, a cél- és a terv-beállítás, a Napló (szöveg és kép), az étkezés és a folyadék, a hibanapló és a diagnosztika; az egyes pénzügyi tételek is csak akkor, ha a pénzügyi kapcsoló be van kapcsolva, és a modell egy hónap részleteit kéri (forrásőr-tesztek: az `lib/ai` kódja nem hivatkozhat ezekre). **A Google-fiókodon kívülre nem megy el:** a bér-, a cél- és a terv-beállítás, a napló szövege, az étkezés és a folyadék – ezek a rejtett Drive `appData` mappába és a mentésbe kerülnek, a check-inekkel azonos módon. **Sehová nem megy el:** a napló képei és a piszkozat (csak az eszközön vannak), a hibanapló és a diagnosztika (csak a *Másolás* / *Mentés fájlba* gombodra, címek és e-mail nélkül); az API-kulcs csak a saját szolgáltatója kérésének fejlécébe kerül.
 
 ## Minőség: hogyan van tesztelve
 
-- **Tesztek:** mag 1 500+, app 2 700+ (`dart test` / `flutter test`); Flutter 3.47.9-en és 3.50.0-n is zöld. A CI Flutter 3.50.0-t / Dart 3.14.0-t rögzít.
+- **Tesztek:** mag 1 900+, app 3 200+ (`dart test` / `flutter test`); Flutter 3.47.9-en és 3.50.0-n is zöld. A CI Flutter 3.50.0-t / Dart 3.14.0-t rögzít.
 - **Idő a tesztekben:** a tesztek **a dologra várnak, nem időre**: `turnUntil` / `pumpUntil` / `pumpEventQueue` (`test/support/turns.dart`), `ManualTimers`, `FakeAsync`, beinjektált óra és szünet (`SyncEngine.pause`). A `test/no_real_waits_test.dart` őrző-teszt megbuktat minden nem nulla `Future.delayed`-et, `sleep`-et, valódi `Timer`-t és `Stopwatch`-ot (egyetlen indokolt kivétel).
 - **Kézzel írt minták:** `.ics` (Apple, Outlook, Google) és Google API JSON a `test/fixtures/` alatt; ezek **nem valódi exportok** – a minták az ismert alakot követik; valódi export bekerülhet mintának.
 - **Szándékos elrontás:** minden új logikához külön másolaton elrontott változatok (`mutate…` szkriptek a munkamenetekben); ami túlél, új tesztet vagy a felesleges kód törlését jelenti.
@@ -141,7 +145,10 @@ Az `update_service` kulcs nélkül, névtelenül kérdezi le a GitHub nyilvános
 | a szolgáltatók (Riverpod) | `lib/providers.dart`, `lib/ai/ai_providers.dart`, `lib/sync/sync_controller.dart` |
 | a naptár nézetei és a szerkesztő | `lib/ui/home_page.dart`, `month_view.dart`, `time_grid.dart`, `agenda_view.dart`, `event_editor.dart` (+ `event_editor/`: mentés / törlés, színválasztó) |
 | a gyors felvitel értelmezője | a mag: `quick_entry.dart` (a lépések: `quick_entry/`: ismétlődés, nap, idő, szótár, forrás) |
-| a navigáció, a töréspontok | `lib/ui/root_shell.dart`, `lib/ui/breakpoints.dart` |
+| a navigáció, a töréspontok | `lib/ui/root_shell.dart`, `lib/ui/shell_tab.dart` (a fülek: az Asszisztens a „Több” alatt), `lib/ui/breakpoints.dart` |
+| az étkezés- és folyadéknapló | a mag: `intake.dart` (modell, ellenőrzés, napi összegek, célok, javaslatok, trend); az app: `lib/intake/` (szolgáltatók, műveletek Visszavonással), `lib/ui/intake/` (oldal, űrlapok, szövegek, trend), a célvonalas diagram: `lib/ui/charts.dart` |
+| a Napló (bejegyzések, képek) | a mag: `journal.dart` (bejegyzés, kép-hivatkozás, piszkozat, idővonal), `search.dart` (a Napló csoport); az app: `lib/journal/` (szolgáltatók, műveletek; a képtár: `photo_pipeline`, `photo_import`, `photo_files`, `photo_picker`, `photo_sweep`; a piszkozat), `lib/ui/journal/` (lista, szerkesztő, képnéző, képek) |
+| a szinkronizált beállítások (bér, célok, terv-kívánságok) | a mag: `pay_estimate.dart`, `intake.dart` (`IntakeGoals`), `local_plan.dart` (`fromRecord` / `toFields`); az app: `lib/data/synced_settings.dart` (olvasás, írás, az átvétel a régi `meta` kulcsokból) |
 | a törlés és a visszavonás | `lib/ui/undo_service.dart`, `lib/data/event_change.dart`, `lib/sync/sync_hold.dart` |
 | az asszisztens | `lib/ai/assistant_service.dart` (+ `service/`), `lib/ai/ai_providers.dart`, `lib/ai/assistant_page.dart` (+ `page/`); a szabályok a magban: `rules.dart`, `assistant_context.dart` |
 | a helyi terv (AI nélkül) | a mag: `local_plan.dart`; az app: `lib/ai/service/local_planning.dart`, `lib/ai/local_plan_prefs.dart`, `lib/ai/settings/local_plan_card.dart`; a gombok: `assistant_page.dart`, `ai_providers.dart` (`planLocally`) |

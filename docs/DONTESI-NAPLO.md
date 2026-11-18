@@ -75,11 +75,27 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** adatvédelem és jogi óvatosság: a szerződésed mérvadó.
 - **Másik út:** szinkronizált beállítás, törvényi alapértékekkel.
 - **Következmény:** eszközváltásnál újra be kell írni; nincs a mentésben, a Drive-on és az asszisztensnek szánt adatban; a pótlékok összeadódnak, túlóra nincs.
+- **Megfordítva (2026-11-16):** a bér szinkronizált beállítás lett (Drive `appData` és mentés), az asszisztensnek továbbra sem megy el; lásd lent.
 
 ### 2026-11-14 – Egy hibás levél vagy társeszköz nem állítja meg a pénzügyi postaládát; ami nem sikerült, azt nem törli
 - **Miért:** eddig egy levél, amelyet nem lehetett alkalmazni (vagy egy társeszköz, amelyre az írás elbukott), megszakította az egész kört: a többi levél és társeszköz sem kapott semmit, és minden szinkron ugyanott akadt el.
 - **Másik út:** a nem alkalmazható levelet törölni (adatvesztés: a levél a másik eszköz egyetlen példánya); az első hibánál leállni, mint eddig; korlátlanul újrapróbálni (a napló megtelne).
 - **Következmény:** a hálózati hiba és a lejárt bejelentkezés továbbra is az egész kör kudarca (visszalépéssel újrapróbálja); minden más hibánál a levél a Drive-on marad, egy futásban legfeljebb 3 próbát kap (az app újraindításáig utána békén marad), a sikertelen társeszköz állapota és a piszkos jelzők nem változnak, így a következő kör újra küldi. A szinkron-állapot kimondja („Pénzügy: N levelet vagy társeszközt most nem tudtam kezelni; a többit elintéztem, ezt később újra próbálom.”), a napló az okot is tartalmazza (`mail`).
+
+### 2026-11-16 – Étkezés és folyadék: havonta egy rekord, tételenként egy mező; nincs egészségügyi alapérték; kalória + makrók + saját ételek (felhasználó)
+- **Miért:** a két eszközön egyszerre felvett tételek ne vesszenek el (mezőnként „utolsó író nyer”), és ne legyen évente több ezer Drive-fájl; a célokat te adod meg, a program nem találja ki (nincs „ajánlott” kalória: az egészségügyi állítás lenne, és az orvos vagy a szakember a mérvadó).
+- **Másik út:** napi rekord listamezővel (két eszköz egyszerre írt tételei közül az egyik elveszne); tételenként egy rekord (évente több ezer fájl); ajánlott napi érték életkor és testsúly alapján.
+- **Következmény:** rekordfajta `intake`, azonosító `yyyy-MM`, mezők `f.<azonosító>` (étel) és `w.<azonosító>` (ital), kompakt JSON-szöveggel; a törlés a mező törlése; a másik hónapra áthelyezett tétel a régiben törlődik, az újban megjelenik. A célok alapból üresek (csak összeg látszik), a haladás szóval is ki van mondva (nem csak színnel). A modellnek semmi nem megy el belőle (forrásőr-tesztek).
+
+### 2026-11-16 – A Napló: bejegyzésenként egy rekord; a szöveg szinkronizál, a képek csak az eszközön vannak; `image` csomag, 1600 px, EXIF nélkül; a piszkozat a `meta`-ban (felhasználó)
+- **Miért:** a szöveg legyen mindenhol (mint a check-in); a kép nagy és személyes: a mentés 4 MB-os Drive-korlátja és a 11 forgó másolat miatt a képek szinkronja külön, későbbi kör. A helyadatnak (EXIF) nem szabad a naplóba kerülnie.
+- **Másik út:** a képek szinkronja most (nagy forgalom, mentés-méret, törlés-szabály); az eredeti fájl másolása (3–6 MB képenként, a helyadat a fájlban marad); JPEG-írás a motorral (nincs ilyen: csak PNG és nyers bájt); a piszkozat szinkronizált rekordként (egy félkész bejegyzés jelenne meg a másik eszközön).
+- **Következmény:** `journal` rekord (azonosító: uuid; `at`, `title`, `text`, `photos`); a képek `journal/photos/<azonosító>.<kiterjesztés>` alatt, a fájlnév mindig azonosító, soha nem az eredeti név; új csomag: `image` (tiszta Dart, csak a JPEG-íráshoz; a dekódolást és a kicsinyítést a motor végzi, a JPEG-írás egy `Isolate`-ban fut); amit nem lehet átalakítani (pl. HEIC Windowson), az eredetiben marad, ha ≤ 40 MB; az árva képet a napi karbantartás 2 nap türelem után törli; a másik eszközön „Ez a kép a másik eszközön van.”. A piszkozat (csak új bejegyzésnél) a `meta`-ban él, a képválasztó megnyitása előtt és az app háttérbe lépésekor íródik, mert az Android a galéria alatt megölheti a háttérbe került appot.
+
+### 2026-11-16 – A bér, a célok és a terv-kívánságok szinkronizált beállítás (a 2026-11-13-i és a 2026-11-15-i döntés megfordul) (felhasználó)
+- **Miért:** eszközönként újra be kellett írni őket, és te kérted, hogy egyszer kelljen megadni a bért és a célokat (a Helyi terv kívánságait én vettem hozzá a tervhez, mert ugyanez volt velük a hiba; kifogás nélkül maradt). A rejtett Drive-mappa ugyanaz a hely, ahová a check-in is megy, a modellnek pedig továbbra sem megy el belőlük semmi.
+- **Másik út:** maradjon az eszközön (újra beírás eszközönként); egyetlen rekord mindháromnak (két eszköz egy-egy mezője ütközne); törvényi alapértékek.
+- **Következmény:** rekordfajta `settings`, három rekord (`pay`, `goals`, `plan`), mezőnként a későbbi nyer: ha az egyik eszközön az órabért, a másikon a vasárnapi pótlékot állítod át, mindkettő megmarad; a Helyi terv sportlistája egyetlen mező (a sorrend egyben marad). Az új build első indításakor a régi `meta` kulcsokból (`pay.settings`, `intake.goals`, `plan.local`) az érték egy tranzakcióban átkerül a rekordba (meglévő rekordot nem ír felül; a régi kulcs törlődik); ha a két eszközön más érték volt, az később átvett nyer. Alapértéket sosem írunk rekordba: egy eszköz, amelyik nem állított semmit, nem szoríthatja ki azét, amelyik igen. A mentésben is benne vannak. A bér és a célok mostantól elhagyják az eszközt (a rejtett Drive-mappába kerülnek), a modellnek továbbra sem megy el belőlük semmi (forrásőr-tesztek).
 
 ## Az AI
 
@@ -122,6 +138,7 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** ha a modell nem elérhető (nincs kulcs, elfogyott a keret), az asszisztens eddig semmit nem tudott adni; a Kézikönyv szavai (naponta egy edzés, a forgás, a napszak, a szezon) kódban sehol nem voltak.
 - **Másik út:** a szabályokat a tervezőben újraírni (két helyen nem ugyanazt mondaná, és az egyik elavulna); modell a tervhez egy „olcsó” hívással (épp a keret nincs); a tervezés a háttérben, magától (nincs kérés, nincs terv).
 - **Következmény:** a `planWorkoutsLocally` csak jelölteket állít elő, és MINDEN jelöltet a `validateProposal` ítél meg, ugyanúgy, ahogy a modell javaslatait – ami átment, az minden szabálynak megfelel, és a tesztek a teljes tervet is újra megítéltetik. Az ablak holnaptól 7 nap (a mai nap fele elmúlt, a „nem a múltba” külön szabály). A sportok, a heti cél és a napszak a meta-táblában (`plan.local`) van: nem szinkronizálódik és nem kerül a mentésbe (a modell nem látja; ha egy napon a másik eszközön is kell, ez új döntés). A gomb csak tervkérésnél és csak valódi kiesésnél (nincs kulcs, visszautasított kulcs, nincs keret / egyenleg / napi korlát) jelenik meg a hibakártyán; a percnyi korlátot ki kell várni. A heti automatikus terv (a H csomag másik fele) nem készült.
+- **Megfordítva (2026-11-16):** a sportok, a heti cél és a napszak is szinkronizált beállítás lett (`settings/plan`); lásd lent.
 
 ### 2026-11-14 – Ha a modellnek elfogyott a kerete vagy megszűnt, a szolgáltató következő modelljére vált – kimondva, megjegyezve
 - **Miért:** a Groq, az OpenRouter és társai modellenként adják az ingyenes keretet, és rendszeresen kivonnak modelleket; eddig csak a Gemininél volt tartalék, a többinél a hiba a felhasználónál maradt.
@@ -156,6 +173,7 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** a fő funkciók ≤ 3 koppintásra; a húzással áthelyezés a legkockázatosabb tétel.
 - **Másik út:** menü mögött maradó Feladatok / Asszisztens; áthelyezés húzással.
 - **Következmény:** a Több (Beosztás, Beállítások) lap; az asszisztens-fülről váltás megszakítja a futó kérést; a töréspontok egy helyen (`breakpoints.dart`).
+- **Módosítva (2026-11-16):** az Asszisztens a „Több” menübe költözött, a sávba a Napló került; lásd lent.
 
 ### 2026-11-13 – Nincs golden kép; helyette szerkezeti tesztek
 - **Miért:** a `flutter test` Ahem-dobozokat rajzol, a golden semmit nem mondana a valódi betűről.
@@ -226,6 +244,16 @@ Miért olyan a Kvantum Naptár, amilyen. Minden bejegyzés: **döntés** · **mi
 - **Miért:** a repó nyilvános. A naplóban a még nyitott tételek helye, támadási útja és javítási terve térkép volna annak, aki keresi őket; a tulajdonos döntése: „Kivesszük a nyitott részeket”.
 - **Másik út:** minden marad (átlátható, de térkép); az egész napló kikerül (a kész tételek története is elvész).
 - **Következmény:** a SEC-1, 6, 10, 16, 17, 18, 19 részletei külön fájlban a tulajdonosnál vannak (nem a tárolóban); a naplóban a státusz és „a részletek nem nyilvánosak” áll. A `.gitignore` titok- és adatmintái bővültek; a tesztekben a valódi tartományú példa-címek `example.com`-ra cserélődtek; `SECURITY.md` mondja meg, hogyan lehet privátban jelenteni, és mi nem hiba. A kézikönyv alapfájljai (`assets/handbook`) változatlanok.
+
+### 2026-11-16 – Alsó sáv: Naptár · Feladatok · Napló · Pénzügyek · Több; az Asszisztens a „Több” menübe (felhasználó)
+- **Miért:** a Napló új fő hely, amelyet gyakran használsz; a sáv így is öt gombos marad (a felirat-szabály és a 360 dp-s elrendezés nem romlik). Az Asszisztenst te jelölted ki arra, hogy a „Több” menübe költözzön.
+- **Másik út:** hat gomb (keskeny telefonon nem fér el); a Napló a „Több” alatt (a mindennapi használathoz túl mély).
+- **Következmény:** az Asszisztens a „Több” menü első eleme; ugyanúgy tovább él (az állapota megmarad, a futó kérés leáll, ha elhagyod); amíg rajta vagy, a „Több” gomb van kiemelve, a Vissza a Naptárra visz; a „Több” lap görgethető (öt elem 200 %-os betűvel nem férne el). A 2026-11-12-i bejegyzés ezzel módosul.
+
+### 2026-11-16 – A „Napló” a Diagnosztikában „Hibanapló” lett
+- **Miért:** a Napló fül a te bejegyzéseid helye; ha a Diagnosztika is „Napló”-t mondana, a kettő összekeveredne.
+- **Másik út:** a fül kapjon más nevet; te „Napló” fület kértél.
+- **Következmény:** a Diagnosztika oldal, a jelentés, a törlés párbeszéde és a dokumentáció „Hibanapló”-t ír; a kódban a `diag` / `DiagLog` név marad.
 
 ## Függő (próba, nem döntés)
 
