@@ -89,7 +89,8 @@ String _cut(String s, int max) {
 }
 
 int? _intIn(Object? v, int lo, int hi) {
-  final n = v is num ? v.toInt() : null;
+  // (an infinite number, "1e999" in a file, has no integer: toInt() would throw)
+  final n = v is num && v.isFinite ? v.toInt() : null;
   return (n == null || n < lo || n > hi) ? null : n;
 }
 

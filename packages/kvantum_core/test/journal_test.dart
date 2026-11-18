@@ -72,6 +72,18 @@ void main() {
       expect(PhotoRef.tryParse(p.toJson()), p);
     });
 
+    test(
+      'with a size that is infinite is not a picture, and nothing throws',
+      () {
+        expect(PhotoRef.tryParse({'id': 'p1', 'w': double.infinity}), isNull);
+        expect(PhotoRef.tryParse({'id': 'p1', 'h': double.nan}), isNull);
+        expect(
+          PhotoRef.tryParse({'id': 'p1', 'b': double.negativeInfinity}),
+          isNull,
+        );
+      },
+    );
+
     test('equal pictures hash alike, and say what they are', () {
       const a = PhotoRef(id: 'p1', width: 3, height: 2, bytes: 9);
       const b = PhotoRef(id: 'p1', width: 3, height: 2, bytes: 9);

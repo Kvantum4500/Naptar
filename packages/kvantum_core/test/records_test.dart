@@ -246,4 +246,26 @@ void main() {
       expect(recordFileName(kindTask, 'abc'), 'task-abc.json');
     });
   });
+
+  group('a number that is no number', () {
+    test('is no priority, no estimate, no rating - and no crash', () {
+      final task = SyncRecord(id: 'a', kind: kindTask).edit(
+        {
+          'title': 'x',
+          'priority': double.infinity,
+          'energyNeed': double.nan,
+          'estimateMin': double.negativeInfinity,
+        },
+        ts: 1,
+        dev: 'A',
+      );
+      final t = TaskView(task);
+      expect((t.priority, t.energyNeed, t.estimateMin), (2, 3, null));
+      final day = SyncRecord(
+        id: '2026-11-16',
+        kind: kindCheckIn,
+      ).edit({'physical': double.infinity, 'mood': 4}, ts: 1, dev: 'A');
+      expect((CheckInView(day).physical, CheckInView(day).mood), (null, 4));
+    });
+  });
 }

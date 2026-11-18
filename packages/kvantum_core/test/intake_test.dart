@@ -571,6 +571,28 @@ void main() {
       expect(log.fluids.map((w) => w.id), ['w']);
     });
 
+    test(
+      'a number that is infinite ("1e999") is no number, and never throws',
+      () {
+        const when = '"day":"2026-11-16","time":"09:00"';
+        expect(FoodEntry.decode('a', '{$when,"kcal":1e999}'), isNull);
+        final f = FoodEntry.decode(
+          'a',
+          '{$when,"kcal":300,"protein":-1e999,"fat":1e999}',
+        )!;
+        expect((f.kcal, f.protein, f.fat), (300, null, null));
+        expect(FluidEntry.decode('w', '{$when,"ml":1e999}'), isNull);
+        final goals = IntakeGoals.fromRecord(
+          SyncRecord(id: settingsGoalsId, kind: kindSettings).edit(
+            {'kcal': double.infinity, 'ml': double.nan, 'protein': 120},
+            ts: 1,
+            dev: 'A',
+          ),
+        );
+        expect((goals.kcal, goals.ml, goals.protein), (null, null, 120));
+      },
+    );
+
     test('the day written in the entry decides, not the month record', () {
       final r = month(
         '2026-11',
