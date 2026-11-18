@@ -29,6 +29,7 @@ import 'support/diary.dart';
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
 import 'support/pickers.dart';
+import 'support/semantics_tree.dart';
 import 'support/turns.dart';
 
 /// The diary page and its editor (8th round): the list by day, what an entry
@@ -327,9 +328,14 @@ void main() {
         find.bySemanticsLabel('Bejegyzés, 11:30. Fogorvos. Nem fájt.. 2 kép'),
         findsOneWidget,
       );
-      // (as that one sentence, not also piece by piece: the head, the time)
-      expect(find.bySemanticsLabel('Fogorvos'), findsNothing);
-      expect(find.bySemanticsLabel('11:30'), findsNothing);
+      // (as that one sentence, not also piece by piece under it)
+      expect(
+        semanticChildCount(
+          tester,
+          find.bySemanticsLabel('Bejegyzés, 11:30. Fogorvos. Nem fájt.. 2 kép'),
+        ),
+        0,
+      );
       handle.dispose();
       await shutdown(tester, db);
     });

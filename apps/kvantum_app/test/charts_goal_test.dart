@@ -190,6 +190,13 @@ void main() {
       final calls = record(bars(goal: 0, goalLabel: 'cél'));
       expect(only(calls, #drawPath), isEmpty);
       expect(only(calls, #drawParagraph), hasLength(4));
+      // (and leaves no strip for a label that is not written: the grid is
+      // where it is without a goal)
+      List<List<Object?>> lines(List<Invocation> c) => [
+        for (final l in only(c, #drawLine))
+          l.positionalArguments.take(2).toList(),
+      ];
+      expect(lines(calls), lines(record(bars())));
     });
 
     test('a goal is one dashed line across the plot, as a stroke', () {

@@ -146,6 +146,9 @@ void main() {
       );
       expect(foodDetail(food(c: 20)), '08:00 · 20 g szénhidrát');
       expect(foodDetail(food(f: 0)), '08:00 · 0 g zsír');
+      // (a zero that was entered is told, as nothing is not)
+      expect(foodDetail(food(c: 0)), '08:00 · 0 g szénhidrát');
+      expect(foodDetail(food(p: 0)), '08:00 · 0 g fehérje');
     });
 
     test('a macro line, with and without a goal', () {

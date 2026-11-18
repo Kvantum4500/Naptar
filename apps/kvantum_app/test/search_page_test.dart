@@ -2,12 +2,14 @@ import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/journal/journal_providers.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/finance/finance_editors.dart';
 import 'package:kvantum_app/ui/home_page.dart';
@@ -33,6 +35,7 @@ void main() {
   Future<void> boot(
     WidgetTester tester, {
     Size size = const Size(1280, 900),
+    List<Override> extra = const [],
   }) async {
     useSize(tester, size: size);
     db = await newDb();
@@ -49,6 +52,7 @@ void main() {
             () => DateTime.utc(2026, 11, 12, 9),
           ),
           midnightTimerProvider.overrideWithValue(ManualTimers().make),
+          ...extra,
         ],
       ),
     );
@@ -480,6 +484,78 @@ void main() {
       await type(tester, 'seta');
       expect(find.textContaining('18:30'), findsOneWidget);
       expect(find.textContaining('2 kép'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('shows only the first line of what it found', (tester) async {
+      await boot(tester);
+      await seedEntry(
+        tester,
+        'e1',
+        'Séta',
+        'Első sor\nMásodik sor\nHarmadik sor',
+      );
+      await openSearch(tester);
+      await type(tester, 'seta');
+      expect(find.textContaining('Első sor…'), findsOneWidget);
+      expect(find.textContaining('Második'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('says "1 kép" for one picture', (tester) async {
+      await boot(tester);
+      await tester.runAsync(
+        () => records.edit(
+          kindJournal,
+          'e3',
+          JournalEntry.checked(
+            id: 'e3',
+            at: DateTime.utc(2026, 11, 10, 18, 30),
+            title: 'Séta a Dunán',
+            photos: const [PhotoRef(id: 'a')],
+          ).fields,
+        ),
+      );
+      await openSearch(tester);
+      await type(tester, 'seta');
+      expect(find.textContaining('· 1 kép'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('says how many more there are when the group is cut', (
+      tester,
+    ) async {
+      // (31 entries that match: the group shows 30, and says there is one more)
+      final many = [
+        for (var i = 0; i < 31; i++)
+          JournalEntry.checked(
+            id: 'e$i',
+            at: DateTime.utc(2026, 11, 10, 8, i),
+            title: 'Kirándulás $i',
+          ),
+      ];
+      await boot(
+        tester,
+        extra: [
+          journalEntriesProvider.overrideWith((ref) => Stream.value(many)),
+        ],
+      );
+      await openSearch(tester);
+      await type(tester, 'kirandulas');
+      expect(find.text('Napló (30)'), findsOneWidget);
+      // the note is at the end of the list: scroll to it
+      await tester.scrollUntilVisible(
+        find.text('és még 1 találat – pontosítsd a keresést'),
+        200,
+        scrollable: find.descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(
+        find.text('és még 1 találat – pontosítsd a keresést'),
+        findsOneWidget,
+      );
       await shutdown(tester, db);
     });
 

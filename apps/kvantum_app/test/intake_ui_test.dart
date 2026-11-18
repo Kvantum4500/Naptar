@@ -15,6 +15,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
 import 'support/pickers.dart';
+import 'support/semantics_tree.dart';
 import 'support/turns.dart';
 
 /// The page of the food and fluid log (8th round): what it shows for a day,
@@ -376,6 +377,24 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('the form of "Más…" starts with the kind chosen on the page', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tapKey(tester, 'drink-kind');
+      await tester.tap(find.byKey(const Key('kind-item-tea')));
+      await settle(tester);
+      await tapKey(tester, 'drink-other');
+      expect(
+        tester.widget<ChoiceChip>(find.byKey(const Key('kind-tea'))).selected,
+        isTrue,
+      );
+      await enter(tester, 'fluid-ml', '250');
+      await tapKey(tester, 'fluid-save');
+      expect((await logOf(tester)).fluids.single.kind, DrinkKind.tea);
+      await shutdown(tester, db);
+    });
+
     testWidgets('on another day the drink is put at noon of that day', (
       tester,
     ) async {
@@ -618,6 +637,83 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('the number fields of the form take digits only', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tapKey(tester, 'intake-add-food');
+      await enter(tester, 'food-kcal', 'a1b2-c');
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('food-kcal')))
+            .controller!
+            .text,
+        '12',
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets(
+      'that is refused has its reason called out to a screen reader',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await boot(tester);
+        await tapKey(tester, 'intake-add-food');
+        await tapKey(tester, 'food-save');
+        final error = tester.getSemantics(find.byKey(const Key('food-error')));
+        expect(error.flagsCollection.isLiveRegion, isTrue);
+        handle.dispose();
+        await shutdown(tester, db);
+      },
+    );
+
+    testWidgets('up to six earlier foods are offered, and no more', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        foods: [
+          for (var i = 0; i < 8; i++)
+            food('e$i', day: DateTime.utc(2026, 11, 1 + i), name: 'Étel $i'),
+        ],
+      );
+      await tapKey(tester, 'intake-add-food');
+      expect(find.byKey(const Key('suggest-5')), findsOneWidget);
+      expect(find.byKey(const Key('suggest-6')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the meal that was chosen stays when the time changes or an '
+        'earlier food is taken up', (tester) async {
+      await boot(
+        tester,
+        foods: [
+          food(
+            'old',
+            day: DateTime.utc(2026, 11, 10),
+            name: 'Zabkása',
+            kcal: 340,
+          ),
+        ],
+      );
+      await tapKey(tester, 'intake-add-food');
+      await tester.tap(find.byKey(const Key('meal-d')));
+      await tester.pump();
+      // (a time of the morning: with no meal chosen it would be a breakfast)
+      await tapKey(tester, 'food-time');
+      await typeTimeInPicker(tester, 7, 45);
+      bool dinner() =>
+          tester.widget<ChoiceChip>(find.byKey(const Key('meal-d'))).selected;
+      expect(dinner(), isTrue);
+      // (and an earlier food, a breakfast, does not take the choice back)
+      await tester.tap(find.byKey(const Key('suggest-0')));
+      await tester.pump();
+      expect(dinner(), isTrue);
+      await tapKey(tester, 'food-save');
+      expect((await logOf(tester)).foodsOn(today).single.meal, Meal.dinner);
+      await shutdown(tester, db);
+    });
+
     testWidgets('earlier foods are offered, and a tap fills the form', (
       tester,
     ) async {
@@ -748,6 +844,22 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('every food with macros: the lines, and no note', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        foods: [
+          food('a', protein: 10),
+          food('b', name: 'Más', minute: 9 * 60, carbs: 20),
+        ],
+      );
+      expect(find.byKey(const Key('macro-Fehérje')), findsOneWidget);
+      expect(find.byKey(const Key('macro-Szénhidrát')), findsOneWidget);
+      expect(find.byKey(const Key('macro-note')), findsNothing);
+      await shutdown(tester, db);
+    });
+
     testWidgets('no macros, no macro lines', (tester) async {
       await boot(tester, foods: [food('a')]);
       expect(find.byKey(const Key('macro-Fehérje')), findsNothing);
@@ -770,6 +882,49 @@ void main() {
       expect(find.text('még ${formatKcal(2200)}'), findsOneWidget);
       expect(find.text('még ${formatVolume(2500)}'), findsOneWidget);
       expect(find.byKey(const Key('intake-kcal-bar')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('are five fields, each a goal of its own', (tester) async {
+      await boot(tester);
+      await tapKey(tester, 'intake-goals');
+      await enter(tester, 'goal-kcal', '2300');
+      await enter(tester, 'goal-protein', '120');
+      await enter(tester, 'goal-carbs', '260');
+      await enter(tester, 'goal-fat', '70');
+      await enter(tester, 'goal-ml', '2600');
+      await tapKey(tester, 'goals-save');
+      final g = scope(tester).read(intakeGoalsProvider).value!;
+      expect(
+        (g.kcal, g.protein, g.carbs, g.fat, g.ml),
+        (2300, 120, 260, 70, 2600),
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('can be as long as the limits: five digits for calories and '
+        'fluid', (tester) async {
+      await boot(tester);
+      await tapKey(tester, 'intake-goals');
+      String text(String key) =>
+          tester.widget<TextField>(find.byKey(Key(key))).controller!.text;
+      // (a sixth digit is not taken; the grams take four)
+      await enter(tester, 'goal-kcal', '123456');
+      expect(text('goal-kcal'), '12345');
+      await enter(tester, 'goal-kcal', '${IntakeGoals.maxKcal}');
+      await enter(tester, 'goal-ml', '${IntakeGoals.maxMl}');
+      expect(text('goal-kcal'), '${IntakeGoals.maxKcal}');
+      expect(text('goal-ml'), '${IntakeGoals.maxMl}');
+      await enter(tester, 'goal-protein', '12345');
+      expect(text('goal-protein'), '1234');
+      await enter(tester, 'goal-kcal', '${IntakeGoals.maxKcal}');
+      await tapKey(tester, 'goals-save');
+      // ('1234' grams is too much: the form says so and stays)
+      expect(find.byKey(const Key('goals-error')), findsOneWidget);
+      await enter(tester, 'goal-protein', '');
+      await tapKey(tester, 'goals-save');
+      final g = scope(tester).read(intakeGoalsProvider).value!;
+      expect((g.kcal, g.ml), (IntakeGoals.maxKcal, IntakeGoals.maxMl));
       await shutdown(tester, db);
     });
 
@@ -827,6 +982,11 @@ void main() {
         foods: [food('a', kcal: 2000)],
       );
       expect(find.text('a cél teljesült'), findsOneWidget);
+      // (the tick: not the arrow of a day that is over, nor the flag of one
+      // that is still short)
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+      expect(find.byIcon(Icons.flag_outlined), findsNothing);
       await shutdown(tester, db);
     });
 
@@ -962,6 +1122,71 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('are told of by the note: the dashed line is there when a '
+        'calorie goal is set, or a fluid goal', (tester) async {
+      await boot(tester, goals: const IntakeGoals(kcal: 2000));
+      await toTrend(tester);
+      String note() =>
+          tester.widget<Text>(find.byKey(const Key('intake-trend-note'))).data!;
+      expect(note(), contains('szaggatott vonal'));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('are told of by the note with a fluid goal alone, too', (
+      tester,
+    ) async {
+      await boot(tester, goals: const IntakeGoals(ml: 2500));
+      await toTrend(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('intake-trend-note'))).data!,
+        contains('szaggatott vonal'),
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('are told of by the note without a word of a line when there '
+        'is no goal', (tester) async {
+      await boot(tester);
+      await toTrend(tester);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('intake-trend-note'))).data!,
+        isNot(contains('szaggatott')),
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('have a table of the days that begins with today', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        foods: [
+          food('a', kcal: 2400),
+          food('b', day: DateTime.utc(2026, 11, 14), kcal: 1600),
+        ],
+      );
+      await toTrend(tester);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('intake-table')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.byKey(const Key('intake-table')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('intake-table')));
+      await tester.pumpAndSettle();
+      final log = await logOf(tester);
+      final todayRow = find.text(intakeTrendRow(log.totalsOn(today)));
+      final olderRow = find.text(
+        intakeTrendRow(log.totalsOn(DateTime.utc(2026, 11, 14))),
+      );
+      expect(
+        tester.getTopLeft(todayRow).dy,
+        lessThan(tester.getTopLeft(olderRow).dy),
+      );
+      await shutdown(tester, db);
+    });
+
     testWidgets('are said in words, too: the sentence and the table', (
       tester,
     ) async {
@@ -1079,6 +1304,17 @@ void main() {
         find.bySemanticsLabel('Tea · ${formatVolume(300)}, 09:00'),
         findsOneWidget,
       );
+      // (one line each: not also piece by piece under it)
+      for (final label in [
+        'Zabkása, ${formatKcal(320)}, 08:00',
+        'Tea · ${formatVolume(300)}, 09:00',
+      ]) {
+        expect(
+          semanticChildCount(tester, find.bySemanticsLabel(label)),
+          0,
+          reason: label,
+        );
+      }
       await shutdown(tester, db);
       handle.dispose();
     });
