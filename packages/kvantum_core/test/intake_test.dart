@@ -610,6 +610,34 @@ void main() {
       expect(log.foods.single.kcal, 100);
     });
 
+    test('a drink that moved to another month counts once, too', () {
+      final nov = month(
+        '2026-11',
+        drink('w', day: DateTime.utc(2026, 11, 30), ml: 200).fields,
+        ts: 10,
+      );
+      final dec = month(
+        '2026-12',
+        drink('w', day: DateTime.utc(2026, 12, 1), ml: 500).fields,
+        ts: 20,
+      );
+      for (final order in [
+        [nov, dec],
+        [dec, nov],
+      ]) {
+        final log = IntakeLog.from(order);
+        expect(log.fluids.length, 1);
+        expect(log.fluids.single.day, DateTime.utc(2026, 12, 1));
+        expect(log.fluids.single.ml, 500);
+      }
+      final novNewer = month(
+        '2026-11',
+        drink('w', day: DateTime.utc(2026, 11, 30), ml: 200).fields,
+        ts: 30,
+      );
+      expect(IntakeLog.from([novNewer, dec]).fluids.single.ml, 200);
+    });
+
     test('a removal in the old month does not hide the move', () {
       final nov = month('2026-11', FoodEntry.removal('a'), ts: 30);
       final dec = month(

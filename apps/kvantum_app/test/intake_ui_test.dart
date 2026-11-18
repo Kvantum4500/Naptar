@@ -14,6 +14,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
+import 'support/pickers.dart';
 import 'support/turns.dart';
 
 /// The page of the food and fluid log (8th round): what it shows for a day,
@@ -376,6 +377,32 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('made in the form on another day and at another time: the '
+        'page goes there, and the drink can be taken back', (tester) async {
+      await boot(tester);
+      await tapKey(tester, 'drink-other');
+      await enter(tester, 'fluid-ml', '250');
+      await tapKey(tester, 'fluid-day');
+      await tester.tap(find.text('20'));
+      await tester.pump();
+      await tester.tap(find.text('OK'));
+      await tester.pump();
+      await tapKey(tester, 'fluid-time');
+      await typeTimeInPicker(tester, 18, 5);
+      await tapKey(tester, 'fluid-save');
+      final w = (await logOf(tester)).fluids.single;
+      expect(
+        (w.day, w.timeText, w.ml),
+        (DateTime.utc(2026, 11, 20), '18:05', 250),
+      );
+      expect(scope(tester).read(intakeDayProvider), DateTime.utc(2026, 11, 20));
+      expect(find.text('Ital felvéve'), findsOneWidget);
+      await tester.tap(find.text('Visszavonás'));
+      await settle(tester);
+      expect((await logOf(tester)).fluids, isEmpty);
+      await shutdown(tester, db);
+    });
+
     testWidgets('the sizes in the form fill the amount in', (tester) async {
       await boot(tester);
       await tapKey(tester, 'drink-other');
@@ -464,6 +491,35 @@ void main() {
       expect(inKcal(find.textContaining(formatKcal(320))), findsOneWidget);
       expect(find.text('Ebéd · ${formatKcal(320)}'), findsOneWidget);
       expect(find.text('Étel felvéve'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('that was just added can be taken back at once', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tapKey(tester, 'intake-add-food');
+      await enter(tester, 'food-name', 'Zabkása tejjel');
+      await enter(tester, 'food-kcal', '320');
+      await tapKey(tester, 'food-save');
+      expect((await logOf(tester)).foods, hasLength(1));
+      await tester.tap(find.text('Visszavonás'));
+      await settle(tester);
+      expect((await logOf(tester)).foods, isEmpty);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('has the time that is typed in the form, and the meal '
+        'follows it until one is chosen', (tester) async {
+      await boot(tester);
+      await tapKey(tester, 'intake-add-food');
+      await enter(tester, 'food-name', 'Reggeli');
+      await enter(tester, 'food-kcal', '300');
+      await tapKey(tester, 'food-time');
+      await typeTimeInPicker(tester, 7, 45);
+      await tapKey(tester, 'food-save');
+      final f = (await logOf(tester)).foods.single;
+      expect((f.timeText, f.meal), ('07:45', Meal.breakfast));
       await shutdown(tester, db);
     });
 

@@ -135,6 +135,24 @@ void main() {
       );
     });
 
+    test(
+      'a sport and a band are told apart, hash alike, and say what they are',
+      () {
+        const a = PlanSport(name: 'Kajak', minutes: 90, outdoor: true);
+        const b = PlanSport(name: 'Kajak', minutes: 90, outdoor: true);
+        expect(a, b);
+        expect(a.hashCode, b.hashCode);
+        expect(<PlanSport>{a}..add(b), hasLength(1));
+        expect(a, isNot(const PlanSport(name: 'Kajak', minutes: 90)));
+        expect(
+          a,
+          isNot(const PlanSport(name: 'Kajak', minutes: 60, outdoor: true)),
+        );
+        expect(a.toString(), 'PlanSport(Kajak, 90, outdoor: true)');
+        expect(PlanBand.morning.toString(), 'PlanBand(morning)');
+      },
+    );
+
     test('the key tells sports apart: the known ones, else the name', () {
       expect(const PlanSport(name: 'Gym', minutes: 60).key, 'gym');
       expect(

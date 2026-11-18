@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +8,8 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
+import 'package:kvantum_app/diag/diag_log.dart';
+import 'package:kvantum_app/journal/journal_draft_store.dart';
 import 'package:kvantum_app/journal/journal_ops.dart';
 import 'package:kvantum_app/journal/journal_providers.dart';
 import 'package:kvantum_app/journal/photo_files.dart';
@@ -23,6 +27,7 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'support/diary.dart';
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
+import 'support/pickers.dart';
 import 'support/turns.dart';
 
 /// The diary page and its editor (8th round): the list by day, what an entry
@@ -82,6 +87,7 @@ void main() {
     Size size = const Size(400, 900),
     double? textScale,
     ThemeMode themeMode = ThemeMode.light,
+    PhotoImporter? importer,
     List<Override> extra = const [],
   }) async {
     useSize(tester, size: size);
@@ -96,11 +102,13 @@ void main() {
           photoFilesProvider.overrideWithValue(files),
           photoPickerProvider.overrideWithValue(picker),
           photoImporterProvider.overrideWith(
-            (ref) => PhotoImporter(
-              files: files,
-              processor: fakeProcessor,
-              newId: () => 'new${++stored}',
-            ),
+            (ref) =>
+                importer ??
+                PhotoImporter(
+                  files: files,
+                  processor: fakeProcessor,
+                  newId: () => 'new${++stored}',
+                ),
           ),
           ...extra,
         ],
@@ -139,6 +147,21 @@ void main() {
       .runAsync(() => scope(tester).read(journalEntriesProvider.future)))!;
 
   group('the list', () {
+    testWidgets('says so when the diary cannot be read', (tester) async {
+      await boot(
+        tester,
+        extra: [
+          journalEntriesProvider.overrideWith(
+            (ref) => Stream<List<JournalEntry>>.error(StateError('x')),
+          ),
+        ],
+      );
+      expect(find.byKey(const Key('journal-error')), findsOneWidget);
+      expect(find.textContaining('A napló nem olvasható.'), findsOneWidget);
+      expect(find.byKey(const Key('journal-add')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
     testWidgets('says what the diary is for when it is empty', (tester) async {
       await boot(tester);
       expect(find.byKey(const Key('journal-empty')), findsOneWidget);
@@ -451,6 +474,21 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('can be put at another time', (tester) async {
+      await boot(tester);
+      await openNew(tester);
+      await tapKey(tester, 'entry-time');
+      await typeTimeInPicker(tester, 21, 40);
+      expect(find.text('21:40'), findsOneWidget);
+      await enter(tester, 'entry-text', 'Késő este');
+      await tapKey(tester, 'entry-save');
+      expect(
+        (await saved(tester)).single.at,
+        DateTime.utc(2026, 11, 16, 21, 40),
+      );
+      await shutdown(tester, db);
+    });
+
     testWidgets('leaving it with something written asks first', (tester) async {
       await boot(tester);
       await openNew(tester);
@@ -516,6 +554,36 @@ void main() {
       final e = (await saved(tester)).single;
       expect([for (final p in e.photos) p.id], ['new1', 'new2']);
       expect(e.photos.first.width, 1200);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('taken in with a failure that is the whole import: told, and '
+        'the entry goes on', (tester) async {
+      final sink = MemoryDiagSink();
+      final log = DiagLog()..attach(sink);
+      await boot(
+        tester,
+        importer: _BrokenImporter(),
+        extra: [diagLogProvider.overrideWithValue(log)],
+      );
+      await openNew(tester);
+      await enter(tester, 'entry-text', 'Kép nélkül is mentem');
+      picker.next = [chosen('a.jpg')];
+      await tapKey(tester, 'entry-add-photo');
+      expect(
+        tester.widget<Text>(find.byKey(const Key('entry-notice'))).data,
+        'A képeket nem sikerült felvenni.',
+      );
+      expect(find.byKey(const Key('entry-busy')), findsNothing);
+      expect(find.text('Képek (0/12)'), findsOneWidget);
+      expect(
+        tester.widget<OutlinedButton>(field('entry-add-photo')).onPressed,
+        isNotNull,
+      );
+      await tester.runAsync(log.flush);
+      expect(sink.lines.join('\n'), contains('photo.import_failed'));
+      await tapKey(tester, 'entry-save');
+      expect((await saved(tester)).single.text, 'Kép nélkül is mentem');
       await shutdown(tester, db);
     });
 
@@ -652,6 +720,35 @@ void main() {
       expect((await draftOf(tester))!.text, 'Hátterben');
       await shutdown(tester, db);
     });
+
+    testWidgets(
+      'that cannot be kept does not stand in the way of the writing',
+      (tester) async {
+        final sink = MemoryDiagSink();
+        final log = DiagLog()..attach(sink);
+        await boot(
+          tester,
+          extra: [
+            journalDraftStoreProvider.overrideWith(
+              (ref) => _BrokenDrafts(ref.watch(recordRepoProvider)),
+            ),
+            diagLogProvider.overrideWithValue(log),
+          ],
+        );
+        await openNew(tester);
+        await enter(tester, 'entry-text', 'Mégis megmarad');
+        await background(tester);
+        expect(find.byType(JournalEntryEditor), findsOneWidget);
+        await tapKey(tester, 'entry-save');
+        expect((await saved(tester)).single.text, 'Mégis megmarad');
+        expect(find.byType(JournalEntryEditor), findsNothing);
+        await tester.runAsync(log.flush);
+        final text = sink.lines.join('\n');
+        expect(text, contains('draft.save_failed'));
+        expect(text, contains('draft.clear_failed'));
+        await shutdown(tester, db);
+      },
+    );
 
     testWidgets('has the pictures taken in so far', (tester) async {
       await boot(tester);
@@ -991,6 +1088,79 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('says that a file that is no picture cannot be shown, in the '
+        'list and full screen', (tester) async {
+      files.put('bad.jpg', Uint8List.fromList([1, 2, 3, 4]));
+      await boot(
+        tester,
+        entries: [
+          entry(
+            'a',
+            photos: [
+              const PhotoRef(id: 'bad', width: 100, height: 80, bytes: 4),
+            ],
+          ),
+        ],
+      );
+      // (the engine says it cannot read it a moment after the first frame)
+      await settle(tester);
+      await settle(tester);
+      expect(find.byTooltip(photoUnreadableText), findsOneWidget);
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('entry-photo-bad')));
+      await settle(tester);
+      await settle(tester);
+      expect(find.text(photoUnreadableText), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('says the same when the store cannot read the file', (
+      tester,
+    ) async {
+      files = _UnreadableStore();
+      await boot(
+        tester,
+        entries: [
+          entry('a', photos: [photo('p1')]),
+        ],
+      );
+      expect(find.byTooltip(photoUnreadableText), findsOneWidget);
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('entry-photo-p1')));
+      await settle(tester);
+      expect(find.text(photoUnreadableText), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('shows a progress mark while the file is read, then the '
+        'picture', (tester) async {
+      final slow = _SlowStore();
+      files = slow;
+      await boot(
+        tester,
+        entries: [
+          entry('a', photos: [photo('p1')]),
+        ],
+      );
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('entry-photo-p1')));
+      // (the mark turns for ever: no settling while it is there)
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.runAsync(() async {
+        slow.gate.complete(tinyJpeg);
+        await pumpEventQueue(times: 50);
+      });
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await shutdown(tester, db);
+    });
+
     testWidgets('is read out picture by picture', (tester) async {
       final handle = tester.ensureSemantics();
       await openViewer(tester);
@@ -1009,6 +1179,42 @@ class _FailingOps extends JournalOps {
   @override
   Future<void> save(JournalEntry entry) =>
       throw StateError('az adatbázis nem írható');
+}
+
+/// Drafts that can neither be kept nor cleared (a disk that is full).
+class _BrokenDrafts extends JournalDraftStore {
+  const _BrokenDrafts(super.repo);
+
+  @override
+  Future<void> save(JournalDraft draft) => throw StateError('nincs hely');
+
+  @override
+  Future<void> clear() => throw StateError('nincs hely');
+}
+
+/// An importer that fails as a whole (not one picture at a time).
+class _BrokenImporter extends PhotoImporter {
+  _BrokenImporter() : super(files: MemoryPhotoFiles());
+
+  @override
+  Future<PhotoImportResult> import(
+    List<PickedPhoto> picked, {
+    required int room,
+  }) => throw StateError('nem olvasható');
+}
+
+/// A store that gives an error when a picture is read.
+class _UnreadableStore extends MemoryPhotoFiles {
+  @override
+  Future<Uint8List?> read(String name) => throw StateError('nem olvasható');
+}
+
+/// A store whose read is still going on, until [gate] says it is over.
+class _SlowStore extends MemoryPhotoFiles {
+  final gate = Completer<Uint8List?>();
+
+  @override
+  Future<Uint8List?> read(String name) => gate.future;
 }
 
 /// The same for a deletion.

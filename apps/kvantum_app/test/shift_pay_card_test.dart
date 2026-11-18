@@ -126,6 +126,14 @@ void main() {
       await done(tester);
     });
 
+    testWidgets('the button of the invitation opens the form', (tester) async {
+      await mount(tester, events: [night(2026, 11, 10)]);
+      await tester.tap(find.byKey(const Key('pay-set')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('pay-hourly')), findsOneWidget);
+      await done(tester);
+    });
+
     testWidgets('set, but no shift that month: nothing to count', (
       tester,
     ) async {

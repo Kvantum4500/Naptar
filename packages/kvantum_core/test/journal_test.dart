@@ -72,6 +72,19 @@ void main() {
       expect(PhotoRef.tryParse(p.toJson()), p);
     });
 
+    test('equal pictures hash alike, and say what they are', () {
+      const a = PhotoRef(id: 'p1', width: 3, height: 2, bytes: 9);
+      const b = PhotoRef(id: 'p1', width: 3, height: 2, bytes: 9);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(<PhotoRef>{a}..add(b), hasLength(1));
+      expect(
+        a,
+        isNot(const PhotoRef(id: 'p1', width: 3, height: 2, bytes: 10)),
+      );
+      expect(a.toString(), 'PhotoRef(p1.jpg, 3x2, 9 B)');
+    });
+
     test('keeps another ending, and leaves the usual one unsaid', () {
       const heic = PhotoRef(id: 'x1', ext: 'heic', bytes: 5);
       expect(heic.fileName, 'x1.heic');
@@ -147,6 +160,16 @@ void main() {
       expect(e.at, nov16);
       expect(e.day, DateTime.utc(2026, 11, 16));
       expect(e.timeText, '08:15');
+    });
+
+    test('equal entries hash alike, different pictures make them differ', () {
+      final a = entry('e1', photos: [photo('p1')]);
+      final b = entry('e1', photos: [photo('p1')]);
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect({a, b}, hasLength(1));
+      expect(a, isNot(entry('e1', photos: [photo('p2')])));
+      expect(a, isNot(entry('e2', photos: [photo('p1')])));
     });
 
     test('drops the seconds and makes the time a floating one', () {

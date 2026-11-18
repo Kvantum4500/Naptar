@@ -9,10 +9,12 @@ import 'package:kvantum_app/data/event_repository.dart';
 import 'package:kvantum_app/data/finance_repository.dart';
 import 'package:kvantum_app/data/housekeeping.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/journal/journal_draft_store.dart';
 import 'package:kvantum_app/journal/journal_ops.dart';
 import 'package:kvantum_app/journal/journal_providers.dart';
 import 'package:kvantum_app/journal/photo_files.dart';
+import 'package:kvantum_app/journal/photo_import.dart';
 import 'package:kvantum_app/journal/photo_sweep.dart';
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -461,5 +463,55 @@ void main() {
         expect(await c.read(photoBytesProvider('b2.jpg').future), isNull);
       },
     );
+  });
+
+  group('the pieces the app puts together', () {
+    test(
+      'the importer writes into the pictures and the log of the app',
+      () async {
+        final files = MemoryPhotoFiles();
+        final sink = MemoryDiagSink();
+        final log = DiagLog()..attach(sink);
+        final c = ProviderContainer(
+          overrides: [
+            ...baseOverrides(db),
+            photoFilesProvider.overrideWithValue(files),
+            diagLogProvider.overrideWithValue(log),
+          ],
+        );
+        addTearDown(c.dispose);
+        // (no engine can read these bytes: an ending the phone may keep as it
+        // is stays, anything else is no picture and is told to the log)
+        PickedPhoto file(String name) => PickedPhoto(
+          name: name,
+          size: 4,
+          read: () async => Uint8List.fromList([1, 2, 3, 4]),
+        );
+        final result = await c.read(photoImporterProvider).import([
+          file('scan.heic'),
+          file('notes.txt'),
+        ], room: 5);
+        expect(result.added, hasLength(1));
+        expect(files.names.single, '${result.added.single.id}.heic');
+        await log.flush();
+        final text = sink.lines.join('\n');
+        expect(text, contains('photo.kept_as_is'));
+        expect(text, contains('photo.decode_failed'));
+        // (codes only: no name of a chosen file)
+        expect(text, isNot(contains('scan')));
+        expect(text, isNot(contains('notes')));
+      },
+    );
+
+    test('the pictures in memory know what they hold and keep to picture '
+        'names', () async {
+      final files = MemoryPhotoFiles();
+      expect(await files.exists('a1.jpg'), isFalse);
+      await files.write('a1.jpg', Uint8List.fromList([1]));
+      expect(await files.exists('a1.jpg'), isTrue);
+      expect(files.write('x.txt', Uint8List(1)), throwsArgumentError);
+      expect(files.write('../a1.jpg', Uint8List(1)), throwsArgumentError);
+      expect(files.names.toList(), ['a1.jpg']);
+    });
   });
 }
