@@ -18,6 +18,7 @@ import 'package:kvantum_app/journal/photo_picker.dart';
 import 'package:kvantum_app/journal/photo_pipeline.dart'
     show maxPhotoSourceBytes;
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/error_catalog.dart';
 import 'package:kvantum_app/ui/format.dart';
 import 'package:kvantum_app/ui/journal/entries_page.dart';
 import 'package:kvantum_app/ui/journal/entry_editor.dart';
@@ -157,7 +158,11 @@ void main() {
         ],
       );
       expect(find.byKey(const Key('journal-error')), findsOneWidget);
-      expect(find.textContaining('A napló nem olvasható.'), findsOneWidget);
+      // (and it says why, in the words the error catalog has for it)
+      expect(
+        tester.widget<Text>(find.byKey(const Key('journal-error'))).data,
+        'A napló nem olvasható. ${errorInfoFor(StateError('x')).text}',
+      );
       expect(find.byKey(const Key('journal-add')), findsOneWidget);
       await shutdown(tester, db);
     });
@@ -258,6 +263,36 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('says "+N" only for the pictures that are not shown', (
+      tester,
+    ) async {
+      await boot(tester);
+      final c = scope(tester);
+      // one picture, exactly as many as are shown, and one more than that
+      for (final (id, n) in [('one', 1), ('full', 4), ('over', 5)]) {
+        final photos = [for (var i = 0; i < n; i++) photo('$id$i')];
+        await tester.runAsync(
+          () => c
+              .read(journalOpsProvider)
+              .save(
+                entry(
+                  id,
+                  photos: photos,
+                  at: nov16.add(Duration(minutes: n)),
+                  title: id,
+                ),
+              ),
+        );
+        await settle(tester);
+      }
+      expect(find.byKey(const Key('entry-more-one')), findsNothing);
+      expect(find.byKey(const Key('entry-more-full')), findsNothing);
+      expect(find.byKey(const Key('entry-more-over')), findsOneWidget);
+      expect(find.text('+1'), findsOneWidget);
+      expect(find.text('+0'), findsNothing);
+      await shutdown(tester, db);
+    });
+
     testWidgets('a picture that is on another device is told so', (
       tester,
     ) async {
@@ -290,6 +325,33 @@ void main() {
       );
       expect(
         find.bySemanticsLabel('Bejegyzés, 11:30. Fogorvos. Nem fájt.. 2 kép'),
+        findsOneWidget,
+      );
+      // (as that one sentence, not also piece by piece: the head, the time)
+      expect(find.bySemanticsLabel('Fogorvos'), findsNothing);
+      expect(find.bySemanticsLabel('11:30'), findsNothing);
+      handle.dispose();
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a single picture is read out, and the lines of the text run '
+        'together', (tester) async {
+      final handle = tester.ensureSemantics();
+      await boot(
+        tester,
+        entries: [
+          entry(
+            'a',
+            title: 'Séta',
+            text: 'Első sor\nMásodik sor',
+            photos: [photo('p1')],
+          ),
+        ],
+      );
+      expect(
+        find.bySemanticsLabel(
+          'Bejegyzés, 11:30. Séta. Első sor Második sor. 1 kép',
+        ),
         findsOneWidget,
       );
       handle.dispose();
@@ -507,6 +569,42 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('leaving it with only a title asks first', (tester) async {
+      await boot(tester);
+      await openNew(tester);
+      await enter(tester, 'entry-title', 'Csak egy cím');
+      await back(tester);
+      expect(find.byKey(const Key('discard-dialog')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('leaving it with only a picture asks first', (tester) async {
+      await boot(tester);
+      await openNew(tester);
+      picker.next = [chosen('a.jpg')];
+      await tapKey(tester, 'entry-add-photo');
+      await back(tester);
+      expect(find.byKey(const Key('discard-dialog')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a tap outside the question about leaving keeps the writing', (
+      tester,
+    ) async {
+      await boot(tester);
+      await openNew(tester);
+      await enter(tester, 'entry-text', 'Ez marad');
+      await back(tester);
+      expect(find.byKey(const Key('discard-dialog')), findsOneWidget);
+      // (the question is closed by a tap beside it: no answer is no "Elvetem")
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+      expect(find.byKey(const Key('discard-dialog')), findsNothing);
+      expect(find.byType(JournalEntryEditor), findsOneWidget);
+      expect(textOf(tester, 'entry-text'), 'Ez marad');
+      await shutdown(tester, db);
+    });
+
     testWidgets('leaving it untouched asks nothing', (tester) async {
       await boot(tester);
       await openNew(tester);
@@ -651,6 +749,39 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('are taken in with the buttons of the page switched off', (
+      tester,
+    ) async {
+      final slow = _SlowImporter();
+      await boot(tester, importer: slow);
+      await openNew(tester);
+      await enter(tester, 'entry-text', 'Várom a képet');
+      picker.next = [chosen('a.jpg')];
+      await tester.tap(find.byKey(const Key('entry-add-photo')));
+      // (the bar moves for ever: nothing settles while it is there)
+      for (var i = 0; i < 3; i++) {
+        await tester.runAsync(turns);
+        await tester.pump();
+      }
+      expect(find.byKey(const Key('entry-busy')), findsOneWidget);
+      expect(tester.widget<TextButton>(field('entry-save')).onPressed, isNull);
+      expect(
+        tester.widget<OutlinedButton>(field('entry-add-photo')).onPressed,
+        isNull,
+      );
+      await tester.runAsync(() async {
+        slow.gate.complete(const PhotoImportResult([]));
+        await turns();
+      });
+      await settle(tester);
+      expect(find.byKey(const Key('entry-busy')), findsNothing);
+      expect(
+        tester.widget<TextButton>(field('entry-save')).onPressed,
+        isNotNull,
+      );
+      await shutdown(tester, db);
+    });
+
     testWidgets('when the chooser gives up nothing happens', (tester) async {
       await boot(tester);
       await openNew(tester);
@@ -718,6 +849,91 @@ void main() {
       await enter(tester, 'entry-text', 'Hátterben');
       await background(tester);
       expect((await draftOf(tester))!.text, 'Hátterben');
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is written when the app goes away, not when it comes back', (
+      tester,
+    ) async {
+      await boot(tester);
+      await openNew(tester);
+      await enter(tester, 'entry-text', 'Elmegyek');
+      // (the first step away is enough: the system may close the app after it)
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await settle(tester);
+      expect((await draftOf(tester))?.text, 'Elmegyek');
+      // (coming back writes nothing: the draft is cleared, the app returns)
+      await tester.runAsync(
+        () => scope(tester).read(journalDraftStoreProvider).clear(),
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await settle(tester);
+      expect(await draftOf(tester), isNull);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('has the day and the time the user chose', (tester) async {
+      await boot(tester);
+      await openNew(tester);
+      await tapKey(tester, 'entry-day');
+      await tester.tap(find.text('14'));
+      await tester.pump();
+      await tester.tap(find.text('OK'));
+      await settle(tester);
+      await tapKey(tester, 'entry-time');
+      await typeTimeInPicker(tester, 21, 40);
+      await enter(tester, 'entry-text', 'Szombat este');
+      await background(tester);
+      expect((await draftOf(tester))!.at, DateTime.utc(2026, 11, 14, 21, 40));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('stays when the question about it is closed by a tap beside', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tester.runAsync(
+        () =>
+            scope(tester)
+                .read(journalDraftStoreProvider)
+                .save(JournalDraft(id: 'draft-1', at: nov16, text: 'Ez marad')),
+      );
+      await openNew(tester);
+      expect(find.byKey(const Key('draft-dialog')), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+      expect(find.byKey(const Key('draft-dialog')), findsNothing);
+      // (not taken up, and not thrown away either)
+      expect(textOf(tester, 'entry-text'), '');
+      expect((await draftOf(tester))?.text, 'Ez marad');
+      await shutdown(tester, db);
+    });
+
+    testWidgets('of a new entry is left alone by the entry that is changed', (
+      tester,
+    ) async {
+      await boot(tester, entries: [entry('a')]);
+      await tester.runAsync(
+        () =>
+            scope(tester)
+                .read(journalDraftStoreProvider)
+                .save(JournalDraft(id: 'draft-1', at: nov16, text: 'Másik')),
+      );
+      // saving a change of an entry
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await enter(tester, 'entry-text', 'Új szöveg');
+      await tapKey(tester, 'entry-save');
+      expect(find.byType(JournalEntryEditor), findsNothing);
+      expect((await draftOf(tester))?.text, 'Másik');
+      // and leaving another change with "Elvetem"
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await enter(tester, 'entry-text', 'Mégsem');
+      await back(tester);
+      await tapKey(tester, 'discard-yes');
+      expect(find.byType(JournalEntryEditor), findsNothing);
+      expect((await draftOf(tester))?.text, 'Másik');
       await shutdown(tester, db);
     });
 
@@ -958,6 +1174,49 @@ void main() {
       expect(tester.takeException(), isNull);
       await shutdown(tester, db);
     });
+
+    testWidgets('a day after the years of the picker can still be changed', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        entries: [entry('a', at: DateTime.utc(2150, 3, 2, 8))],
+      );
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await tapKey(tester, 'entry-day');
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
+  });
+
+  group('the small pictures', () {
+    testWidgets('are named for a screen reader, by the name they are given or '
+        'as a picture', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [photoFilesProvider.overrideWithValue(files)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  PhotoThumb(photo: photo('p1')),
+                  PhotoThumb(photo: photo('p2'), label: 'Kép 2 / 3'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.bySemanticsLabel('Kép'), findsOneWidget);
+      expect(find.bySemanticsLabel('Kép 2 / 3'), findsOneWidget);
+      handle.dispose();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 10));
+    });
   });
 
   group('the viewer', () {
@@ -1063,6 +1322,94 @@ void main() {
       await openViewer(tester, count: 1);
       expect(find.byKey(const Key('photo-prev')), findsNothing);
       expect(find.byKey(const Key('photo-next')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('has no arrow buttons on a phone, however many pictures', (
+      tester,
+    ) async {
+      await openViewer(tester);
+      expect(find.byKey(const Key('photo-viewer')), findsOneWidget);
+      expect(find.byKey(const Key('photo-prev')), findsNothing);
+      expect(find.byKey(const Key('photo-next')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    /// The viewer, opened on the first of [count] pictures in a window
+    /// [width] pixels wide.
+    Future<void> openWide(
+      WidgetTester tester, {
+      required double width,
+      required int count,
+    }) async {
+      await boot(
+        tester,
+        size: Size(width, 800),
+        entries: [
+          entry('a', photos: [for (var i = 0; i < count; i++) photo('p$i')]),
+        ],
+      );
+      await tester.tap(find.byKey(const Key('entry-a')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('entry-photo-p0')));
+      await settle(tester);
+      expect(find.byKey(const Key('photo-viewer')), findsOneWidget);
+    }
+
+    testWidgets('has no arrow buttons for one picture, however wide the '
+        'window', (tester) async {
+      await openWide(tester, width: 1000, count: 1);
+      expect(find.byKey(const Key('photo-prev')), findsNothing);
+      expect(find.byKey(const Key('photo-next')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('has the arrow buttons from a window of 600 pixels', (
+      tester,
+    ) async {
+      await openWide(tester, width: 600, count: 2);
+      expect(find.byKey(const Key('photo-prev')), findsOneWidget);
+      expect(find.byKey(const Key('photo-next')), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('has none in a window of 599 pixels', (tester) async {
+      await openWide(tester, width: 599, count: 2);
+      expect(find.byKey(const Key('photo-prev')), findsNothing);
+      expect(find.byKey(const Key('photo-next')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('lets a swipe turn the page again after a button has turned '
+        'it from a picture that was zoomed in', (tester) async {
+      await openWide(tester, width: 1000, count: 2);
+      final page = find.byKey(const Key('photo-viewer'));
+      await tester.tap(page);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(page);
+      await settle(tester);
+      // (zoomed in: a swipe does not turn the page, the button does)
+      await tester.fling(page, const Offset(-300, 0), 1000);
+      await settle(tester);
+      expect(find.text('1 / 2'), findsOneWidget);
+      await tapKey(tester, 'photo-next');
+      expect(find.text('2 / 2'), findsOneWidget);
+      // (the next picture is whole: the swipe is free again)
+      await tester.fling(page, const Offset(300, 0), 1000);
+      await settle(tester);
+      expect(find.text('1 / 2'), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('calls out the count of pictures to a screen reader', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await openViewer(tester);
+      final count = tester.getSemantics(find.byKey(const Key('photo-count')));
+      expect(count.flagsCollection.isLiveRegion, isTrue);
+      expect(count.label, contains('1 / 3'));
+      handle.dispose();
       await shutdown(tester, db);
     });
 
@@ -1218,6 +1565,19 @@ class _BrokenImporter extends PhotoImporter {
     List<PickedPhoto> picked, {
     required int room,
   }) => throw StateError('nem olvasható');
+}
+
+/// An importer that is still at work, until [gate] says it is done.
+class _SlowImporter extends PhotoImporter {
+  _SlowImporter() : super(files: MemoryPhotoFiles());
+
+  final gate = Completer<PhotoImportResult>();
+
+  @override
+  Future<PhotoImportResult> import(
+    List<PickedPhoto> picked, {
+    required int room,
+  }) => gate.future;
 }
 
 /// A store that gives an error when a picture is read.

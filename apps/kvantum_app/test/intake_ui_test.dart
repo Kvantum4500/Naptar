@@ -167,6 +167,33 @@ void main() {
       await shutdown(tester, db);
     });
 
+    testWidgets('with only a drink in it is not an empty day', (tester) async {
+      await boot(tester, drinks: [drink('w1')]);
+      expect(find.byKey(const Key('intake-empty')), findsNothing);
+      expect(inFluid(find.textContaining(formatVolume(200))), findsOneWidget);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('lists the meals from the first to the last', (tester) async {
+      await boot(
+        tester,
+        size: const Size(400, 1600),
+        foods: [
+          food('d', meal: Meal.dinner, minute: 19 * 60, name: 'Rakott'),
+          food('s', meal: Meal.snack, minute: 16 * 60, name: 'Alma'),
+          food('l', meal: Meal.lunch, minute: 13 * 60, name: 'Leves'),
+          food('b'),
+        ],
+      );
+      final tops = [
+        for (final m in Meal.values)
+          tester.getTopLeft(find.byKey(Key('meal-header-${m.key}'))).dy,
+      ];
+      expect(tops, hasLength(Meal.values.length));
+      expect(tops, orderedEquals([...tops]..sort()));
+      await shutdown(tester, db);
+    });
+
     testWidgets('shows what was eaten, by meal, with the sums', (tester) async {
       await boot(
         tester,

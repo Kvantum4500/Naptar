@@ -7,6 +7,9 @@ import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/journal/photo_files.dart';
 import 'package:kvantum_app/journal/photo_import.dart';
 import 'package:kvantum_app/journal/photo_pipeline.dart';
+import 'package:kvantum_app/ui/journal/photo_widgets.dart'
+    show thumbDecodeWidth;
+import 'package:kvantum_core/kvantum_core.dart' show PhotoRef;
 import 'package:uuid/uuid.dart';
 
 /// The edges of the pictures of the diary that nothing held until the
@@ -87,6 +90,29 @@ void main() {
         expect(px.b, inInclusiveRange(140, 165));
       },
     );
+  });
+
+  group('the width a small picture is decoded at', () {
+    PhotoRef shape(int w, int h) =>
+        PhotoRef(id: 'a', width: w, height: h, bytes: 1);
+
+    test('is the side of the square, but wider for a wide picture', () {
+      // (the shorter side fills the square, so a wide one needs more width)
+      expect(thumbDecodeWidth(shape(800, 800), 100), 100);
+      expect(thumbDecodeWidth(shape(800, 1600), 100), 100);
+      expect(thumbDecodeWidth(shape(1600, 800), 100), 200);
+      expect(thumbDecodeWidth(shape(1200, 800), 100), 150);
+    });
+
+    test('is twice the side when the size of the picture is not known', () {
+      expect(thumbDecodeWidth(shape(0, 800), 100), 200);
+      expect(thumbDecodeWidth(shape(800, 0), 100), 200);
+    });
+
+    test('is rounded up, and never nothing', () {
+      expect(thumbDecodeWidth(shape(1200, 800), 101), 152);
+      expect(thumbDecodeWidth(shape(800, 800), 0), 1);
+    });
   });
 
   group('the files that are taken in', () {
