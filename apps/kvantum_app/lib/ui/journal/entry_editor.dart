@@ -51,6 +51,11 @@ class _JournalEntryEditorState extends ConsumerState<JournalEntryEditor>
 
   /// Saving, or taking pictures in.
   bool _busy = false;
+
+  /// The question about an earlier draft is open: the page is still empty, and
+  /// an empty page must not be written as a draft (that would clear the one
+  /// being offered, and the system may close the app right now).
+  bool _asking = false;
   String? _error;
   String? _notice;
 
@@ -96,7 +101,7 @@ class _JournalEntryEditorState extends ConsumerState<JournalEntryEditor>
   // ------------------------------------------------------------- the draft
 
   Future<void> _saveDraft() async {
-    if (!_isNew) return;
+    if (!_isNew || _asking) return;
     try {
       await ref
           .read(journalDraftStoreProvider)
@@ -133,6 +138,7 @@ class _JournalEntryEditorState extends ConsumerState<JournalEntryEditor>
     }
     if (draft == null || !mounted) return;
     final d = draft;
+    _asking = true;
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -157,6 +163,7 @@ class _JournalEntryEditorState extends ConsumerState<JournalEntryEditor>
         ],
       ),
     );
+    _asking = false;
     if (!mounted) return;
     if (go == true) {
       setState(() {

@@ -995,6 +995,24 @@ void main() {
   });
 
   group('the words for a screen reader', () {
+    testWidgets('the macro lines, and the note about them, are read out, too', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await boot(
+        tester,
+        goals: const IntakeGoals(kcal: 2200, protein: 150),
+        foods: [
+          food('a', protein: 80),
+          food('b', name: 'Más', minute: 9 * 60),
+        ],
+      );
+      expect(find.bySemanticsLabel(RegExp('Fehérje 80')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('A makrók összege')), findsOneWidget);
+      await shutdown(tester, db);
+      handle.dispose();
+    });
+
     testWidgets('the calorie card is one sentence', (tester) async {
       final handle = tester.ensureSemantics();
       await boot(

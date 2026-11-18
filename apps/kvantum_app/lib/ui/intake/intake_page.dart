@@ -492,29 +492,31 @@ class _KcalCard extends StatelessWidget {
                       goodWhenOver: false,
                     ),
                   ],
-                  for (final (name, grams, goal) in macros)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        macroLine(name, grams, goal),
-                        key: Key('macro-$name'),
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                  if (macros.isNotEmpty && partial)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        'A makrók összege csak azokból az ételekből van, '
-                        'ahol megadtad (${totals.withMacros} / '
-                        '${totals.foodCount}).',
-                        key: const Key('macro-note'),
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
                 ],
               ),
             ),
+            // (outside the sentence above: a screen reader reads these lines
+            // one by one, they are not part of that sentence)
+            for (final (name, grams, goal) in macros)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  macroLine(name, grams, goal),
+                  key: Key('macro-$name'),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+            if (macros.isNotEmpty && partial)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'A makrók összege csak azokból az ételekből van, '
+                  'ahol megadtad (${totals.withMacros} / '
+                  '${totals.foodCount}).',
+                  key: const Key('macro-note'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
           ],
         ),
       ),

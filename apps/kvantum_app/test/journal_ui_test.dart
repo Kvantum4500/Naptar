@@ -797,6 +797,23 @@ void main() {
       },
     );
 
+    testWidgets('is not lost while the question about it is open and the app '
+        'goes to the background', (tester) async {
+      await boot(tester);
+      await tester.runAsync(
+        () => scope(tester)
+            .read(journalDraftStoreProvider)
+            .save(JournalDraft(id: 'draft-1', at: nov16, text: 'Itt tartok')),
+      );
+      await openNew(tester);
+      expect(find.byKey(const Key('draft-dialog')), findsOneWidget);
+      await background(tester);
+      expect((await draftOf(tester))?.text, 'Itt tartok');
+      await tapKey(tester, 'draft-continue');
+      expect(textOf(tester, 'entry-text'), 'Itt tartok');
+      await shutdown(tester, db);
+    });
+
     testWidgets('can be put aside for a new, empty entry', (tester) async {
       await boot(tester);
       await tester.runAsync(
