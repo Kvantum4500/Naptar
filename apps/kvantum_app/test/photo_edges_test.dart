@@ -44,7 +44,7 @@ void main() {
       expect(encodeJpegFromRgba(rgba, w, h), expected);
     });
 
-    test('has every see-through pixel laid on white, the last one too', () {
+    test('has every see-through pixel laid on white', () {
       final jpeg = encodeJpegFromRgba(Uint8List(8 * 8 * 4), 8, 8);
       final back = img.decodeJpg(jpeg)!;
       for (final (x, y) in [(0, 0), (3, 5), (7, 7)]) {
@@ -55,6 +55,17 @@ void main() {
           reason: 'the pixel at $x, $y is $px',
         );
       }
+    });
+
+    test('lays the last pixel on white as well as the others', () {
+      // (white all over; the last pixel, a quarter of a light grey, as the
+      // engine gives it: only laying it on white makes it light)
+      final rgba = Uint8List(8 * 8 * 4)..fillRange(0, 8 * 8 * 4, 255);
+      rgba.setRange(63 * 4, 64 * 4, [60, 60, 60, 64]);
+      final px = img.decodeJpg(encodeJpegFromRgba(rgba, 8, 8))!.getPixel(7, 7);
+      expect(px.r, greaterThan(235));
+      expect(px.g, greaterThan(235));
+      expect(px.b, greaterThan(235));
     });
 
     test(
