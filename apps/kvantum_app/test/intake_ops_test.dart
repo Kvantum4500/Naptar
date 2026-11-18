@@ -61,6 +61,22 @@ void main() {
   );
 
   group('a food', () {
+    test('logged with its macros keeps them', () async {
+      final f = await ops.addFood(
+        day: nov16,
+        minute: 12 * 60,
+        meal: Meal.lunch,
+        name: 'Rizs',
+        kcal: 400,
+        protein: 12,
+        carbs: 80,
+        fat: 3,
+      );
+      expect((f.protein, f.carbs, f.fat), (12, 80, 3));
+      final read = (await log()).foods.single;
+      expect((read.protein, read.carbs, read.fat), (12, 80, 3));
+    });
+
     test('goes into the record of its month, and the sync is asked', () async {
       final e = await addFood();
       expect(e.id, 'id1');
@@ -239,6 +255,21 @@ void main() {
       await expectLater(add(ml: 4000), throwsArgumentError);
       expect(await monthRecord('2026-11'), isNull);
       expect(changed, 0);
+    });
+
+    test('moved to another day of the same month stays, once', () async {
+      final before = await add(day: DateTime.utc(2026, 11, 3), ml: 200);
+      final after = FluidEntry.checked(
+        id: before.id,
+        day: DateTime.utc(2026, 11, 9),
+        minute: 600,
+        ml: 200,
+      );
+      await ops.saveFluid(before, after);
+      final l = await log();
+      expect(l.fluids, hasLength(1));
+      expect(l.fluids.single.day, DateTime.utc(2026, 11, 9));
+      expect((await monthRecord('2026-11'))!['w.id1'], after.encode());
     });
 
     test('saved again, moved, removed and taken back', () async {

@@ -344,6 +344,15 @@ void main() {
       },
     );
 
+    test('the grace is two days, to the minute', () async {
+      expect(orphanPhotoGrace, const Duration(days: 2));
+      put('young.jpg', age: const Duration(days: 1, hours: 23, minutes: 59));
+      put('exact.jpg', age: orphanPhotoGrace);
+      put('older.jpg', age: const Duration(days: 2, minutes: 1));
+      expect(await sweep.run(now), 2);
+      expect(files.names.toSet(), {'young.jpg'});
+    });
+
     test('keeps what a draft refers to', () async {
       put('draftpic.jpg');
       await drafts.save(

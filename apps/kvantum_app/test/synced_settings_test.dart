@@ -289,6 +289,29 @@ void main() {
       expect(changed, 0);
     });
 
+    test(
+      'is all or nothing: a failure at the end takes the beginning back',
+      () async {
+        await seedOld();
+        final broken = SyncedSettings(
+          _BreaksAtPlan(db, deviceId: 'dev1', clock: () => nowMs),
+        );
+        await expectLater(broken.takeOverOldSettings(), throwsStateError);
+        expect(await repo.all(kindSettings), isEmpty);
+        for (final k in [
+          legacyPaySettingsKey,
+          legacyIntakeGoalsKey,
+          legacyLocalPlanKey,
+        ]) {
+          expect(await repo.meta(k), isNotNull, reason: k);
+        }
+        // (and the next start does it, whole)
+        expect(await store.takeOverOldSettings(), isTrue);
+        expect(await store.watchPay().first, pay);
+        expect(await repo.meta(legacyLocalPlanKey), isNull);
+      },
+    );
+
     test('run twice, it is the same as once', () async {
       await seedOld();
       await store.takeOverOldSettings();
@@ -562,4 +585,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
     });
   });
+}
+
+/// A repository that cannot clear the old text of the planner's wishes (the
+/// last step of the take-over).
+class _BreaksAtPlan extends RecordRepository {
+  _BreaksAtPlan(super.db, {super.deviceId, super.clock});
+
+  @override
+  Future<void> setMeta(String key, String? value) {
+    if (key == legacyLocalPlanKey && value == null) {
+      throw StateError('the disk is full');
+    }
+    return super.setMeta(key, value);
+  }
 }
