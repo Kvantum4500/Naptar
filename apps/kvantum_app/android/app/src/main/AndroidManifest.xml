@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Release builds need this explicitly (Flutter adds it only for debug). -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Lets the in-app updater hand the downloaded APK to the system installer. -->
@@ -6,9 +7,27 @@
     <!-- Local reminders (shift, check-in): shown after a reboot too. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Approximate location only: weather for the place the assistant plans in. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- The file-opening plugin (open_filex) asks for access to the user's
+         files, photos, videos and music in its own manifest. This app opens
+         one file only, the downloaded update, from its own cache folder, where
+         the plugin asks for no permission at all (it checks the path first):
+         so none of these is needed, and none is requested (SEC-14). The
+         marker removes them from the merged manifest. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
+    <!-- No Google/device backup of the app data: the database holds the finance
+         ledger and the secure-storage keys cannot be restored on another phone
+         anyway. Recovery goes through the Google account (calendar, Drive) and
+         the other devices of the user. -->
     <application
         android:label="Kvantum Naptár"
         android:name="${applicationName}"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -40,6 +59,31 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
+        </receiver>
+        <!-- Reads Google Wallet payment notifications (only when the user grants
+             "notification access"); see WalletNotificationListener. -->
+        <service
+            android:name=".WalletNotificationListener"
+            android:exported="true"
+            android:label="Kvantum Naptár: Wallet-értesítések"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
+        <!-- The home-screen widget (today's events, tasks and the next shift).
+             Only the system and this app's own alarm reach it (not exported);
+             see TodayWidgetProvider and lib/widget. -->
+        <receiver
+            android:name=".TodayWidgetProvider"
+            android:exported="false"
+            android:label="Kvantum Naptár">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info"/>
         </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

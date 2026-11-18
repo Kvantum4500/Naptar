@@ -74,6 +74,8 @@ List<TimeSlot> findFreeSlots({
   final blocks = [
     for (final b in busy)
       if (!b.allDay) _Iv(b.startUtc.subtract(buffer), b.endUtc.add(buffer)),
+    // the sleep after a night shift (sleep is no event: no buffer around it)
+    for (final z in shiftSleep(busy, rules)) _Iv(z.startUtc, z.endUtc),
   ]..sort((a, b) => a.s.compareTo(b.s));
   for (final b in blocks) {
     final next = <_Iv>[];

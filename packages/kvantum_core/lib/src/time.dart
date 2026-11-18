@@ -17,6 +17,61 @@ tz.Location locationOf(String tzid) {
   return tz.getLocation(tzid);
 }
 
+/// Windows zone names (what Outlook writes in a `TZID`) and the IANA zone that
+/// stands for each (the first, "primary" zone of Unicode CLDR's `windowsZones`).
+/// The cities of one Windows zone change to summer time on the same day, so
+/// which of them is named does not matter for the instants.
+const Map<String, String> windowsZoneNames = {
+  'UTC': 'UTC',
+  'GMT Standard Time': 'Europe/London',
+  'Greenwich Standard Time': 'Atlantic/Reykjavik',
+  'W. Europe Standard Time': 'Europe/Berlin',
+  'Central Europe Standard Time': 'Europe/Budapest',
+  'Central European Standard Time': 'Europe/Warsaw',
+  'Romance Standard Time': 'Europe/Paris',
+  'E. Europe Standard Time': 'Europe/Chisinau',
+  'FLE Standard Time': 'Europe/Kyiv',
+  'GTB Standard Time': 'Europe/Bucharest',
+  'Turkey Standard Time': 'Europe/Istanbul',
+  'Russian Standard Time': 'Europe/Moscow',
+  'Eastern Standard Time': 'America/New_York',
+  'Central Standard Time': 'America/Chicago',
+  'Mountain Standard Time': 'America/Denver',
+  'Pacific Standard Time': 'America/Los_Angeles',
+};
+
+final Map<String, String> _windowsByLowerName = {
+  for (final e in windowsZoneNames.entries) e.key.toLowerCase(): e.value,
+};
+
+/// The IANA zone a `TZID` of a calendar file stands for, or null when it is
+/// not a zone this app knows. Understood: an IANA name; a Windows name (any
+/// case); an IANA name behind a path, as Thunderbird and Evolution write it
+/// (`/mozilla.org/20070129_1/Europe/Berlin`).
+String? ianaZoneOf(String tzid) {
+  final name = tzid.trim();
+  bool known(String zone) {
+    try {
+      locationOf(zone);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (known(name)) return name;
+  final windows = _windowsByLowerName[name.toLowerCase()];
+  if (windows != null && known(windows)) return windows;
+  final parts = name.split('/').where((p) => p.isNotEmpty).toList();
+  for (final n in const [3, 2]) {
+    if (parts.length >= n) {
+      final tail = parts.sublist(parts.length - n).join('/');
+      if (known(tail)) return tail;
+    }
+  }
+  return null;
+}
+
 /// A wall-clock time ("floating", no zone) is represented as a UTC-flagged
 /// [DateTime] whose fields are the wall-clock fields. This is also what the
 /// `rrule` package expects, so recurrence math never sees DST.

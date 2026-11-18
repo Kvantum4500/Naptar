@@ -1,14 +1,35 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../update/update_dialog.dart';
-import 'ai_providers.dart';
+import '../backup/backup_card.dart';
+import '../finance/wallet_settings.dart';
+import '../notify/autostart_tile.dart';
+import '../notify/budget_alerts.dart';
+import '../notify/budget_notify.dart' show budgetNotifierProvider;
+import '../notify/reminder_test_button.dart';
 import '../notify/reminders.dart';
+import '../notify/windows_autostart.dart' show autostartProvider;
+import '../ui/diagnostics_page.dart';
+import '../ui/setup_guide.dart';
+import '../ui/shortcuts.dart' show showShortcutHelp;
+import '../ui/theme.dart';
+import '../update/update_dialog.dart';
+import '../widget/widget_bridge.dart';
+import 'ai_providers.dart';
 import 'ai_settings.dart';
 import 'handbook_page.dart';
-import 'llm_provider.dart';
-import 'provider_catalog.dart';
+import 'location_service.dart';
+import 'place.dart';
+import 'settings/account_card.dart';
+import 'settings/ai_provider_card.dart';
+import 'settings/export_import_card.dart';
+import 'settings/local_plan_card.dart';
+import 'settings/settings_toast.dart';
+
+export 'settings/ai_provider_card.dart' show spaced;
+export 'settings/consent_dialog.dart';
 
 /// App settings: AI provider + key + model, what the assistant may see, handbook.
 class SettingsPage extends ConsumerStatefulWidget {
@@ -18,95 +39,78 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  final _key = TextEditingController();
-  final _base = TextEditingController();
-  bool _hasKey = false;
-  bool _busy = false;
-  bool _show = false;
-  String? _message;
-  bool _messageIsError = false;
-  List<LlmModel> _models = const [];
-  String? _loadedFor;
+  /// Bumped when the system refuses the notifications: the choice a field
+  /// shows is not the one in force, so the fields are built anew.
+  int _remindersRev = 0;
+  final _city = TextEditingController();
+  var _found = const <Place>[];
+  var _locBusy = false;
 
   @override
   void dispose() {
-    _key.dispose();
-    _base.dispose();
+    _city.dispose();
     super.dispose();
   }
 
-  /// Reads whether a key exists for [provider] (called when it changes).
-  Future<void> _refresh(AiSettings s) async {
-    _loadedFor = s.provider;
-    final k = await ref.read(apiKeyStoreProvider).read(provider: s.provider);
+  Future<void> _useGps() async {
+    setState(() => _locBusy = true);
+    final r = await ref.read(locationProvider).current();
+    if (!mounted) return;
+    setState(() => _locBusy = false);
+    final p = r.place;
+    if (p != null) {
+      await ref
+          .read(aiSettingsProvider.notifier)
+          .change(
+            (ref.read(aiSettingsProvider).value ?? const AiSettings()).copyWith(
+              place: p,
+            ),
+          );
+      _toast('Helyszín beállítva: ${p.label} (kb.).');
+      return;
+    }
+    _toast(switch (r.failure) {
+      LocationFailure.serviceOff =>
+        'A helymeghatározás ki van kapcsolva az eszközön.',
+      LocationFailure.denied => 'A helyhozzáférést nem engedélyezted.',
+      LocationFailure.deniedForever => 'A helyhozzáférés tiltva van. Engedélyezd a rendszer beállításaiban (Alkalmazások → Kvantum Naptár → Engedélyek → Hely).',
+      _ => 'Nem sikerült meghatározni a helyzetet. Gépen gyakran nincs GPS: keress rá a városodra.',
+    }, error: true);
+  }
+
+  Future<void> _searchCity() async {
+    setState(() => _locBusy = true);
+    final found = await ref.read(weatherServiceProvider).search(_city.text);
     if (!mounted) return;
     setState(() {
-      _hasKey = k != null;
-      _models = const [];
-      _message = null;
-      _key.clear();
-      _base.text = s.customBaseUrl ?? '';
+      _found = found;
+      _locBusy = false;
+    });
+    if (found.isEmpty) {
+      _toast('Nem találtam ilyen helyet (vagy nincs kapcsolat).', error: true);
+    }
+  }
+
+  Future<void> _pickPlace(Place p) async {
+    await ref
+        .read(aiSettingsProvider.notifier)
+        .change(
+          (ref.read(aiSettingsProvider).value ?? const AiSettings()).copyWith(
+            place: p,
+          ),
+        );
+    if (!mounted) return;
+    setState(() {
+      _found = const [];
+      _city.clear();
     });
   }
 
-  void _say(String m, {bool error = false}) => setState(() {
-    _message = m;
-    _messageIsError = error;
-  });
-
-  Future<void> _saveAndCheck(AiSettings settings) async {
-    final info = providerById(settings.provider);
-    final typed = _key.text.trim();
-    final store = ref.read(apiKeyStoreProvider);
-    final key = typed.isNotEmpty ? typed : await store.read(provider: info.id);
-    if (key == null && !info.keyOptional) {
-      _say('Írd be az API-kulcsot.', error: true);
-      return;
-    }
-    final base = info.id == 'custom' ? _base.text.trim() : null;
-    if (info.id == 'custom' && (base == null || base.isEmpty)) {
-      _say('Add meg a szolgáltató címét.', error: true);
-      return;
-    }
-    setState(() => _busy = true);
-    try {
-      final models = await ref
-          .read(llmFactoryProvider)(
-            LlmConfig(provider: info.id, apiKey: key ?? '', baseUrl: base),
-          )
-          .listModels();
-      if (models.isEmpty) {
-        _say(
-          'A kulcs érvényes, de nem találtam használható modellt.',
-          error: true,
-        );
-        return;
-      }
-      await store.write(
-        key,
-        provider: info.id,
-      ); // only a key that works is kept
-      _key.clear();
-      final notifier = ref.read(aiSettingsProvider.notifier);
-      final known = models.any((m) => m.id == settings.model);
-      await notifier.change(
-        settings.copyWith(
-          customBaseUrl: base,
-          model: known ? settings.model : pickModelFor(info.id, models),
-        ),
-      );
-      setState(() {
-        _hasKey = key != null;
-        _models = models;
-      });
-      _say('Rendben van, elmentve. ${models.length} modell érhető el.');
-    } on LlmException catch (e) {
-      _say(e.message, error: true);
-    } catch (e) {
-      _say('Az ellenőrzés nem sikerült: $e', error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  /// The results of the buttons far below the key section (where [_say] is not
+  /// visible) appear as a snack bar.
+  void _toast(String m, {bool error = false}) {
+    if (!mounted) return;
+    showSettingsToast(context, m, error: error);
   }
 
   /// Turning a reminder on asks for the notification permission first; when
@@ -115,23 +119,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (next.any) {
       final ok = await ref.read(reminderSchedulerProvider).ensurePermission();
       if (!ok) {
-        _say(
-          'Az értesítések le vannak tiltva. Engedélyezd az Android beállításaiban (Alkalmazások → Kvantum Naptár → Értesítések).',
-          error: true,
-        );
+        _toast(remindersBlockedHelp(), error: true);
+        if (mounted) setState(() => _remindersRev++);
         return;
       }
     }
     await ref.read(reminderSettingsProvider.notifier).change(next);
   }
 
-  Future<void> _deleteKey(String provider) async {
-    await ref.read(apiKeyStoreProvider).write(null, provider: provider);
-    setState(() {
-      _hasKey = false;
-      _models = const [];
-    });
-    _say('A kulcs törölve.');
+  /// Turning the budget alerts on asks for the notification permission first;
+  /// when it is refused nothing is switched on and the user is told why.
+  Future<void> _setBudgetAlerts(bool on) async {
+    final setting = ref.read(budgetAlertsSettingProvider.notifier);
+    if (!on) return setting.disable();
+    if (await setting.enable() == BudgetAlertsStart.denied) {
+      _toast(remindersBlockedHelp(), error: true);
+    }
   }
 
   @override
@@ -139,15 +142,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final settings = ref.watch(aiSettingsProvider).value ?? const AiSettings();
     final reminders =
         ref.watch(reminderSettingsProvider).value ?? const ReminderSettings();
-    if (_loadedFor != settings.provider &&
-        ref.watch(aiSettingsProvider).hasValue) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh(settings));
-    }
-    final info = providerById(settings.provider);
-    final usage = ref.watch(aiUsageProvider).value ?? 0;
     final notifier = ref.read(aiSettingsProvider.notifier);
     final build = ref.watch(currentBuildProvider).value;
-    final scheme = Theme.of(context).colorScheme;
     Widget section(String title, List<Widget> children) => Card(
       margin: const EdgeInsets.only(bottom: 14),
       child: Padding(
@@ -171,141 +167,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              section('AI-asszisztens', [
-                DropdownButtonFormField<String>(
-                  key: ValueKey('provider-${settings.provider}'),
-                  initialValue: settings.provider,
-                  decoration: const InputDecoration(labelText: 'Szolgáltató'),
-                  items: [
-                    for (final p in kProviders)
-                      DropdownMenuItem(value: p.id, child: Text(p.label)),
-                  ],
-                  onChanged: _busy
-                      ? null
-                      : (v) => v == null ? null : notifier.selectProvider(v),
-                ),
-                const SizedBox(height: 6),
-                Text(info.note, style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Icon(
-                      _hasKey ? Icons.check_circle : Icons.info_outline,
-                      size: 18,
-                      color: _hasKey ? scheme.primary : scheme.outline,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _hasKey
-                          ? 'API-kulcs megadva'
-                          : (info.keyOptional
-                                ? 'Kulcs nem kötelező'
-                                : 'Nincs API-kulcs'),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => launchUrl(
-                        Uri.parse(info.keyUrl),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                      icon: const Icon(Icons.open_in_new, size: 16),
-                      label: const Text('Kulcs létrehozása'),
-                    ),
-                  ],
-                ),
-                if (info.id == 'custom')
-                  TextField(
-                    controller: _base,
-                    decoration: const InputDecoration(
-                      labelText: 'Szolgáltató címe',
-                      hintText: 'http://localhost:11434/v1',
-                    ),
-                  ),
-                TextField(
-                  controller: _key,
-                  obscureText: !_show,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: _hasKey
-                        ? 'Új API-kulcs (üresen hagyva a mostanit ellenőrzi)'
-                        : 'API-kulcs',
-                    helperText: 'A kulcs csak ezen az eszközön, a biztonságos tárolóban él.',
-                    suffixIcon: IconButton(
-                      tooltip: _show ? 'Elrejt' : 'Mutat',
-                      icon: Icon(
-                        _show ? Icons.visibility_off : Icons.visibility,
-                      ),
-                      onPressed: () => setState(() => _show = !_show),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: _busy ? null : () => _saveAndCheck(settings),
-                      icon: _busy
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.verified_outlined),
-                      label: const Text('Mentés és ellenőrzés'),
-                    ),
-                    if (_hasKey)
-                      OutlinedButton(
-                        onPressed: _busy ? null : () => _deleteKey(info.id),
-                        child: const Text('Kulcs törlése'),
-                      ),
-                  ],
-                ),
-                if (_message != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text(
-                      _message!,
-                      style: TextStyle(
-                        color: _messageIsError ? scheme.error : scheme.primary,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 14),
-                if (_models.isNotEmpty)
-                  DropdownButtonFormField<String>(
-                    key: ValueKey('${settings.provider}-${settings.model}'),
-                    initialValue: _models.any((m) => m.id == settings.model)
-                        ? settings.model
-                        : null,
-                    decoration: const InputDecoration(labelText: 'Modell'),
-                    items: [
-                      for (final m in _models)
-                        DropdownMenuItem(
-                          value: m.id,
-                          child: Text(m.id, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => v == null
-                        ? null
-                        : notifier.change(settings.copyWith(model: v)),
-                  )
-                else
-                  Text(
-                    'Modell: ${settings.model ?? 'még nincs kiválasztva (az első ellenőrzés után automatikus)'}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                const SizedBox(height: 8),
-                Text(
-                  'Ma elküldött kérések: $usage',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ]),
+              SettingsGroupHeader('Fiók és szinkron'),
+              section('Google-fiók', const [AccountSyncBody()]),
+              SettingsGroupHeader('Asszisztens'),
+              section('AI-asszisztens', const [AiProviderBody()]),
               section('Mit láthat az asszisztens?', [
                 const Text(
-                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi.',
+                  'Kikapcsolt adat sosem megy el a szolgáltatóhoz. Az ütközéseket ilyenkor is a program ellenőrzi. Mindig megy: a kérésed szövege (legfeljebb 500 karakter) és a beépített szabályok. Tervezésnél a kézzel felvett rövid események címe nem megy el, a modell csak azt látja, hogy foglalt; törlésnél és áthelyezésnél a címek elmennek, mert abból tudja, melyik eseményről van szó. A check-in megjegyzése soha nem megy el.',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Kézikönyv (szabályok, profil, tanult szokások)',
+                  ),
+                  subtitle: const Text(
+                    'Kikapcsolva csak a beépített szabályok mennek el, a saját szabályaid nem.',
+                  ),
+                  value: settings.handbook,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(handbook: v)),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -324,23 +204,190 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Napi check-in (energia, hangulat, alvás)'),
+                  subtitle: const Text(
+                    'Ide tartozik az edzés utáni visszajelzés összegzése is (a megjegyzések nem mennek el).',
+                  ),
                   value: settings.checkins,
                   onChanged: (v) =>
                       notifier.change(settings.copyWith(checkins: v)),
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Pénzügyek (csak olvasás)'),
+                  subtitle: const Text(
+                    'Csak az összesítés megy el (kategóriánként, kerettel, célokkal); az egyes tételek csak akkor, ha a modell egy hónap részleteit kéri. Felvenni vagy törölni nem tud.',
+                  ),
+                  value: settings.finance,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(finance: v)),
+                ),
               ]),
+              section('Időjárás és helyszín', [
+                const Text(
+                  'A szabadtéri hobbisportokat (kajak, kerékpár, falmászás…) az időjárás-előrejelzés alapján javasolja. Az előrejelzést az Open-Meteo adja (ingyenes, kulcs nélkül). Az Open-Meteóhoz csak a kerekített koordináta (kb. 1 km pontosságú) megy ki, a naptáradatod nem; a modellnek a napi előrejelzés megy, a helyszín neve nem.',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Időjárás használata a tervezéshez'),
+                  value: settings.weather,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(weather: v)),
+                ),
+                if (settings.weather) ...[
+                  Text(
+                    settings.place == null
+                        ? 'Helyszín: nincs megadva (időjárás nélkül tervez).'
+                        : 'Helyszín: ${settings.place!.label}',
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _locBusy ? null : _useGps,
+                        icon: const Icon(Icons.my_location),
+                        label: const Text('Helyzet meghatározása (GPS)'),
+                      ),
+                      if (settings.place != null)
+                        TextButton(
+                          onPressed: () => notifier.change(
+                            settings.copyWith(clearPlace: true),
+                          ),
+                          child: const Text('Helyszín törlése'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _city,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _searchCity(),
+                    decoration: InputDecoration(
+                      labelText: 'Vagy keress rá a városodra',
+                      suffixIcon: IconButton(
+                        tooltip: 'Keresés',
+                        icon: const Icon(Icons.search),
+                        onPressed: _locBusy ? null : _searchCity,
+                      ),
+                    ),
+                  ),
+                  for (final p in _found)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.place_outlined),
+                      title: Text(p.label),
+                      onTap: () => _pickPlace(p),
+                    ),
+                ],
+              ]),
+              section('Alvási sáv', [
+                const Text(
+                  'Ebben az időszakban az asszisztens semmit nem tervez. Éjszakás időszakban állítsd át arra, amikor ténylegesen alszol (pl. 08:00–16:00).',
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: settings.sleepStartHour,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Alvás kezdete',
+                        ),
+                        items: [
+                          for (var h = 0; h < 24; h++)
+                            DropdownMenuItem(
+                              value: h,
+                              enabled: h != settings.sleepEndHour,
+                              child: Text('${h.toString().padLeft(2, '0')}:00'),
+                            ),
+                        ],
+                        onChanged: (v) => v == null
+                            ? null
+                            : notifier.change(
+                                settings.copyWith(sleepStartHour: v),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: settings.sleepEndHour,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Alvás vége',
+                        ),
+                        items: [
+                          for (var h = 0; h < 24; h++)
+                            DropdownMenuItem(
+                              value: h,
+                              enabled: h != settings.sleepStartHour,
+                              child: Text('${h.toString().padLeft(2, '0')}:00'),
+                            ),
+                        ],
+                        onChanged: (v) => v == null
+                            ? null
+                            : notifier.change(
+                                settings.copyWith(sleepEndHour: v),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ]),
+              section('Edzés utáni visszajelzés', [
+                const Text(
+                  'Egy edzés után (a címéből ismeri fel: Gym, Calisthenics, futás, kajak …) a főoldalon rákérdez, milyen nehéz volt, mennyi energiával kezdted és fejezted be, és milyen élmény volt. Pár koppintás, és nem kötelező. Ebből tanul: ha egy edzés-típus a visszajelzéseid szerint nehezebb, mint amit a program feltételez, magától szigorít; ha könnyebb, csak a jóváhagyásoddal lazít (a jóváhagyás a Kézikönyv „Tanult szokások” fájljába kerül, ott törölheted).',
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Edzés utáni visszajelzés kérése'),
+                  subtitle: const Text(
+                    'Kikapcsolva nem kérdez, és nem tanul újat; a már megadott válaszok megmaradnak.',
+                  ),
+                  value: settings.workoutFeedback,
+                  onChanged: (v) =>
+                      notifier.change(settings.copyWith(workoutFeedback: v)),
+                ),
+              ]),
+              section('Kézikönyv', [
+                const Text(
+                  'Az asszisztens szabályai, a profilod és az összefüggések. Szerkesztheted, és a Google Drive-on át minden eszközön ugyanaz.',
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const HandbookPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.menu_book_outlined),
+                  label: const Text('Kézikönyv szerkesztése'),
+                ),
+              ]),
+              section('Helyi terv (AI nélkül)', const [LocalPlanBody()]),
+              SettingsGroupHeader('Értesítések'),
               section('Emlékeztetők', [
                 if (!ref.watch(reminderSchedulerProvider).supported)
                   const Text(
-                    'Az emlékeztetők ezen az eszközön még nem érhetők el (egyelőre csak Androidon működnek).',
+                    'Az emlékeztetők ezen az eszközön nem érhetők el (Androidon és Windowson működnek).',
                   )
                 else ...[
-                  const Text(
-                    'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
+                  Text(
+                    defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Helyi értesítések, nem megy el hozzá adat sehová. '
+                              'A Windows jeleníti meg őket a kitűzött időben, '
+                              'akkor is, ha a program be van zárva; az '
+                              'ütemezést a program frissíti, amikor fut.'
+                        : 'Helyi értesítések, nem megy el hozzá adat sehová. Pár percet késhetnek.',
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
+                    key: ValueKey('lead-$_remindersRev'),
                     initialValue: reminders.shiftLeadMinutes,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Emlékeztető a műszak előtt',
                     ),
@@ -372,83 +419,152 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     onChanged: (v) =>
                         _setReminders(reminders.copyWith(checkIn: v)),
                   ),
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('summary-$_remindersRev'),
+                    initialValue: reminders.summaryMinutes,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Reggeli összefoglaló',
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: 0, child: Text('Ki')),
+                      for (final m in summaryChoices)
+                        DropdownMenuItem(
+                          value: m,
+                          child: Text(summaryTimeLabel(m)),
+                        ),
+                    ],
+                    onChanged: (v) => v == null
+                        ? null
+                        : _setReminders(reminders.copyWith(summaryMinutes: v)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Egy értesítés a nap elején: a mai események, a határidős '
+                    'feladatok, az ünnepnap, és ha megadtál helyet (és az '
+                    'Időjárás be van kapcsolva), az időjárás. A szövege a '
+                    'zárolt képernyőn is látszhat. A program előre, a '
+                    'következő nyolc napra írja meg, és minden változásnál '
+                    'újraírja; ha sokáig nem nyitod meg, a régi szöveg jön.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  // (starting with Windows: only where there is such a thing)
+                  if (ref.watch(autostartProvider) != null)
+                    const AutostartTile(),
+                  // (a way to see at once that the reminders reach the user)
+                  const ReminderTestButton(),
                 ],
               ]),
-              section('Alvási sáv', [
-                const Text(
-                  'Ebben az időszakban az asszisztens semmit nem tervez. Éjszakás időszakban állítsd át arra, amikor ténylegesen alszol (pl. 08:00–16:00).',
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        initialValue: settings.sleepStartHour,
-                        decoration: const InputDecoration(
-                          labelText: 'Alvás kezdete',
-                        ),
-                        items: [
-                          for (var h = 0; h < 24; h++)
-                            DropdownMenuItem(
-                              value: h,
-                              enabled: h != settings.sleepEndHour,
-                              child: Text('${h.toString().padLeft(2, '0')}:00'),
-                            ),
-                        ],
-                        onChanged: (v) => v == null
-                            ? null
-                            : notifier.change(
-                                settings.copyWith(sleepStartHour: v),
-                              ),
-                      ),
+              // (only where such notifications can be shown)
+              if (ref.watch(budgetNotifierProvider).supported)
+                section('Költségkeret', [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Értesítés a költségkeretről'),
+                    subtitle: const Text(
+                      'Szól, ha egy kategória eléri a keret 80%-át, és ha '
+                      'túllépi.',
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        initialValue: settings.sleepEndHour,
-                        decoration: const InputDecoration(
-                          labelText: 'Alvás vége',
-                        ),
-                        items: [
-                          for (var h = 0; h < 24; h++)
-                            DropdownMenuItem(
-                              value: h,
-                              enabled: h != settings.sleepStartHour,
-                              child: Text('${h.toString().padLeft(2, '0')}:00'),
-                            ),
-                        ],
-                        onChanged: (v) => v == null
-                            ? null
-                            : notifier.change(
-                                settings.copyWith(sleepEndHour: v),
-                              ),
-                      ),
-                    ),
-                  ],
-                ),
-              ]),
-              section('Kézikönyv', [
-                const Text(
-                  'Az asszisztens szabályai, a profilod és az összefüggések. Szerkesztheted, és a Google Drive-on át minden eszközön ugyanaz.',
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const HandbookPage(),
-                    ),
+                    value:
+                        ref.watch(budgetAlertsSettingProvider).value ?? false,
+                    onChanged: _setBudgetAlerts,
                   ),
-                  icon: const Icon(Icons.menu_book_outlined),
-                  label: const Text('Kézikönyv szerkesztése'),
-                ),
-              ]),
+                  Text(
+                    'Helyi értesítés, nem megy el hozzá adat sehová. A tétel '
+                    'felvételekor jön; a Google Wallet-tételeknél akkor, '
+                    'amikor megnyitod a programot (a háttérben a program nem '
+                    'dolgoz fel semmit). Amit az ismétlődő tételek (például '
+                    'a lakbér) okoznak, azt nem jelzi, csak ami fölötte van. '
+                    'A bekapcsoláskor már közeli vagy túllépett kategóriáról '
+                    'nem szól, csak az utána jövő lépésekről.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ]),
+              // (the widget is an Android thing: only there is it mentioned)
+              if (ref.watch(widgetBridgeProvider).active)
+                section('Főképernyő-widget', [
+                  const Text(
+                    'A főképernyőre kitehető egy „Kvantum Naptár” widget: a '
+                    'mai események, a határidős feladatok, az ünnepnap és a '
+                    'következő műszak látszik rajta. Kitételhez tartsd '
+                    'nyomva a főképernyő egy üres helyét, válaszd a Widgetek '
+                    'pontot, és húzd ki a Kvantum Naptárt.',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'A tartalma akkor frissül, amikor az app fut (megnyitáskor, '
+                    'szinkron után); az új napra magától vált, és a következő '
+                    'hét napot előre tudja. Az események címe a főképernyőn '
+                    'annak is látszik, aki a telefonodra néz.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ]),
+              section('Google Wallet értesítések', const [WalletSettings()]),
+              SettingsGroupHeader('Adatok'),
+              section('Automatikus mentés', const [BackupBody()]),
+              section('Mentés és visszaállítás', const [ExportImportBody()]),
+              SettingsGroupHeader('Névjegy'),
               section('A program', [
                 Text('Verzió: ${build == null ? '…' : 'build $build'}'),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<ThemeMode>(
+                  key: ValueKey('theme-${ref.watch(themeModeProvider).name}'),
+                  initialValue: ref.watch(themeModeProvider),
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Téma'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: ThemeMode.system,
+                      child: Text('Rendszer szerint'),
+                    ),
+                    DropdownMenuItem(
+                      value: ThemeMode.light,
+                      child: Text('Világos'),
+                    ),
+                    DropdownMenuItem(
+                      value: ThemeMode.dark,
+                      child: Text('Sötét'),
+                    ),
+                  ],
+                  onChanged: (m) => m == null
+                      ? null
+                      : ref.read(themeModeProvider.notifier).set(m),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () => showUpdateDialog(context, ref),
                   icon: const Icon(Icons.system_update_alt),
                   label: const Text('Frissítés keresése'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('open-diagnostics'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiagnosticsPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.monitor_heart_outlined),
+                  label: const Text('Diagnosztika'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('open-shortcuts'),
+                  onPressed: () => showShortcutHelp(context),
+                  icon: const Icon(Icons.keyboard_outlined),
+                  label: const Text('Billentyűparancsok'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('reset-setup'),
+                  onPressed: () {
+                    ref.read(setupFlagsProvider.notifier).reset();
+                    _toast(
+                      'Az első lépések újra megjelennek a naptár tetején.',
+                    );
+                  },
+                  icon: const Icon(Icons.checklist),
+                  label: const Text('Első lépések újra'),
                 ),
               ]),
             ],

@@ -4,6 +4,12 @@ const defaultTz = 'Europe/Budapest';
 
 DateTime dateOnly(DateTime d) => DateTime.utc(d.year, d.month, d.day);
 
+/// Today's date (a floating y/m/d) in the display zone [tz]: the day the
+/// calendar draws, wherever the device thinks it is (a phone abroad, a PC set
+/// to another zone).
+DateTime todayIn(DateTime now, {String tz = defaultTz}) =>
+    dateOnly(toWallClock(tz, now.toUtc()));
+
 /// Calendar days (floating dates, in [tz]) that an occurrence touches.
 /// All-day events are zone-independent; their end date is exclusive.
 List<DateTime> daysOf(Occurrence o, {String tz = defaultTz}) {
@@ -34,6 +40,13 @@ List<DateTime> daysOf(Occurrence o, {String tz = defaultTz}) {
   DateTime toExclusive, {
   String tz = defaultTz,
 }) => (resolveWallClock(tz, from), resolveWallClock(tz, toExclusive));
+
+/// The same day of the month in [month], or its last day when that month is
+/// shorter (the 31st becomes the 30th, or the 28th / 29th of February).
+DateTime sameDayIn(DateTime day, DateTime month) {
+  final last = DateTime.utc(month.year, month.month + 1, 0).day;
+  return DateTime.utc(month.year, month.month, day.day < last ? day.day : last);
+}
 
 /// 42-cell month grid (6 weeks), Monday-based.
 List<DateTime> monthGrid(DateTime month, {int weekStart = DateTime.monday}) {

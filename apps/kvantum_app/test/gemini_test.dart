@@ -192,23 +192,22 @@ void main() {
     test(
       'empty, blocked and malformed replies become readable errors',
       () async {
-        Future<LlmException> fail(Object body) async {
+        Future<LlmException> errorOf(Object body) async {
           try {
             await provider((_) async => _json(body)).generate('m', request());
           } on LlmException catch (e) {
             return e;
           }
           fail('expected an exception');
-          throw StateError('unreachable');
         }
 
-        expect(await fail({'candidates': []}), isA<LlmBadResponse>());
-        final blocked = await fail({
+        expect(await errorOf({'candidates': []}), isA<LlmBadResponse>());
+        final blocked = await errorOf({
           'promptFeedback': {'blockReason': 'SAFETY'},
         });
         expect(blocked.message, contains('biztonsági szűrő'));
         expect(
-          await fail({
+          await errorOf({
             'candidates': [
               {
                 'content': {'parts': []},

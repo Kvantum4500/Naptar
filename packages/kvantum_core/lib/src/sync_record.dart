@@ -1,5 +1,16 @@
 import 'dart:convert';
 
+/// The version of the record file format this build writes and reads.
+const syncRecordVersion = 1;
+
+/// A record file written by a NEWER version of the app. It is not read (it may
+/// hold what this version does not know) and, above all, not overwritten.
+class NewerFormatException extends FormatException {
+  NewerFormatException(this.version)
+    : super('A rekord újabb formátumú (v$version).');
+  final int version;
+}
+
 /// One value of one field, stamped with the time and device of the last write.
 class FieldValue {
   const FieldValue(this.value, this.ts, this.dev);
@@ -84,7 +95,7 @@ class SyncRecord {
   }
 
   Map<String, Object?> toJson() => {
-    'v': 1,
+    'v': syncRecordVersion,
     'id': id,
     'kind': kind,
     'f': {for (final e in fields.entries) e.key: e.value.toJson()},
@@ -100,6 +111,12 @@ class SyncRecord {
       j = jsonDecode(text);
     } on FormatException {
       throw const FormatException('Hibás rekord (nem JSON).');
+    }
+    if (j is Map<String, dynamic>) {
+      final v = j['v'];
+      if (v is num && v > syncRecordVersion) {
+        throw NewerFormatException(v.toInt());
+      }
     }
     if (j is! Map<String, dynamic> ||
         j['id'] is! String ||

@@ -1,14 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MaxLengthEnforcement;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:kvantum_core/kvantum_core.dart'
+    show LocalAnswer, LocalKind, Occurrence, toWallClock;
+
+import '../ui/day_utils.dart' show defaultTz;
+import '../ui/event_editor.dart' show Scope;
 import '../ui/format.dart';
+import '../ui/undo_service.dart' show UndoSite;
 import 'ai_providers.dart';
+import 'approval.dart' show assistantApplyingProvider;
+import 'assistant_service.dart'
+    show AssistantOutcome, PreparedRequest, maxPromptLength;
+import 'llm_provider.dart' show LlmUsage;
 import 'settings_page.dart';
+
+part 'page/panels.dart';
+part 'page/result_cards.dart';
 
 const _quickPrompts = [
   'Tervezz edzést a jövő hétre',
   'Mikor férne be 45 perc mozgás ma?',
   'Tervezz könnyű napot, kevés energiám van',
+  'Ütemezd a nyitott feladataimat a következő napokra',
+  'Hogy állok a költségkerettel?',
+  'Mi lesz holnap?',
 ];
 
 /// Ask for a plan; review the proposals; accept the ones you like.
@@ -20,11 +37,34 @@ class AssistantPage extends ConsumerStatefulWidget {
 
 class _AssistantPageState extends ConsumerState<AssistantPage> {
   final _input = TextEditingController();
+  late final AssistantController _ctl;
+
+  // "Mit küldünk a modellnek?": built when the panel is opened or refreshed
+  // (no timers: it does not follow the typing by itself).
+  Future<PreparedRequest>? _preview;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctl = ref.read(assistantControllerProvider.notifier);
+  }
 
   @override
   void dispose() {
+    // Leaving the page ends the running request (nobody is waiting for it, and
+    // it would only spend tokens). Later, because the tree is locked now.
+    final ctl = _ctl;
+    Future.microtask(ctl.cancel);
     _input.dispose();
     super.dispose();
+  }
+
+  void _showPreview() {
+    final text = _input.text.trim().isEmpty ? '…' : _input.text;
+    final future = ref.read(assistantControllerProvider.notifier).preview(text);
+    setState(() {
+      _preview = future;
+    });
   }
 
   void _send([String? text]) {
@@ -38,6 +78,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   Widget build(BuildContext context) {
     final st = ref.watch(assistantControllerProvider);
     final ctl = ref.read(assistantControllerProvider.notifier);
+    // an approval is being carried out: its buttons (and the question box)
+    // wait, so a second tap cannot do it twice
+    final applying = ref.watch(assistantApplyingProvider);
     final scheme = Theme.of(context).colorScheme;
     final o = st.outcome;
 
@@ -64,6 +107,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 controller: _input,
                 minLines: 2,
                 maxLines: 5,
+                maxLength: maxPromptLength,
+                maxLengthEnforcement: MaxLengthEnforcement.enforced,
                 enabled: !st.busy,
                 textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
@@ -79,7 +124,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send),
-                    onPressed: st.busy ? null : _send,
+                    onPressed: (st.busy || applying) ? null : _send,
                   ),
                 ),
               ),
@@ -90,13 +135,35 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 children: [
                   for (final q in _quickPrompts)
                     ActionChip(
-                      label: Text(q),
-                      onPressed: st.busy ? null : () => _send(q),
+                      // (a chip is one line unless told otherwise: at a large
+                      // text size a suggestion would be cut off)
+                      label: Text(q, softWrap: true, maxLines: 3),
+                      onPressed: (st.busy || applying) ? null : () => _send(q),
                     ),
+                  // the program plans by itself: no key, no model, no tokens
+                  ActionChip(
+                    key: const Key('plan-local-chip'),
+                    avatar: const Icon(Icons.offline_bolt_outlined, size: 18),
+                    label: const Text(
+                      'Terv AI nélkül',
+                      softWrap: true,
+                      maxLines: 3,
+                    ),
+                    tooltip: 'A program tervez a naptáradból, modell és kulcs nélkül (a következő 7 napra)',
+                    onPressed: (st.busy || applying) ? null : ctl.planLocally,
+                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              if (st.busy) _Working(status: st.status),
+              const SizedBox(height: 8),
+              _PreviewPanel(
+                future: _preview,
+                onOpen: _showPreview,
+                onClose: () => setState(() {
+                  _preview = null;
+                }),
+              ),
+              const SizedBox(height: 8),
+              if (st.busy) _Working(status: st.status, onCancel: ctl.cancel),
               if (st.error != null)
                 Card(
                   color: scheme.errorContainer,
@@ -141,8 +208,21 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                                 ),
                                 child: const Text('Beállítások'),
                               ),
+                            if (st.errorOffersLocalPlan)
+                              FilledButton.tonalIcon(
+                                key: const Key('plan-local-error'),
+                                onPressed: (st.busy || applying)
+                                    ? null
+                                    : ctl.planLocally,
+                                icon: const Icon(Icons.offline_bolt_outlined),
+                                label: const Text('Helyi terv'),
+                              ),
                             TextButton(
-                              onPressed: () => _send(st.prompt),
+                              // (a plan the program made itself is made again,
+                              // not asked of the model)
+                              onPressed: st.prompt == localPlanPrompt
+                                  ? ctl.planLocally
+                                  : () => _send(st.prompt),
                               child: const Text('Újrapróbál'),
                             ),
                           ],
@@ -171,123 +251,56 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       'Zöld színnel jelöltük őket, a Google „Naptar” naptárba is felmennek.',
                     ),
                     trailing: TextButton(
-                      onPressed: ctl.dismiss,
+                      onPressed: ctl.dismissAccepted,
                       child: const Text('Rendben'),
                     ),
                   ),
                 ),
-              if (o != null) ..._result(context, st, o),
+              if (st.askWhy) const _WhyCard(),
+              if (st.habitSaved)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.psychology_outlined),
+                    title: const Text(
+                      'Rögzítve a Tanult szokások közé (Beállítások → Kézikönyv).',
+                    ),
+                    trailing: TextButton(
+                      onPressed: ctl.dismissHabit,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
+              if (st.movedCount != null)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.event_repeat),
+                    title: Text('${st.movedCount} esemény áthelyezve.'),
+                    trailing: TextButton(
+                      onPressed: ctl.dismissMoved,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
+              if (st.deletedCount != null)
+                Card(
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text('${st.deletedCount} esemény törölve.'),
+                    trailing: TextButton(
+                      onPressed: ctl.dismissDeleted,
+                      child: const Text('Rendben'),
+                    ),
+                  ),
+                ),
+              if (o != null) _CostLine(outcome: o),
+              if (o != null) ..._result(context, st, o, applying),
             ],
           ),
         ),
       ),
     );
   }
-
-  List<Widget> _result(BuildContext context, AssistantState st, dynamic o) {
-    final ctl = ref.read(assistantControllerProvider.notifier);
-    final scheme = Theme.of(context).colorScheme;
-    String when(dynamic it) {
-      final s = it.startWall as DateTime, e = it.endWall as DateTime;
-      return '${fmtDateLong(DateTime.utc(s.year, s.month, s.day))}, ${fmtTime(s)}–${fmtTime(e)}';
-    }
-
-    return [
-      if (o.text.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: SelectableText(o.text),
-        ),
-      if (o.summary.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Text(
-            o.summary,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-      for (final q in o.questions as List<String>)
-        ListTile(
-          dense: true,
-          leading: const Icon(Icons.help_outline),
-          title: Text(q),
-        ),
-      if (o.items.isNotEmpty) ...[
-        for (var i = 0; i < o.items.length; i++)
-          Card(
-            child: CheckboxListTile(
-              value: st.selected.contains(i),
-              onChanged: (_) => ctl.toggle(i),
-              title: Text(o.items[i].title as String),
-              subtitle: Text(
-                '${when(o.items[i])}${(o.items[i].reason as String).isEmpty ? '' : '\n${o.items[i].reason}'}',
-              ),
-              isThreeLine: (o.items[i].reason as String).isNotEmpty,
-              secondary: o.items[i].hard == true
-                  ? const Tooltip(
-                      message: 'Nehéz edzés',
-                      child: Icon(Icons.fitness_center),
-                    )
-                  : null,
-            ),
-          ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            FilledButton.icon(
-              onPressed: st.selected.isEmpty
-                  ? null
-                  : () => ctl.acceptSelected(),
-              icon: const Icon(Icons.event_available),
-              label: Text('Elfogadom a kijelölteket (${st.selected.length})'),
-            ),
-            const SizedBox(width: 10),
-            TextButton(onPressed: ctl.dismiss, child: const Text('Elvetem')),
-          ],
-        ),
-      ],
-      if (o.items.isEmpty && o.text.isEmpty && (o.questions as List).isEmpty)
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('Most nem tudtam használható tervet adni.'),
-        ),
-      if ((o.dropped as List).isNotEmpty)
-        ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          title: Text(
-            'Nem javasolt (${(o.dropped as List).length}), mert sértené a szabályokat',
-            style: TextStyle(color: scheme.outline),
-          ),
-          children: [
-            for (final d in o.dropped as List<String>)
-              ListTile(dense: true, title: Text(d)),
-          ],
-        ),
-    ];
-  }
-}
-
-class _Working extends StatelessWidget {
-  const _Working({this.status});
-  final String? status;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Row(
-      children: [
-        const SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            status ??
-                'Az asszisztens dolgozik: tervez, és ellenőrzi a szabályokat…',
-          ),
-        ),
-      ],
-    ),
-  );
 }

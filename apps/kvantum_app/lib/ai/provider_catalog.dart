@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 
+import 'endpoint_policy.dart';
 import 'gemini_provider.dart';
 import 'llm_provider.dart';
 import 'openai_provider.dart';
@@ -14,6 +15,11 @@ class ProviderInfo {
     this.baseUrl,
     this.keyOptional = false,
     this.modelPrefs = const [],
+    this.temperature = 0.2,
+    this.maxOutput = 4096,
+    this.reasoningEffort,
+    this.reasoningModels,
+    this.tokenBudget = 20000,
   });
 
   final String id;
@@ -29,6 +35,24 @@ class ProviderInfo {
 
   /// Patterns for the default model, best first.
   final List<RegExp> modelPrefs;
+
+  /// Sampling temperature for planning (low: the same request should give
+  /// nearly the same plan). null = not sent, the service's own default.
+  final double? temperature;
+
+  /// Upper bound for one reply, thinking included. Groq counts it against the
+  /// per-minute token limit (8 000 on the free tier), so it is lower there.
+  final int maxOutput;
+
+  /// `reasoning_effort` sent to the models matching [reasoningModels].
+  final String? reasoningEffort;
+  final RegExp? reasoningModels;
+
+  /// How many tokens a request (instructions + tools + data) may have, by the
+  /// program's own estimate. A bigger one is made smaller before it is sent.
+  /// Groq's free tier allows 8 000 tokens a minute, and the reply cap counts
+  /// against it too (8 000 − 2 048, with some room for the estimate's error).
+  final int tokenBudget;
 }
 
 final kProviders = <ProviderInfo>[
@@ -50,6 +74,11 @@ final kProviders = <ProviderInfo>[
       RegExp(r'gpt-oss'),
       RegExp(r'llama'),
     ],
+    maxOutput: 2048,
+    tokenBudget: 5500,
+    // gpt-oss thinks a lot by default; "low" keeps the budget for the plan
+    reasoningEffort: 'low',
+    reasoningModels: RegExp(r'gpt-oss'),
   ),
   ProviderInfo(
     id: 'mistral',
@@ -106,12 +135,73 @@ class LlmConfig {
 }
 
 LLMProvider buildProvider(LlmConfig c, http.Client client) {
-  if (c.provider == 'gemini') return GeminiProvider(client, apiKey: c.apiKey);
-  final base = c.baseUrl ?? providerById(c.provider).baseUrl;
+  final info = providerById(c.provider);
+  if (c.provider == 'gemini') {
+    return GeminiProvider(
+      client,
+      apiKey: c.apiKey,
+      maxOutputTokens: info.maxOutput,
+      defaultTemperature: info.temperature,
+    );
+  }
+  // Only the "custom" provider has an address chosen by the user. A leftover
+  // custom address must never redirect the key and the data of Groq, Mistral…
+  final String? base;
+  if (c.provider == 'custom') {
+    final text = c.baseUrl?.trim() ?? '';
+    if (text.isNotEmpty) {
+      final check = checkCustomEndpoint(text);
+      if (!check.ok) throw LlmBadResponse(check.error!);
+    }
+    base = text;
+  } else {
+    base = info.baseUrl;
+  }
   if (base == null || base.trim().isEmpty) {
     throw const LlmBadResponse('Add meg a szolgáltató címét a Beállításokban.');
   }
-  return OpenAiProvider(client, apiKey: c.apiKey, baseUrl: base.trim());
+  return OpenAiProvider(
+    client,
+    apiKey: c.apiKey,
+    baseUrl: base.trim(),
+    maxOutputTokens: info.maxOutput,
+    defaultTemperature: info.temperature,
+    reasoningEffort: info.reasoningEffort,
+    reasoningModels: info.reasoningModels,
+  );
+}
+
+/// Models that do not chat (guards, speech, embeddings, images…): never a
+/// fallback.
+final _notForChat = RegExp(
+  r'guard|whisper|tts|embed|moderat|transcri|audio|image|realtime|dall-e|rerank|orpheus',
+  caseSensitive: false,
+);
+
+/// Other models of [providerId] worth trying when [failed] has no quota left
+/// or is gone: the ones the provider's own preferences name, best first, never
+/// the failed one, nothing that cannot chat, at most three. Gemini has its own,
+/// subtler list; an address of the user's own has no preferences (no catalogue
+/// to choose from), so it gets none.
+List<String> fallbackModelsFor(
+  String providerId,
+  List<LlmModel> models,
+  String failed,
+) {
+  if (providerId == 'gemini') return fallbackModels(models, failed);
+  final out = <String>[];
+  for (final re in providerById(providerId).modelPrefs) {
+    final hit = [
+      for (final m in models)
+        if (m.id != failed &&
+            re.hasMatch(m.id) &&
+            !_notForChat.hasMatch(m.id) &&
+            !out.contains(m.id))
+          m.id,
+    ]..sort((a, b) => b.compareTo(a));
+    out.addAll(hit);
+  }
+  return out.take(3).toList();
 }
 
 /// The default model from the list a provider returned.

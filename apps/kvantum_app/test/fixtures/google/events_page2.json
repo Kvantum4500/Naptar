@@ -1,0 +1,56 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-1",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000000000001\"",
+      "id": "removed0d1e2f",
+      "status": "cancelled"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000045088930\"",
+      "id": "winter3a4b5c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=winter3a4b5c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Téli edzés",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-12-07T18:00:00+01:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-12-07T19:00:00+01:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "winter3a4b5c@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default"
+    }
+  ]
+}

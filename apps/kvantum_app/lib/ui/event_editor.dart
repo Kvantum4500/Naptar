@@ -5,12 +5,21 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/event_repository.dart';
+import '../diag/diag_log.dart';
 import '../providers.dart';
+import '../sync/error_catalog.dart';
 import '../sync/sync_controller.dart';
+import 'breakpoints.dart';
 import 'day_utils.dart';
+import 'delete_ops.dart';
 import 'format.dart';
 import 'palette.dart';
 import 'repeat_editor.dart';
+import 'text_scale.dart';
+import 'undo_service.dart';
+
+part 'event_editor/saving.dart';
+part 'event_editor/widgets.dart';
 
 const calendarIdLocal = kNaptarCalendar;
 
@@ -25,6 +34,10 @@ class EditTarget {
     this.originalStart,
     this.initialStart,
     this.initialDay,
+    this.initialTitle,
+    this.initialEnd,
+    this.initialAllDay = false,
+    this.initialRrule,
   });
 
   /// The stored event being edited (a master, a single event, or an override).
@@ -41,6 +54,14 @@ class EditTarget {
   final DateTime? initialStart;
   final DateTime? initialDay;
 
+  /// For new events made from a line of text ("Szerkesztés…" of the quick
+  /// entry): what is already known. [initialEnd] is the floating end of a
+  /// timed event; an all-day event is one day long.
+  final String? initialTitle;
+  final DateTime? initialEnd;
+  final bool initialAllDay;
+  final String? initialRrule;
+
   bool get isSeriesOccurrence => master != null && originalStart != null;
 }
 
@@ -51,11 +72,19 @@ Future<bool?> openEditor(
   Occurrence? occurrence,
   DateTime? initialStart,
   DateTime? initialDay,
+  String? initialTitle,
+  DateTime? initialEnd,
+  bool initialAllDay = false,
+  String? initialRrule,
 }) async {
   final repo = ref.read(repoProvider);
   var target = EditTarget(
     initialStart: initialStart,
     initialDay: initialDay ?? ref.read(selectedDayProvider),
+    initialTitle: initialTitle,
+    initialEnd: initialEnd,
+    initialAllDay: initialAllDay,
+    initialRrule: initialRrule,
   );
   if (occurrence != null) {
     final e = await repo.byId(occurrence.eventId);
@@ -71,7 +100,7 @@ Future<bool?> openEditor(
     );
   }
   if (!context.mounted) return null;
-  final wide = MediaQuery.sizeOf(context).width >= 760;
+  final wide = useRail(MediaQuery.sizeOf(context).width);
   final editor = EventEditor(target: target);
   if (wide) {
     return showDialog<bool>(
@@ -122,20 +151,21 @@ class _EventEditorState extends ConsumerState<EventEditor> {
   void initState() {
     super.initState();
     final e = _e;
-    _title = TextEditingController(text: e?.title ?? '');
+    _title = TextEditingController(text: e?.title ?? t.initialTitle ?? '');
     _notes = TextEditingController(text: e?.notes ?? '');
     _location = TextEditingController(text: e?.location ?? '');
-    _allDay = e?.allDay ?? false;
+    _allDay = e?.allDay ?? t.initialAllDay;
     _colorId = e?.colorId;
     if (e == null) {
       final s =
           t.initialStart ??
           (() {
-            final d = t.initialDay ?? dateOnly(DateTime.now());
+            final today = ref.read(todayProvider);
+            final d = t.initialDay ?? today;
             return floating(d.year, d.month, d.day, 9);
           })();
       _start = s;
-      _end = s.add(const Duration(hours: 1));
+      _end = t.initialEnd ?? s.add(const Duration(hours: 1));
     } else if (_isSeries && !e.isException) {
       // plain occurrence of a series: show THIS occurrence's date/time
       final m = _master!;
@@ -153,6 +183,9 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     if (ruleOwner != null && ruleOwner.isRecurring) {
       _spec = RecurrenceSpec.fromRrule(ruleOwner.rrule!, ruleOwner.start);
       if (_spec == null) _rawRule = ruleOwner.rrule;
+    } else if (ruleOwner == null && t.initialRrule != null) {
+      _spec = RecurrenceSpec.fromRrule(t.initialRrule!, _start);
+      if (_spec == null) _rawRule = t.initialRrule;
     }
     _initialSignature = _signature();
   }
@@ -178,6 +211,10 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     }
     super.dispose();
   }
+
+  // The save and delete code lives in an extension of its own file, which
+  // cannot call the protected [setState] itself.
+  void _set(VoidCallback change) => setState(change);
 
   // ------------------------------------------------------------ pickers
 
@@ -226,277 +263,6 @@ class _EventEditorState extends ConsumerState<EventEditor> {
   }
 
   void _quickDuration(Duration d) => setState(() => _end = _start.add(d));
-
-  // --------------------------------------------------------------- save
-
-  String? get _ruleString => _spec != null ? _spec!.toRrule(_start) : _rawRule;
-
-  /// The event as described by the form (id/links are filled in later).
-  CalEvent _formEvent() {
-    final start = _allDay
-        ? floating(_start.year, _start.month, _start.day)
-        : _start;
-    final end = _allDay
-        ? floating(_end.year, _end.month, _end.day).add(const Duration(days: 1))
-        : _end;
-    final base = _master ?? _e;
-    return CalEvent(
-      id: base?.id ?? 'form',
-      calendarId: base?.calendarId ?? calendarIdLocal,
-      title: _title.text.trim(),
-      notes: _notes.text.trim(),
-      location: _location.text.trim(),
-      start: start,
-      end: end,
-      allDay: _allDay,
-      tzid: _allDay ? null : (base?.tzid ?? defaultTz),
-      rrule: _ruleString,
-      colorId: _colorId,
-    );
-  }
-
-  bool get _ruleChanged =>
-      _isSeries && (_ruleString ?? '') != (_master!.rrule ?? '');
-
-  Future<Scope?> _askScope({required bool delete}) => showDialog<Scope>(
-    context: context,
-    builder: (c) => SimpleDialog(
-      title: Text(
-        delete ? 'Ismétlődő esemény törlése' : 'Ismétlődő esemény módosítása',
-      ),
-      children: [
-        if (!_ruleChanged || delete)
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(c, Scope.only),
-            child: const Text('Csak ez az esemény'),
-          ),
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(c, Scope.following),
-          child: const Text('Ez és a következő események'),
-        ),
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(c, Scope.all),
-          child: const Text('Az összes esemény'),
-        ),
-        if (!delete && _ruleChanged)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(24, 4, 24, 8),
-            child: Text(
-              'Az ismétlődési szabály módosításánál a „csak ez” nem választható.',
-              style: TextStyle(fontSize: 12),
-            ),
-          ),
-      ],
-    ),
-  );
-
-  Future<void> _save() async {
-    if (_busy) return;
-    if (!_form.currentState!.validate()) return;
-    if (_spec?.validate() != null) {
-      setState(() => _error = _spec!.validate());
-      return;
-    }
-    if (_allDay ? _end.isBefore(_start) : !_end.isAfter(_start)) {
-      setState(
-        () => _error = _allDay
-            ? 'A befejezés nem lehet a kezdés előtt.'
-            : 'A befejezésnek a kezdés után kell lennie.',
-      );
-      return;
-    }
-    setState(() => _error = null);
-    final repo = ref.read(repoProvider);
-    final formEv = _formEvent();
-    const uuid = Uuid();
-    setState(() => _busy = true);
-    try {
-      if (!_isSeries) {
-        final old = _e;
-        final ev = CalEvent(
-          id: old?.id ?? uuid.v4(),
-          calendarId: old?.calendarId ?? calendarIdLocal,
-          title: formEv.title,
-          notes: formEv.notes,
-          location: formEv.location,
-          start: formEv.start,
-          end: formEv.end,
-          allDay: formEv.allDay,
-          tzid: formEv.tzid,
-          rrule: formEv.rrule,
-          exdates: old?.exdates ?? const [],
-          colorId: formEv.colorId,
-          aiGenerated: old?.aiGenerated ?? false,
-          version: (old?.version ?? 0) + 1,
-          googleId: old?.googleId,
-          etag: old?.etag,
-          iCalUid: old?.iCalUid,
-        );
-        await repo.saveLocal(ev);
-      } else {
-        final scope = await _askScope(delete: false);
-        if (scope == null) {
-          setState(() => _busy = false);
-          return;
-        }
-        await _saveSeries(scope, formEv, repo, uuid);
-      }
-      ref.read(syncControllerProvider.notifier).requestSync();
-      if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Mentés sikertelen: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _saveSeries(
-    Scope scope,
-    CalEvent formEv,
-    EventRepository repo,
-    Uuid uuid,
-  ) async {
-    final m = _master!;
-    final orig = t.originalStart!;
-    switch (scope) {
-      case Scope.only:
-        final existing = _e!.isException ? _e : null;
-        if (existing != null) {
-          await repo.saveLocal(
-            existing.copyWith(
-              title: formEv.title,
-              notes: formEv.notes,
-              location: formEv.location,
-              start: formEv.start,
-              end: formEv.end,
-              colorId: formEv.colorId,
-              clearColor: formEv.colorId == null,
-            ),
-          );
-        } else {
-          await repo.saveLocal(
-            makeOverride(
-              master: m,
-              originalStart: orig,
-              edited: formEv,
-              newId: uuid.v4(),
-            ),
-          );
-        }
-      case Scope.following:
-        final r = splitSeries(
-          master: m,
-          splitAt: orig,
-          edited: formEv,
-          newId: uuid.v4(),
-          overrides: t.overrides,
-        );
-        if (r.truncated == null) {
-          // first instance chosen: the whole series is replaced = edit all
-          await _saveAll(m, formEv, orig, repo);
-        } else {
-          await repo.saveLocal(r.truncated!);
-          await repo.saveLocal(r.newSeries);
-          for (final o in r.droppedOverrides) {
-            await repo.deleteLocal(o.id);
-          }
-        }
-      case Scope.all:
-        await _saveAll(m, formEv, orig, repo);
-    }
-  }
-
-  Future<void> _saveAll(
-    CalEvent m,
-    CalEvent formEv,
-    DateTime orig,
-    EventRepository repo,
-  ) async {
-    // The instance the user edited moved by (formStart - orig): shift the
-    // whole series by the same amount, keep its length.
-    final shift = formEv.start.difference(orig);
-    final newStart = m.start.add(shift);
-    final newEnd = newStart.add(formEv.end.difference(formEv.start));
-    final edited = CalEvent(
-      id: m.id,
-      calendarId: m.calendarId,
-      title: formEv.title,
-      notes: formEv.notes,
-      location: formEv.location,
-      start: newStart,
-      end: newEnd,
-      allDay: formEv.allDay,
-      tzid: formEv.tzid,
-      rrule: _spec != null ? _spec!.toRrule(newStart) : _rawRule,
-      colorId: formEv.colorId,
-    );
-    final res = editAll(master: m, edited: edited, overrides: t.overrides);
-    await repo.saveLocal(res.master);
-    for (final o in res.overrides) {
-      await repo.saveLocal(o);
-    }
-  }
-
-  // ------------------------------------------------------------- delete
-
-  Future<void> _delete() async {
-    final repo = ref.read(repoProvider);
-    final e = _e!;
-    if (!_isSeries) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Törlés'),
-          content: const Text('Biztosan törlöd ezt az eseményt?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Mégse'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Törlés'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true) return;
-      await repo.deleteLocal(e.id);
-    } else {
-      final scope = await _askScope(delete: true);
-      if (scope == null) return;
-      final m = _master!;
-      final orig = t.originalStart!;
-      switch (scope) {
-        case Scope.only:
-          await repo.saveLocal(deleteInstance(m, orig));
-          if (e.isException) await repo.deleteLocal(e.id);
-        case Scope.following:
-          final cut = deleteFollowing(m, orig);
-          if (cut == null) {
-            await _deleteSeries(repo, m);
-          } else {
-            await repo.saveLocal(cut);
-            for (final o in t.overrides) {
-              if (o.originalStart != null && !o.originalStart!.isBefore(orig)) {
-                await repo.deleteLocal(o.id);
-              }
-            }
-          }
-        case Scope.all:
-          await _deleteSeries(repo, m);
-      }
-    }
-    ref.read(syncControllerProvider.notifier).requestSync();
-    if (mounted) Navigator.of(context).pop(true);
-  }
-
-  Future<void> _deleteSeries(EventRepository repo, CalEvent m) async {
-    for (final o in t.overrides) {
-      await repo.deleteLocal(o.id);
-    }
-    await repo.deleteLocal(m.id);
-  }
 
   // ----------------------------------------------------------------- UI
 
@@ -771,93 +537,33 @@ class _EventEditorState extends ConsumerState<EventEditor> {
     String? time,
     VoidCallback onDate,
     VoidCallback onTime,
-  ) => Row(
-    children: [
-      SizedBox(width: 84, child: Text(label)),
-      Expanded(
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(onPressed: onDate, child: Text(date)),
-        ),
-      ),
-      if (time != null) TextButton(onPressed: onTime, child: Text(time)),
-    ],
-  );
-}
-
-class _ColorPicker extends StatelessWidget {
-  const _ColorPicker({required this.value, required this.onChanged});
-  final String? value;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget dot(String? id, Color c, String tip) => Tooltip(
-      message: tip,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () => onChanged(id),
-        child: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: c,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: value == id
-                  ? Theme.of(context).colorScheme.onSurface
-                  : Colors.transparent,
-              width: 2.5,
-            ),
+  ) {
+    // At a large text size the label and the date do not fit side by side
+    // (a label broken in the middle of its word, a date over four lines): the
+    // buttons flow under the label then.
+    if (context.textFactor() >= 1.3) {
+      return Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 84),
+            child: Text(label),
           ),
-          child: value == id
-              ? Icon(Icons.check, size: 16, color: onEventColor(c))
-              : null,
-        ),
-      ),
-    );
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        dot(null, defaultEventColor, 'Alapértelmezett'),
-        for (final e in eventColorChoices)
-          dot(e.key, e.value, eventColorNames[e.key] ?? e.key),
-      ],
-    );
-  }
-}
-
-class _SourceBadge extends StatelessWidget {
-  const _SourceBadge({required this.event});
-  final CalEvent? event;
-  @override
-  Widget build(BuildContext context) {
-    if (event == null) {
-      return const Text(
-        'Mentés után a Google „Naptar” naptárába szinkronizálódik.',
-        style: TextStyle(fontSize: 12),
+          TextButton(onPressed: onDate, child: Text(date)),
+          if (time != null) TextButton(onPressed: onTime, child: Text(time)),
+        ],
       );
     }
-    final synced = event!.googleId != null;
     return Row(
       children: [
-        Icon(
-          synced ? Icons.cloud_done_outlined : Icons.cloud_upload_outlined,
-          size: 16,
-        ),
-        const SizedBox(width: 6),
+        SizedBox(width: 84, child: Text(label)),
         Expanded(
-          child: Text(
-            [
-              synced
-                  ? 'Szinkronban a Google-lel'
-                  : 'Még nincs elküldve a Google-nek',
-              if (event!.aiGenerated) 'AI-javaslatból jött',
-            ].join(' · '),
-            style: Theme.of(context).textTheme.bodySmall,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: onDate, child: Text(date)),
           ),
         ),
+        if (time != null) TextButton(onPressed: onTime, child: Text(time)),
       ],
     );
   }

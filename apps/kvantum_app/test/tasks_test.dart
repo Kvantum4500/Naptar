@@ -3,16 +3,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/ui/checkin.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/tasks_page.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
 
-DateTime today() {
-  final n = DateTime.now();
-  return DateTime.utc(n.year, n.month, n.day);
-}
+/// The moment of these tests: the app and the test agree on what "today" is.
+final _now = DateTime.utc(2026, 5, 13, 9, 30);
+
+DateTime today() => todayIn(_now);
 
 void main() {
   setUpAll(() async {
@@ -27,7 +29,9 @@ void main() {
     useSize(tester);
     db = await newDb();
     repo = RecordRepository(db);
-    await tester.pumpWidget(app(home, db));
+    await tester.pumpWidget(
+      app(home, db, extra: [appClockProvider.overrideWithValue(() => _now)]),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -107,7 +111,7 @@ void main() {
         (t.title, t.estimateMin, t.priority, t.energyNeed, t.done),
         ('Futás a parkban', 45, 3, 5, false),
       );
-      expect((await tester.runAsync(() => repo.dirtyCount())), 1);
+      expect(await tester.runAsync(() => repo.dirtyCount()), 1);
       await shutdown(tester, db);
     });
 
@@ -150,7 +154,7 @@ void main() {
     });
 
     testWidgets(
-      'editing keeps the done state; deleting asks and then hides it (tombstone)',
+      'editing keeps the done state; deleting hides it at once (tombstone)',
       (tester) async {
         await boot(tester, const TasksPage());
         await seedTask(tester, 'a', 'Régi cím', done: true);
@@ -169,9 +173,7 @@ void main() {
 
         await tester.tap(find.byTooltip('Törlés'));
         await tester.pumpAndSettle();
-        expect(find.textContaining('Biztosan törlöd'), findsOneWidget);
-        await tester.tap(find.text('Törlés').last);
-        await tester.pumpAndSettle();
+        expect(find.textContaining('Biztosan törlöd'), findsNothing);
         expect(find.text('Új cím'), findsNothing);
         t = TaskView(
           (await tester.runAsync<SyncRecord?>(() => repo.get(kindTask, 'a')))!,
@@ -180,6 +182,46 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    testWidgets('"Visszavonás" brings a deleted task back as it was', (
+      tester,
+    ) async {
+      await boot(tester, const TasksPage());
+      final t0 = today();
+      await seedTask(tester, 'a', 'Fogorvos', due: t0);
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsOneWidget);
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsNothing);
+      expect(find.text('Feladat törölve'), findsOneWidget);
+
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fogorvos'), findsOneWidget);
+      final back = TaskView(
+        (await tester.runAsync<SyncRecord?>(() => repo.get(kindTask, 'a')))!,
+      );
+      expect(back.deleted, isFalse);
+      expect(back.title, 'Fogorvos');
+      expect(back.due, t0);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a deleted task stays deleted when the bar runs out', (
+      tester,
+    ) async {
+      await boot(tester, const TasksPage());
+      await seedTask(tester, 'a', 'Fogorvos');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(find.text('Visszavonás'), findsNothing);
+      expect(find.text('Fogorvos'), findsNothing);
+      await shutdown(tester, db);
+    });
   });
 
   group('check-in', () {

@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/ui/day_utils.dart';
 import 'package:kvantum_app/ui/home_page.dart';
-import 'package:kvantum_app/ui/time_grid.dart';
+import 'package:kvantum_app/ui/month_view.dart';
 import 'package:kvantum_app/ui/palette.dart';
+import 'package:kvantum_app/ui/time_grid.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/harness.dart';
+import 'support/manual_timers.dart';
 
 Occurrence occ(DateTime s, DateTime e, {bool allDay = false}) => Occurrence(
   eventId: 'e',
@@ -18,6 +23,11 @@ Occurrence occ(DateTime s, DateTime e, {bool allDay = false}) => Occurrence(
   endUtc: allDay ? e : resolveWallClock(bp, e),
   originalStart: s,
 );
+
+/// The moment of the tests that look at "now": the app and the test agree on
+/// what today is, and on the hour the time grid scrolls to.
+final _now = DateTime.utc(2026, 5, 13, 9, 30);
+final _clock = appClockProvider.overrideWithValue(() => _now);
 
 void main() {
   setUpAll(() async {
@@ -84,7 +94,7 @@ void main() {
       useSize(tester);
       final db = await newDb();
       final repo = EventRepository(db);
-      final today = DateTime.now();
+      final today = todayIn(_now);
       final d = floating(today.year, today.month, 15);
       await tester.runAsync(() async {
         for (var i = 0; i < 6; i++) {
@@ -101,7 +111,7 @@ void main() {
           evt('ad', 'Szabadnap', d, len: const Duration(days: 1), allDay: true),
         );
       });
-      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
       await tester.pumpAndSettle();
 
       expect(
@@ -128,7 +138,7 @@ void main() {
       final db = await newDb();
       final repo = EventRepository(db);
       // The grid scrolls to "now - 1 h"; an event starting this hour is always visible.
-      final n = toWallClock(bp, DateTime.now().toUtc());
+      final n = toWallClock(bp, _now);
       final h = n.hour.clamp(1, 21);
       String hh(int x) => x.toString().padLeft(2, '0');
       await tester.runAsync(
@@ -141,7 +151,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
       await tester.pumpAndSettle();
 
       // still the month view ...
@@ -151,6 +161,16 @@ void main() {
       expect(find.text('${hh(h)}:00–${hh(h + 1)}:00'), findsOneWidget);
       expect(find.text('${hh((h + 2).clamp(1, 23))}:00'), findsWidgets);
       expect(find.text('1 esemény'), findsOneWidget);
+
+      // the red "now" line is a marker only: it must never take a tap meant
+      // for the event under it (it used to, for two minutes of every hour,
+      // when it happened to cross the title)
+      expect(
+        tester
+            .widget<IgnorePointer>(find.byKey(const Key('now-line')))
+            .ignoring,
+        isTrue,
+      );
 
       // tapping the block opens the editor directly, no view switch needed
       await tester.tap(find.text('Panel esemény'));
@@ -183,7 +203,7 @@ void main() {
     useSize(tester);
     final db = await newDb();
     final repo = EventRepository(db);
-    final n = toWallClock(bp, DateTime.now().toUtc());
+    final n = toWallClock(bp, _now);
     final h = n.hour.clamp(1, 21);
     String hh(int x) => x.toString().padLeft(2, '0');
     await tester.runAsync(
@@ -196,7 +216,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpWidget(app(const HomePage(), db));
+    await tester.pumpWidget(app(const HomePage(), db, extra: [_clock]));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Hét'));
@@ -257,34 +277,126 @@ void main() {
     });
   }
 
-  testWidgets(
-    'below 1000 px the page shortcuts live in the menu and open the pages',
-    (tester) async {
-      useSize(tester, size: const Size(800, 800));
-      final db = await newDb();
-      await tester.pumpWidget(app(const HomePage(), db));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Asszisztens'), findsNothing);
-      await tester.tap(find.byTooltip('Menü'));
-      await tester.pumpAndSettle();
-      for (final label in ['Feladatok', 'Asszisztens', 'Beállítások']) {
-        expect(find.text(label), findsOneWidget);
-      }
-      await tester.tap(find.text('Asszisztens'));
-      await tester.pumpAndSettle();
-      expect(find.text('Mit tervezzen az asszisztens?'), findsOneWidget);
-      await shutdown(tester, db);
-    },
-  );
-
-  testWidgets('wide windows show the shortcuts as icons', (tester) async {
-    useSize(tester, size: const Size(1280, 800));
+  testWidgets('the day panel sits beside the month grid from 900 px', (
+    tester,
+  ) async {
+    useSize(tester, size: const Size(900, 800));
     final db = await newDb();
     await tester.pumpWidget(app(const HomePage(), db));
     await tester.pumpAndSettle();
-    for (final t in ['Feladatok', 'Asszisztens', 'Beállítások']) {
-      expect(find.byTooltip(t), findsOneWidget);
+    final grid = tester.getRect(find.byType(MonthView));
+    final panel = tester.getRect(find.byType(TimeGrid));
+    expect(panel.left, greaterThanOrEqualTo(grid.right));
+    expect(panel.top, lessThan(grid.bottom), reason: 'side by side');
+    await shutdown(tester, db);
+  });
+
+  testWidgets('under 900 px the day panel sits below the month grid', (
+    tester,
+  ) async {
+    useSize(tester, size: const Size(899, 800));
+    final db = await newDb();
+    await tester.pumpWidget(app(const HomePage(), db));
+    await tester.pumpAndSettle();
+    final grid = tester.getRect(find.byType(MonthView));
+    final panel = tester.getRect(find.byType(TimeGrid));
+    expect(panel.top, greaterThanOrEqualTo(grid.bottom));
+    await shutdown(tester, db);
+  });
+
+  testWidgets('the calendar bar holds no page shortcuts: they are in the bar', (
+    tester,
+  ) async {
+    for (final w in [800.0, 1280.0]) {
+      useSize(tester, size: Size(w, 800));
+      final db = await newDb();
+      await tester.pumpWidget(app(const HomePage(), db));
+      await tester.pumpAndSettle();
+      for (final t in ['Menü', 'Feladatok', 'Asszisztens', 'Beállítások']) {
+        expect(find.byTooltip(t), findsNothing, reason: '$t at ${w.toInt()}');
+      }
+      await shutdown(tester, db);
     }
+  });
+
+  group('the month title', () {
+    Future<AppDatabase> pumpAt(WidgetTester tester, double w) async {
+      useSize(tester, size: Size(w, 800));
+      final db = await newDb();
+      await tester.pumpWidget(
+        app(
+          const HomePage(),
+          db,
+          extra: [
+            appClockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 12, 9),
+            ),
+            midnightTimerProvider.overrideWithValue(ManualTimers().make),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      return db;
+    }
+
+    testWidgets('is short on a narrow phone, so the buttons leave it room', (
+      tester,
+    ) async {
+      final db = await pumpAt(tester, 360);
+      expect(find.text('2026. nov.'), findsOneWidget);
+      expect(find.text('2026. november'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is the full month name from 400 px', (tester) async {
+      final db = await pumpAt(tester, 400);
+      expect(find.text('2026. november'), findsOneWidget);
+      final title = tester.getRect(find.text('2026. november'));
+      final firstButton = tester.getRect(find.byTooltip('Nézet'));
+      expect(title.right, lessThanOrEqualTo(firstButton.left));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('shrinks to what is left and is never cut off', (tester) async {
+      final db = await pumpAt(tester, 320);
+      final bar = find.byType(AppBar);
+      expect(
+        find.descendant(of: bar, matching: find.byType(FittedBox)),
+        findsOneWidget,
+      );
+      final text = tester.widget<Text>(find.text('2026. nov.'));
+      expect(text.overflow, isNull, reason: 'no ellipsis: it scales instead');
+      // what is drawn ends before the first button begins
+      final title = tester.getRect(find.text('2026. nov.'));
+      final firstButton = tester.getRect(find.byTooltip('Nézet'));
+      expect(title.right, lessThanOrEqualTo(firstButton.left));
+      expect(title.left, greaterThanOrEqualTo(0));
+      expect(tester.takeException(), isNull);
+      await shutdown(tester, db);
+    });
+  });
+
+  testWidgets('the bar follows the width of the PAGE, not of the window', (
+    tester,
+  ) async {
+    // a wide window, but the page has only 430 px (as beside a rail)
+    useSize(tester, size: const Size(1400, 800));
+    final db = await newDb();
+    await tester.pumpWidget(
+      app(
+        const Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: 430, child: HomePage()),
+        ),
+        db,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Nézet'), findsOneWidget, reason: 'the view menu');
+    expect(find.text('Napirend'), findsNothing, reason: 'no wide controls');
+    expect(find.byTooltip('Előző'), findsNothing, reason: 'under 440: swipe');
+    expect(tester.takeException(), isNull);
     await shutdown(tester, db);
   });
 

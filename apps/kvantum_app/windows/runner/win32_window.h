@@ -39,6 +39,11 @@ class Win32Window {
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 
+  // If true, Show() shows the window minimised in the taskbar, without taking
+  // the focus (the program was started by Windows at sign-in). It applies to
+  // the first Show() only; set it before Create().
+  void SetStartMinimized(bool start_minimized);
+
   // Release OS resources associated with window.
   void Destroy();
 
@@ -91,6 +96,17 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+
+  // Whether the window was maximised when it was last closed (Show() then
+  // shows it maximised).
+  bool maximize_on_show_ = false;
+
+  // Whether the first Show() puts the window in the taskbar, minimised.
+  bool start_minimized_ = false;
+
+  // Where the window is (screen coordinates) while it is neither maximised nor
+  // minimised: what is kept for the next run.
+  RECT normal_rect_ = {};
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

@@ -1,13 +1,7 @@
-# Kemény szabályok (az AI ezeket SOHA nem szegheti meg)
-> A kód a javaslatot a `PlanRules` ellenőrzővel is átnézi; ami sérti, nem kerül a naptárba.
-
-- Alvási sáv: a felhasználó beállítása szerint (lásd a rendszerutasítást); ekkor nem tervezel semmit.
-- Két esemény között legalább 15 perc puffer.
-- Nehéz edzés csak akkor, ha az aznapi fizikai energia ≥ 3 (1–5 skála).
-- Két nehéz edzés között legalább 48 óra.
-- Heti maximum 5 edzés.
-- Törölni vagy átírni meglévő eseményt csak a felhasználó jóváhagyásával lehet; alapértelmezésben csak ÚJ eseményt javasolsz.
-- Rögzített eseményt (munka, orvos, utazás) soha nem mozgatsz.
-- Ha nincs check-in egy napra, közepes energiát (3/5) feltételezel, és ezt jelzed az indoklásban; arra a napra csak könnyű edzést javasolsz.
-- Ha nincs szabad idősáv, vagy a kérés nem érthető, kérdezz vissza, ne találj ki adatot.
-- A „muszak: true” jelölésű események a munkaműszakok: rögzítettek, nem mozgatod őket; nehéz edzés műszak előtt és után legalább 8 órával lehet.
+# Szabályok
+- Edzés: Calisthenics, Gym, Street Workout és hobbisportok (kajak, falmászás, kerékpár). Mást (pl. futás) magadtól nem javasolsz. A címben a sport és az idő szerepeljen („Calisthenics 45 perc”). Naponta legfeljebb egy edzés.
+- Az edzés 60 perctől nehéz (`hard: true`); a „könnyű”, „nyújtás”, „mobilitás” című tétel mindig könnyű.
+- A séta nem edzés: hangulatjavító mozgás (`kind: other`), nem alapjavaslat.
+- Hobbisport csak illő évszakban: kajak május–szeptember; szabadtéri falmászás és kerékpár tavasztól őszig, szárazon, fagy nélkül; télen terem. Szabadtérinél `outdoor: true`.
+- Az idojaras blokk szerint döntesz: szabadtérit nem javasolsz, ha csapadék ≥ 60% vagy ≥ 3 mm, fagy, max < 3 °C (kajak < 10 °C), max > 33 °C, szél ≥ 40 km/h (kajak ≥ 25); helyette beltéri (Gym, Calisthenics terem) vagy másik nap. Előrejelzés nélkül az évszakból következtess, bizonytalanul főtípus vagy kérdés.
+- A „Tanult szokások” kötnek, de az alvás-, puffer-, energia- és műszakszabályok felülírják.

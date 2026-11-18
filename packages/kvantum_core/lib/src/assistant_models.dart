@@ -1,5 +1,7 @@
+import 'event.dart';
 import 'rules.dart';
 import 'time.dart';
+import 'workout.dart';
 
 /// One event proposed by the AI assistant (as understood by the app).
 class ProposalItem {
@@ -11,7 +13,48 @@ class ProposalItem {
     required this.kind,
     required this.hard,
     required this.reason,
+    this.taskId,
+    this.taskTitle,
+    this.taskDue,
+    this.taskEstimateMin,
+    this.taskEnergy,
+    this.outdoor = false,
   });
+
+  /// The model said it is done outside.
+  final bool outdoor;
+
+  /// Task this block works on (named by the model, details filled in by the
+  /// app from the real task record).
+  final String? taskId;
+  final String? taskTitle;
+  final DateTime? taskDue; // floating date
+  final int? taskEstimateMin;
+  final int? taskEnergy;
+
+  /// Fills in the details of the real task. [id] replaces the id the model
+  /// named (a short alias such as `t1`) with the real record id.
+  ProposalItem withTask({
+    required String title,
+    String? id,
+    DateTime? due,
+    int? estimateMin,
+    int? energy,
+  }) => ProposalItem(
+    title: this.title,
+    startWall: startWall,
+    endWall: endWall,
+    tzid: tzid,
+    kind: kind,
+    hard: hard,
+    reason: reason,
+    taskId: id ?? taskId,
+    taskTitle: title,
+    taskDue: due,
+    taskEstimateMin: estimateMin,
+    taskEnergy: energy,
+    outdoor: outdoor,
+  );
 
   final String title;
   final DateTime startWall; // floating
@@ -26,12 +69,55 @@ class ProposalItem {
   DateTime get startUtc => resolveWallClock(tzid, startWall);
   DateTime get endUtc => resolveWallClock(tzid, endWall);
 
-  ProposedBlock toBlock() => ProposedBlock(
+  /// Whether this is a workout for the rules. The model's `kind` counts, but a
+  /// plain workout name under "other" does not slip past the weekly cap (a
+  /// walk, a stretch and anything else light is never one).
+  bool get isWorkout =>
+      kind == 'workout' ||
+      (kind == 'other' && isWorkoutTitle(title) && !isLightTitle(title));
+
+  /// Whether the rules treat it as a hard session: decided in code (see
+  /// [isHardWorkout]) from the length and the title, with the limit the user's
+  /// own workouts have taught ([PlanRules.hardFromFor]); the model's `hard` is
+  /// one vote, not the verdict.
+  bool isHardSession({PlanRules rules = const PlanRules()}) =>
+      isWorkout &&
+      isHardWorkout(
+        title: title,
+        length: endUtc.difference(startUtc),
+        modelSaysHard: hard,
+        fromMinutes: rules.hardFromFor(sportKey(title)),
+      );
+
+  /// The same item with the code's verdict as its `hard` (what the screen
+  /// shows is what the rules judged).
+  ProposalItem withHard(bool value) => ProposalItem(
+    title: title,
+    startWall: startWall,
+    endWall: endWall,
+    tzid: tzid,
+    kind: kind,
+    hard: value,
+    reason: reason,
+    taskId: taskId,
+    taskTitle: taskTitle,
+    taskDue: taskDue,
+    taskEstimateMin: taskEstimateMin,
+    taskEnergy: taskEnergy,
+    outdoor: outdoor,
+  );
+
+  ProposedBlock toBlock({PlanRules rules = const PlanRules()}) => ProposedBlock(
     title: title,
     startUtc: startUtc,
     endUtc: endUtc,
-    isWorkout: kind == 'workout',
-    isHard: hard,
+    isWorkout: isWorkout,
+    isHard: isHardSession(rules: rules),
+    taskId: taskId,
+    taskDue: taskDue,
+    taskEstimateMin: taskEstimateMin,
+    taskEnergy: taskEnergy,
+    outdoor: outdoor,
   );
 }
 
@@ -60,6 +146,7 @@ const _kinds = {'workout', 'task', 'rest', 'other'};
 ParsedProposal parseProposal(
   Object? json, {
   String defaultTz = 'Europe/Budapest',
+  int maxItems = 20,
 }) {
   final problems = <String>[];
   final items = <ProposalItem>[];
@@ -84,6 +171,12 @@ ParsedProposal parseProposal(
   final list = raw is List ? raw : const [];
   for (var i = 0; i < list.length; i++) {
     final n = i + 1;
+    if (items.length >= maxItems) {
+      problems.add(
+        'Egyszerre legfeljebb $maxItems javaslatot fogadok el, a többit ($n. javaslattól) kihagytam.',
+      );
+      break;
+    }
     final it = list[i];
     if (it is! Map) {
       problems.add('$n. javaslat: nem objektum.');
@@ -121,7 +214,14 @@ ParsedProposal parseProposal(
       problems.add('$n. javaslat („$title”): 12 óránál hosszabb.');
       continue;
     }
-    final kind = _kinds.contains(it['kind']) ? it['kind'] as String : 'workout';
+    var kind = _kinds.contains(it['kind']) ? it['kind'] as String : 'workout';
+    var hard = it['hard'] == true;
+    // A walk is mood-lifting movement, not a workout: it must not count
+    // towards the weekly workout cap or the hard-session rules.
+    if (kind == 'workout' && title.toLowerCase().contains('séta')) {
+      kind = 'other';
+      hard = false;
+    }
     items.add(
       ProposalItem(
         title: title,
@@ -129,8 +229,12 @@ ParsedProposal parseProposal(
         endWall: e,
         tzid: tz,
         kind: kind,
-        hard: it['hard'] == true,
+        hard: hard,
+        outdoor: it['outdoor'] == true,
         reason: _text(it['reason'], 300),
+        taskId: _text(it['taskId'], 100).isEmpty
+            ? null
+            : _text(it['taskId'], 100),
       ),
     );
   }
@@ -141,6 +245,94 @@ ParsedProposal parseProposal(
     questions: questions,
   );
 }
+
+/// A move the model asked for: ONE existing occurrence gets a new time.
+/// It only becomes a proposal the user must confirm with a button.
+class MoveRequest {
+  const MoveRequest({
+    required this.ref,
+    required this.startWall,
+    required this.endWall,
+    required this.tzid,
+    required this.reason,
+  });
+  final String ref;
+  final DateTime startWall; // floating
+  final DateTime endWall;
+  final String tzid;
+  final String reason;
+
+  DateTime get startUtc => resolveWallClock(tzid, startWall);
+  DateTime get endUtc => resolveWallClock(tzid, endWall);
+}
+
+/// Reads the optional `moves` list of the `propose_events` arguments.
+/// Never throws; at most [max] distinct references are kept.
+({List<MoveRequest> items, List<String> problems}) parseMoves(
+  Object? json, {
+  String defaultTz = 'Europe/Budapest',
+  int max = 20,
+}) {
+  final problems = <String>[];
+  final out = <MoveRequest>[];
+  final raw = json is Map ? json['moves'] : null;
+  if (raw == null) return (items: out, problems: problems);
+  if (raw is! List) {
+    return (items: out, problems: const ['A „moves” mező nem lista.']);
+  }
+  final seen = <String>{};
+  for (var i = 0; i < raw.length; i++) {
+    final n = i + 1;
+    final it = raw[i];
+    final ref = it is Map && it['ref'] is String
+        ? (it['ref'] as String).trim()
+        : '';
+    if (parseOccurrenceRef(ref) == null) {
+      problems.add('$n. áthelyezés: hibás hivatkozás${_shown(ref)}.');
+      continue;
+    }
+    final m = it as Map;
+    final tz = _text(m['tzid'], 60).isEmpty ? defaultTz : _text(m['tzid'], 60);
+    try {
+      locationOf(tz);
+    } catch (_) {
+      problems.add('$n. áthelyezés: ismeretlen időzóna: $tz.');
+      continue;
+    }
+    final s = _wall(m['start'], tz);
+    final e = _wall(m['end'], tz);
+    if (s == null || e == null) {
+      problems.add('$n. áthelyezés: hibás vagy hiányzó kezdés/befejezés.');
+      continue;
+    }
+    if (!e.isAfter(s)) {
+      problems.add('$n. áthelyezés: a befejezés nem a kezdés után van.');
+      continue;
+    }
+    if (!seen.add(ref)) continue;
+    if (out.length >= max) {
+      problems.add(
+        'Egyszerre legfeljebb $max áthelyezés javasolható; a többit kihagytam.',
+      );
+      break;
+    }
+    out.add(
+      MoveRequest(
+        ref: ref,
+        startWall: s,
+        endWall: e,
+        tzid: tz,
+        reason: _text(m['reason'], 300),
+      ),
+    );
+  }
+  return (items: out, problems: problems);
+}
+
+/// What the model sent as a reference, for diagnosis (short, markup-free).
+String _shown(String ref) => ref.isEmpty
+    ? ' (üres)'
+    : ' („${_text(ref.replaceAll(RegExp('[<>]'), ''), 40)}”)';
 
 String _text(Object? v, int max) {
   final s = (v is String ? v : '').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -157,4 +349,88 @@ DateTime? _wall(Object? v, String tz) {
   if (d == null) return null;
   if (hasZone) return toWallClock(tz, d.toUtc());
   return DateTime.utc(d.year, d.month, d.day, d.hour, d.minute, d.second);
+}
+
+/// Stable reference to ONE occurrence of an event, handed to the model in the
+/// calendar data so it can name what should be deleted: `<eventId>@<original start>`.
+String occurrenceRef(Occurrence o) =>
+    '${o.eventId}@${o.originalStart.toIso8601String()}';
+
+({String eventId, DateTime originalStart})? parseOccurrenceRef(String ref) {
+  final i = ref.lastIndexOf('@');
+  if (i <= 0 || i == ref.length - 1) return null;
+  final id = ref.substring(0, i);
+  final t = DateTime.tryParse(ref.substring(i + 1));
+  if (t == null || id.length > 100) return null;
+  return (
+    eventId: id,
+    originalStart: DateTime.utc(
+      t.year,
+      t.month,
+      t.day,
+      t.hour,
+      t.minute,
+      t.second,
+    ),
+  );
+}
+
+/// Whether [now] is still the occurrence a proposal was made for ([then]): the
+/// same event at the same place of its series, with the same title and times.
+///
+/// A proposal is a snapshot, and the card may sit on the page for hours. Before
+/// it is carried out, the live calendar is compared with the snapshot with
+/// this; whatever has changed since is left alone.
+bool sameOccurrence(Occurrence then, Occurrence now) =>
+    then.eventId == now.eventId &&
+    then.originalStart == now.originalStart &&
+    then.title == now.title &&
+    then.startUtc == now.startUtc &&
+    then.endUtc == now.endUtc &&
+    then.allDay == now.allDay &&
+    then.recurring == now.recurring &&
+    then.isOverride == now.isOverride &&
+    then.isShift == now.isShift;
+
+/// A deletion the model asked for. It only ever becomes a proposal the user
+/// must confirm with a button; nothing is deleted from this alone.
+class DeletionRequest {
+  const DeletionRequest(this.ref, this.reason);
+  final String ref;
+  final String reason;
+}
+
+/// Reads the optional `deletions` list of the `propose_events` arguments.
+/// Never throws; at most [max] distinct references are kept.
+({List<DeletionRequest> items, List<String> problems}) parseDeletions(
+  Object? json, {
+  int max = 20,
+}) {
+  final problems = <String>[];
+  final out = <DeletionRequest>[];
+  final raw = json is Map ? json['deletions'] : null;
+  if (raw == null) return (items: out, problems: problems);
+  if (raw is! List) {
+    return (items: out, problems: const ['A „deletions” mező nem lista.']);
+  }
+  final seen = <String>{};
+  for (var i = 0; i < raw.length; i++) {
+    final it = raw[i];
+    final ref = it is Map && it['ref'] is String
+        ? (it['ref'] as String).trim()
+        : '';
+    if (parseOccurrenceRef(ref) == null) {
+      problems.add('${i + 1}. törlés: hibás hivatkozás${_shown(ref)}.');
+      continue;
+    }
+    if (!seen.add(ref)) continue;
+    if (out.length >= max) {
+      problems.add(
+        'Egyszerre legfeljebb $max törlés javasolható; a többit kihagytam.',
+      );
+      break;
+    }
+    out.add(DeletionRequest(ref, _text((it as Map)['reason'], 300)));
+  }
+  return (items: out, problems: problems);
 }

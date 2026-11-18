@@ -1,0 +1,113 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-3",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000060390252\"",
+      "id": "conf1a2b3c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=conf1a2b3c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Konferencia",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-06-12"
+      },
+      "end": {
+        "date": "2026-06-15"
+      },
+      "iCalUID": "conf1a2b3c@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "transparency": "transparent"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000068127497\"",
+      "id": "newyear4d5e6f",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=newyear4d5e6f",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Évforduló utazás",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-12-30"
+      },
+      "end": {
+        "date": "2027-01-03"
+      },
+      "iCalUID": "newyear4d5e6f@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000036737783\"",
+      "id": "yearly7a8b9c",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=yearly7a8b9c",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Névnap",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-03-19"
+      },
+      "end": {
+        "date": "2026-03-20"
+      },
+      "iCalUID": "yearly7a8b9c@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=YEARLY"
+      ],
+      "transparency": "transparent"
+    }
+  ]
+}

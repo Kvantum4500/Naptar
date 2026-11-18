@@ -11,6 +11,8 @@ import 'package:http/testing.dart';
 import 'package:kvantum_app/update/update_dialog.dart';
 import 'package:kvantum_app/update/update_service.dart';
 
+import 'support/turns.dart';
+
 http.Response _json(Object body, [int status = 200]) => http.Response(
   jsonEncode(body),
   status,
@@ -22,7 +24,11 @@ int _assetId(String name) => name.endsWith('.sha256')
     ? 102
     : (name.endsWith('.zip') ? 101 : (name.endsWith('.apk') ? 103 : 104));
 
-Map<String, Object?> release(int build, {List<String>? names}) => {
+Map<String, Object?> release(
+  int build, {
+  List<String>? names,
+  int size = 10,
+}) => {
   'tag_name': 'build-$build',
   'body': 'Új dolgok',
   'assets': [
@@ -37,10 +43,19 @@ Map<String, Object?> release(int build, {List<String>? names}) => {
         'name': n,
         'url':
             'https://api.github.com/repos/o/r/releases/assets/${_assetId(n)}',
-        'size': 10,
+        'size': size,
       },
   ],
 };
+
+class _MemoryPrefs implements UpdatePrefs {
+  _MemoryPrefs(this.on);
+  bool on;
+  @override
+  Future<bool> previews() async => on;
+  @override
+  Future<void> setPreviews(bool v) async => on = v;
+}
 
 UpdateService svc(
   MockClientHandler h, {
@@ -61,16 +76,20 @@ void main() {
       expect(buildFromTag('build-x'), isNull);
     });
 
-    test('no token -> clear message, no network call', () async {
-      var called = false;
-      final r = await svc((_) async {
-        called = true;
-        return _json({});
-      }, token: '').check(1);
-      expect(r, isA<UpdateFailed>());
-      expect((r as UpdateFailed).kind, UpdateErrorKind.notConfigured);
-      expect(called, isFalse);
-    });
+    test(
+      'no token: the check goes out anonymously (the repository is public)',
+      () async {
+        late http.Request seen;
+        final r = await svc((req) async {
+          seen = req;
+          return _json(release(9));
+        }, token: '').check(5);
+        expect(r, isA<UpdateAvailable>());
+        expect(seen.headers.containsKey('Authorization'), isFalse);
+        expect(seen.headers['X-GitHub-Api-Version'], '2022-11-28');
+        expect(seen.url.path, '/repos/o/r/releases/latest');
+      },
+    );
 
     test(
       'newer release is offered with the right platform asset and checksum',
@@ -130,6 +149,82 @@ void main() {
       expect(
         await kind((_) async => _json(release(9, names: ['readme.txt']))),
         UpdateErrorKind.noPackage,
+      );
+    });
+
+    test('"too many requests" is told as that, not as a bad key', () async {
+      http.Response limited(int status, {String left = '0'}) => http.Response(
+        '{}',
+        status,
+        headers: {
+          'x-ratelimit-remaining': left,
+          'content-type': 'application/json',
+        },
+      );
+      Future<UpdateFailed> fail(
+        MockClientHandler h, {
+        String token = 'tok',
+      }) async => (await svc(h, token: token).check(1)) as UpdateFailed;
+      // with a key: a 403 with no calls left, and a 429, are the limit
+      expect(
+        (await fail((_) async => limited(403))).kind,
+        UpdateErrorKind.rateLimited,
+      );
+      expect(
+        (await fail((_) async => limited(429, left: '12'))).kind,
+        UpdateErrorKind.rateLimited,
+      );
+      // a 403 with calls left is the key
+      expect(
+        (await fail((_) async => limited(403, left: '4999'))).kind,
+        UpdateErrorKind.badToken,
+      );
+      // without a key the words name the limit of the shared address
+      final anon = await fail((_) async => limited(403), token: '');
+      expect(anon.kind, UpdateErrorKind.rateLimited);
+      expect(anon.message, contains('óránként 60'));
+      final keyed = await fail((_) async => limited(403));
+      expect(keyed.message, isNot(contains('óránként 60')));
+      expect(keyed.message, contains('korlátozza'));
+    });
+
+    test(
+      'without a key a refusal is never "your key", just unexpected',
+      () async {
+        Future<UpdateErrorKind> kind(int status) async => ((await svc(
+          (_) async => _json({}, status),
+          token: '',
+        ).check(1)) as UpdateFailed).kind;
+        expect(await kind(401), UpdateErrorKind.other);
+        expect(await kind(403), UpdateErrorKind.other);
+      },
+    );
+
+    test('no release: the words depend on whether a key was sent', () async {
+      Future<String> text(
+        String token,
+        MockClientHandler h, {
+        bool previews = false,
+      }) async => ((await svc(
+        h,
+        token: token,
+      ).check(1, includePreviews: previews)) as UpdateFailed).message;
+      expect(
+        await text('', (_) async => _json({}, 404)),
+        'Még nincs kiadott verzió.',
+      );
+      expect(
+        await text('tok', (_) async => _json({}, 404)),
+        contains('hozzáférési kulcs'),
+      );
+      // the list of the releases (with previews) says it the same way
+      expect(
+        await text('', (_) async => _json([]), previews: true),
+        'Még nincs kiadott verzió.',
+      );
+      expect(
+        await text('tok', (_) async => _json([]), previews: true),
+        contains('hozzáférési kulcs'),
       );
     });
 
@@ -460,16 +555,21 @@ void main() {
           platform: UpdatePlatform.windows,
         );
 
-    Widget host(UpdateService s, {UpdateInstaller? installer, int build = 5}) =>
-        ProviderScope(
-          overrides: [
-            currentBuildProvider.overrideWith((ref) async => build),
-            updateServiceProvider.overrideWithValue(s),
-            if (installer != null)
-              updateInstallerProvider.overrideWithValue(installer),
-          ],
-          child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
-        );
+    Widget host(
+      UpdateService s, {
+      UpdateInstaller? installer,
+      int build = 5,
+      bool previews = false,
+    }) => ProviderScope(
+      overrides: [
+        currentBuildProvider.overrideWith((ref) async => build),
+        updatePrefsProvider.overrideWithValue(_MemoryPrefs(previews)),
+        updateServiceProvider.overrideWithValue(s),
+        if (installer != null)
+          updateInstallerProvider.overrideWithValue(installer),
+      ],
+      child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
+    );
 
     testWidgets('up to date', (tester) async {
       await tester.pumpWidget(host(service((_) async => _json(release(5)))));
@@ -477,10 +577,45 @@ void main() {
       expect(find.textContaining('Naprakész vagy'), findsOneWidget);
     });
 
-    testWidgets('no token explains what is missing', (tester) async {
-      await tester.pumpWidget(host(service((_) async => _json({}), token: '')));
+    testWidgets('no token: the check still runs (the repository is public)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(service((_) async => _json(release(5)), token: '')),
+      );
       await tester.pumpAndSettle();
-      expect(find.textContaining('UPDATE_TOKEN'), findsOneWidget);
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
+      expect(find.textContaining('nincs beállítva a frissítés'), findsNothing);
+      expect(find.textContaining('UPDATE_TOKEN'), findsNothing);
+    });
+
+    testWidgets('too many requests: told, with a retry that works later', (
+      tester,
+    ) async {
+      var limited = true;
+      await tester.pumpWidget(
+        host(
+          service((_) async {
+            if (limited) {
+              return http.Response(
+                '{}',
+                403,
+                headers: {'x-ratelimit-remaining': '0'},
+              );
+            }
+            return _json(release(5));
+          }, token: ''),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('korlátozza a kérések számát'),
+        findsOneWidget,
+      );
+      limited = false;
+      await tester.tap(find.text('Újrapróbál'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
     });
 
     testWidgets('expired token has its own message', (tester) async {
@@ -513,36 +648,136 @@ void main() {
         final bytes = utf8.encode('package-bytes');
         final sum = sha256.convert(bytes).toString();
         final installed = <String>[];
-        await tester.runAsync(() async {
-          await tester.pumpWidget(
-            host(
-              service((req) async {
-                final path = req.url.path;
-                if (path.endsWith('/releases/latest')) return _json(release(9));
-                if (path.endsWith('/assets/102')) {
-                  return http.Response('$sum  naptar-windows-9.zip', 200);
-                }
-                if (path.endsWith('/assets/101')) {
-                  return http.Response.bytes(bytes, 200);
-                }
-                return http.Response('', 404);
-              }),
-              installer: _FakeInstaller(installed),
-            ),
-          );
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        });
+        await tester.pumpWidget(
+          host(
+            service((req) async {
+              final path = req.url.path;
+              if (path.endsWith('/releases/latest')) {
+                return _json(release(9, size: bytes.length));
+              }
+              if (path.endsWith('/assets/102')) {
+                return http.Response('$sum  naptar-windows-9.zip', 200);
+              }
+              if (path.endsWith('/assets/101')) {
+                return http.Response.bytes(bytes, 200);
+              }
+              return http.Response('', 404);
+            }),
+            installer: _FakeInstaller(installed),
+          ),
+        );
+        // the check, and later the download (real files), take as long as they
+        // take: the test goes on when the screen says they are done
+        await pumpUntil(
+          tester,
+          () => find
+              .textContaining('Új verzió érhető el: 9')
+              .evaluate()
+              .isNotEmpty,
+          what: 'the news of the new version',
+        );
         await tester.pumpAndSettle();
         expect(find.textContaining('Új verzió érhető el: 9'), findsOneWidget);
-        await tester.runAsync(() async {
-          await tester.tap(find.text('Frissítés most'));
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-        });
+        await tester.tap(find.text('Frissítés most'));
+        await pumpUntil(
+          tester,
+          () => find.text('Kész, újraindítás…').evaluate().isNotEmpty,
+          what: 'the end of the update',
+        );
         await tester.pumpAndSettle();
         expect(installed, ['naptar-windows-9.zip']);
         expect(find.text('Kész, újraindítás…'), findsOneWidget);
       },
     );
+  });
+
+  group('preview builds', () {
+    List<Object?> releases() => [
+      {...release(5), 'prerelease': false},
+      {...release(7), 'prerelease': true},
+      {...release(9), 'draft': true},
+    ];
+
+    test('with previews the newest published build wins, a pre-release '
+        'included, a draft never', () async {
+      Uri? asked;
+      final r = await svc((req) async {
+        asked = req.url;
+        return _json(releases());
+      }).check(5, includePreviews: true);
+      expect(asked.toString(), endsWith('/repos/o/r/releases?per_page=20'));
+      expect((r as UpdateAvailable).info.build, 7);
+    });
+
+    test(
+      'without previews only the release marked latest is asked for',
+      () async {
+        Uri? asked;
+        await svc((req) async {
+          asked = req.url;
+          return _json(release(5));
+        }).check(5);
+        expect(asked.toString(), endsWith('/repos/o/r/releases/latest'));
+      },
+    );
+
+    test(
+      'a preview that is not newer than the installed build is no update',
+      () async {
+        final r = await svc((_) async => _json(releases()))
+            .check(7, includePreviews: true);
+        expect(r, isA<UpToDate>());
+      },
+    );
+
+    test('no published release at all', () async {
+      final empty = await svc((_) async => _json([]))
+          .check(1, includePreviews: true);
+      expect((empty as UpdateFailed).kind, UpdateErrorKind.noRelease);
+      final onlyDraft = await svc(
+        (_) async => _json([
+          {...release(3), 'draft': true},
+        ]),
+      ).check(1, includePreviews: true);
+      expect((onlyDraft as UpdateFailed).kind, UpdateErrorKind.noRelease);
+    });
+
+    testWidgets('the dialog switch changes what is asked and is remembered', (
+      tester,
+    ) async {
+      final asked = <String>[];
+      final prefs = _MemoryPrefs(true);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentBuildProvider.overrideWith((ref) async => 5),
+            updatePrefsProvider.overrideWithValue(prefs),
+            updateServiceProvider.overrideWithValue(
+              UpdateService(
+                client: MockClient((req) async {
+                  asked.add(req.url.toString());
+                  return req.url.path.endsWith('/latest')
+                      ? _json(release(5))
+                      : _json([release(7)]);
+                }),
+                repo: 'o/r',
+                token: 'tok',
+                platform: UpdatePlatform.windows,
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: UpdateDialog())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Új verzió érhető el: 7'), findsOneWidget);
+
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pumpAndSettle();
+      expect(prefs.on, isFalse);
+      expect(find.textContaining('Naprakész vagy'), findsOneWidget);
+      expect(asked.last, endsWith('/releases/latest'));
+    });
   });
 }
 

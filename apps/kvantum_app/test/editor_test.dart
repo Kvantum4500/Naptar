@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/sync/sync_hold.dart';
 import 'package:kvantum_app/ui/event_editor.dart';
 import 'package:kvantum_app/ui/repeat_editor.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -85,6 +89,27 @@ void main() {
         await shutdown(tester, db);
       },
     );
+
+    testWidgets('an end before the start is explained and nothing is stored', (
+      tester,
+    ) async {
+      await openOn(
+        tester,
+        EditTarget(
+          initialStart: floating(2026, 5, 4, 14),
+          initialEnd: floating(2026, 5, 4, 13),
+        ),
+      );
+      await rename(tester, 'Fordítva');
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('A befejezésnek a kezdés után kell lennie.'),
+        findsOneWidget,
+      );
+      expect(await all(tester), isEmpty);
+      await shutdown(tester, db);
+    });
 
     testWidgets('empty title is rejected and nothing is stored', (
       tester,
@@ -319,16 +344,198 @@ void main() {
       await shutdown(tester, db);
     });
 
-    testWidgets('plain event: confirmation then removed', (tester) async {
+    CalEvent shiftEvent() => evt(
+      'sh',
+      'Nappali műszak',
+      floating(2026, 5, 4, 6),
+    ).copyWith(notes: kShiftMarker);
+
+    testWidgets('saving a generated shift unchanged keeps it generated', (
+      tester,
+    ) async {
+      final e = shiftEvent();
+      await seed(tester, e);
+      await boot(tester, EditTarget(event: e));
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      expect((await all(tester)).single.notes, kShiftMarker);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('changing a generated shift marks it modified', (tester) async {
+      final e = shiftEvent();
+      await seed(tester, e);
+      await boot(tester, EditTarget(event: e));
+      await rename(tester, 'Nappali műszak (csere)');
+      await tester.tap(find.text('Mentés'));
+      await tester.pumpAndSettle();
+      final saved = (await all(tester)).single;
+      expect(saved.title, 'Nappali műszak (csere)');
+      expect(saved.notes, kShiftEditedMarker);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('plain event: removed at once, without a question', (
+      tester,
+    ) async {
       final e = evt('p', 'Egyszeri', floating(2026, 5, 4, 9));
       await seed(tester, e);
       await boot(tester, EditTarget(event: e));
       await tester.tap(find.byTooltip('Törlés'));
       await tester.pumpAndSettle();
-      expect(find.text('Biztosan törlöd ezt az eseményt?'), findsOneWidget);
-      await tester.tap(find.text('Törlés').last);
-      await tester.pumpAndSettle();
+      expect(find.text('Biztosan törlöd ezt az eseményt?'), findsNothing);
       expect(await all(tester), isEmpty);
+      await shutdown(tester, db);
+    });
+  });
+
+  group('taking a deletion back', () {
+    /// The editor opened over a page, the way the app does it: when it closes,
+    /// something is left to show the bar.
+    Future<void> bootOver(WidgetTester tester, EditTarget target) async {
+      useSize(tester);
+      await tester.pumpWidget(
+        app(const Scaffold(body: Center(child: Text('Naptár'))), db),
+      );
+      await tester.pumpAndSettle();
+      unawaited(
+        Navigator.of(tester.element(find.text('Naptár'))).push(
+          MaterialPageRoute<bool>(builder: (_) => EventEditor(target: target)),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<List<int>> days(WidgetTester tester) async => (await tester.runAsync(
+      () =>
+          repo.occurrences(DateTime.utc(2026, 5, 1), DateTime.utc(2026, 6, 30)),
+    ))!.map((o) => o.originalStart.day).toList();
+
+    Future<void> undo(WidgetTester tester) async {
+      await tester.tap(find.text('Visszavonás'));
+      await tester.pumpAndSettle();
+    }
+
+    /// What the sync is told to leave alone right now.
+    SyncHold hold(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.text('Naptár')))
+            .read(syncHoldProvider);
+
+    testWidgets('a plain event comes back as it was', (tester) async {
+      final e = evt('p', 'Egyszeri', floating(2026, 5, 4, 9));
+      await seed(tester, e);
+      await bootOver(tester, EditTarget(event: e));
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      expect(find.text('Naptár'), findsOneWidget, reason: 'the editor closed');
+      expect(find.text('Esemény törölve'), findsOneWidget);
+      expect(await all(tester), isEmpty);
+      expect(hold(tester).isHeld('p'), isTrue, reason: 'not uploaded yet');
+      await undo(tester);
+      expect(hold(tester).isHeld('p'), isFalse, reason: 'back to normal');
+      final back = (await all(tester)).single;
+      expect(back.id, 'p');
+      expect(back.title, 'Egyszeri');
+      expect(back.start, floating(2026, 5, 4, 9));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('one occurrence of a series', (tester) async {
+      await seed(tester);
+      await bootOver(tester, occurrence2());
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Csak ez az esemény'));
+      await tester.pumpAndSettle();
+      expect(find.text('Az előfordulás törölve'), findsOneWidget);
+      expect(await days(tester), [4, 18, 25]);
+      expect(hold(tester).isHeld('m'), isTrue, reason: 'the series is held');
+      await undo(tester);
+      expect(await days(tester), [4, 11, 18, 25]);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('this and the following ones', (tester) async {
+      await seed(tester);
+      await bootOver(tester, occurrence2());
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ez és a következő események'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Az előfordulás és a következők törölve'),
+        findsOneWidget,
+      );
+      expect(await days(tester), [4]);
+      await undo(tester);
+      expect(await days(tester), [4, 11, 18, 25]);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a whole series with its exception', (tester) async {
+      final ov = makeOverride(
+        master: series(),
+        originalStart: floating(2026, 5, 18, 9),
+        newId: 'o1',
+        edited: series().copyWith(
+          title: 'Máskor',
+          start: floating(2026, 5, 18, 12),
+          end: floating(2026, 5, 18, 13),
+        ),
+      );
+      await seed(tester);
+      await tester.runAsync(() => repo.saveLocal(ov));
+      await bootOver(tester, occurrence2(overrides: [ov]));
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Az összes esemény'));
+      await tester.pumpAndSettle();
+      expect(find.text('A sorozat törölve'), findsOneWidget);
+      expect(await all(tester), isEmpty);
+      await undo(tester);
+      final back = await all(tester);
+      expect(back.map((e) => e.id).toSet(), {'m', 'o1'});
+      expect(back.firstWhere((e) => e.id == 'o1').title, 'Máskor');
+      expect(await days(tester), [4, 11, 18, 25]);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the bar goes after ten seconds and the deletion stays', (
+      tester,
+    ) async {
+      final e = evt('p', 'Egyszeri', floating(2026, 5, 4, 9));
+      await seed(tester, e);
+      await bootOver(tester, EditTarget(event: e));
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      expect(find.text('Visszavonás'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 12));
+      await tester.pumpAndSettle();
+      expect(find.text('Visszavonás'), findsNothing);
+      expect(await all(tester), isEmpty);
+      expect(hold(tester).isHeld('p'), isFalse, reason: 'it goes up now');
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a change made meanwhile is not overwritten', (tester) async {
+      await seed(tester);
+      await bootOver(tester, occurrence2());
+      await tester.tap(find.byTooltip('Törlés'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Csak ez az esemény'));
+      await tester.pumpAndSettle();
+      // the user renames the series while the bar is up
+      final m = (await tester.runAsync(() => repo.byId('m')))!;
+      await tester.runAsync(
+        () => repo.saveLocal(m.copyWith(title: 'Átnevezve')),
+      );
+      await undo(tester);
+      expect(
+        find.text('A visszavonás már nem lehetséges: közben megváltozott.'),
+        findsOneWidget,
+      );
+      expect((await tester.runAsync(() => repo.byId('m')))!.title, 'Átnevezve');
+      expect(await days(tester), [4, 18, 25], reason: 'nothing was undone');
       await shutdown(tester, db);
     });
   });

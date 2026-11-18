@@ -4,28 +4,62 @@ import 'package:uuid/uuid.dart';
 
 import 'db.dart';
 
+/// The meta key of the Drive change token (where the record sync left off).
+const driveTokenKey = 'drivePageToken';
+
+/// The stamp for a write of [keys] on top of [base]: the clock, unless one of
+/// the fields it replaces already carries that stamp or a later one.
+int stampAfter(SyncRecord base, Iterable<String> keys, int clock) {
+  var ts = clock;
+  for (final k in keys) {
+    final old = base.fields[k]?.ts;
+    if (old != null && old >= ts) ts = old + 1;
+  }
+  return ts;
+}
+
+/// How far a stamp is ahead of the clock, when it is far enough to suspect a
+/// wrong clock on the device that wrote it (otherwise null).
+Duration? clockAhead(int? stampMs, int nowMs) {
+  if (stampMs == null) return null;
+  final ahead = Duration(milliseconds: stampMs - nowMs);
+  return ahead > const Duration(days: 2) ? ahead : null;
+}
+
+/// How far ahead of the clock a stamp may be before it is not believed. A
+/// device with a wrong clock stamps days or weeks ahead, and what it writes
+/// must not be lost, so a smaller lead is taken (and warned about, see
+/// [clockAhead]; the next edit is stamped after it, see [stampAfter]). A year
+/// ahead is no clock error but a forged or broken record: it would stay on
+/// top of every honest edit until the clock caught up.
+const maxStampAhead = Duration(days: 365);
+
+/// Whether [stampMs] is further ahead of [nowMs] than [maxStampAhead].
+bool stampIsAbsurd(int stampMs, int nowMs) =>
+    stampMs - nowMs > maxStampAhead.inMilliseconds;
+
 /// Local store of the Drive-synced records (tasks, check-ins).
 class RecordRepository {
   RecordRepository(this.db, {String? deviceId, int Function()? clock})
-    : _clock = clock ?? (() => DateTime.now().toUtc().millisecondsSinceEpoch) {
-    _deviceId = deviceId;
-  }
+    : _clock = clock ?? (() => DateTime.now().toUtc().millisecondsSinceEpoch),
+      _deviceId = deviceId == null ? null : Future.value(deviceId);
 
   final AppDatabase db;
 
   /// Stable id of this installation (created once, kept in the database);
-  /// breaks timestamp ties identically on every device.
-  late String? _deviceId;
-  Future<String> deviceId() async {
-    final known = _deviceId;
-    if (known != null) return known;
+  /// breaks timestamp ties identically on every device. The first lookup is
+  /// shared: two callers at the same moment must not create two ids.
+  Future<String>? _deviceId;
+  Future<String> deviceId() => _deviceId ??= _loadDeviceId();
+
+  Future<String> _loadDeviceId() => db.transaction(() async {
     var id = await meta('deviceId');
     if (id == null) {
       id = const Uuid().v4().substring(0, 8);
       await setMeta('deviceId', id);
     }
-    return _deviceId = id;
-  }
+    return id;
+  });
 
   final int Function() _clock;
 
@@ -61,34 +95,112 @@ class RecordRepository {
   }
 
   /// Creates or edits a record locally (marks it for upload).
+  ///
+  /// The write is stamped with the clock, but never earlier than one
+  /// millisecond after the value it replaces: the last writer wins by stamp,
+  /// so an edit made on top of what this device has seen must beat it even if
+  /// another device's clock runs ahead (otherwise that device's value would
+  /// silently outlive every later edit until the real time caught up).
   Future<SyncRecord> edit(
     String kind,
     String id,
     Map<String, Object?> changes,
   ) async {
-    final base = await get(kind, id) ?? SyncRecord(id: id, kind: kind);
-    final next = base.edit(changes, ts: now(), dev: await deviceId());
-    await _put(next, dirty: true);
-    return next;
+    final dev = await deviceId();
+    return db.transaction(() async {
+      final base = await get(kind, id) ?? SyncRecord(id: id, kind: kind);
+      final next = base.edit(
+        changes,
+        ts: stampAfter(base, changes.keys, now()),
+        dev: dev,
+      );
+      await _put(next, dirty: true);
+      return next;
+    });
   }
 
   /// Soft delete: a tombstone that is synced like any other change.
   Future<void> delete(String kind, String id) async {
-    final base = await get(kind, id);
-    if (base == null) return;
-    await _put(
-      base.edit({'deleted': true}, ts: now(), dev: await deviceId()),
-      dirty: true,
-    );
+    final dev = await deviceId();
+    await db.transaction(() async {
+      final base = await get(kind, id);
+      if (base == null) return;
+      await _put(
+        base.edit(
+          {'deleted': true},
+          ts: stampAfter(base, const ['deleted'], now()),
+          dev: dev,
+        ),
+        dirty: true,
+      );
+    });
   }
+
+  /// Takes a soft delete back (undo): the record is edited to "not deleted",
+  /// with a stamp above the deletion's, so it wins on every device that has
+  /// seen the deletion. Returns false when the record is not deleted (any
+  /// more): it was never there, was cleaned up, or was brought back already.
+  /// (Editing a missing record would create an empty ghost, hence the check.)
+  Future<bool> undelete(String kind, String id) async {
+    final dev = await deviceId();
+    return db.transaction(() async {
+      final base = await get(kind, id);
+      if (base == null || !base.deleted) return false;
+      await _put(
+        base.edit(
+          {'deleted': false},
+          ts: stampAfter(base, const ['deleted'], now()),
+          dev: dev,
+        ),
+        dirty: true,
+      );
+      return true;
+    });
+  }
+
+  /// The newest write stamp of any record, in milliseconds (null: none yet).
+  Future<int?> newestStamp() async =>
+      (await (db.selectOnly(
+        db.recordRows,
+      )..addColumns([db.recordRows.updatedAt.max()])).getSingle()).read(
+        db.recordRows.updatedAt.max(),
+      );
 
   /// Merges a record read from Drive. The row stays dirty only when the local
   /// side still has information the remote copy lacks.
-  Future<void> applyRemote(SyncRecord remote) async {
+  Future<void> applyRemote(SyncRecord remote) => db.transaction(() async {
     final local = await get(remote.kind, remote.id);
     final merged = local == null ? remote : local.merge(remote);
     await _put(merged, dirty: !merged.sameAs(remote));
-  }
+  });
+
+  /// Puts the records of a backup back: a record this device does not have is
+  /// added, one it has is merged field by field (what is newer on the device
+  /// stays; a deleted record stays deleted). Everything that changes is queued
+  /// for upload (Drive may have lost it too). With [dryRun] nothing is
+  /// written: the counts say what a restore would do.
+  Future<({int added, int updated, int same})> restoreRecords(
+    Iterable<SyncRecord> incoming, {
+    bool dryRun = false,
+  }) => db.transaction(() async {
+    var added = 0, updated = 0, same = 0;
+    for (final rec in incoming) {
+      final local = await get(rec.kind, rec.id);
+      if (local == null) {
+        if (!dryRun) await _put(rec, dirty: true);
+        added++;
+        continue;
+      }
+      final merged = local.merge(rec);
+      if (merged.sameAs(local)) {
+        same++;
+        continue;
+      }
+      if (!dryRun) await _put(merged, dirty: true);
+      updated++;
+    }
+    return (added: added, updated: updated, same: same);
+  });
 
   /// Queues a record for upload again (e.g. its Drive file disappeared).
   Future<void> markDirty(String kind, String id) =>
@@ -96,12 +208,45 @@ class RecordRepository {
             ..where((t) => t.kind.equals(kind) & t.id.equals(id)))
           .write(const RecordRowsCompanion(dirty: Value(true)));
 
+  /// "Start the record sync over": forget where the Drive listing stopped and
+  /// which file belongs to which record (they may belong to ANOTHER account's
+  /// Drive), and queue every record for a check against Drive. Nothing is
+  /// deleted: the merge keeps whatever either side has.
+  Future<void> resetSync() => db.transaction(() async {
+    await setMeta(driveTokenKey, null);
+    await db.delete(db.driveFileRows).go();
+    await db
+        .update(db.recordRows)
+        .write(const RecordRowsCompanion(dirty: Value(true)));
+  });
+
   Future<List<SyncRecord>> dirty() async {
     final rows = await (db.select(
       db.recordRows,
     )..where((t) => t.dirty.equals(true))).get();
     return [for (final r in rows) ?_tryDecode(r)];
   }
+
+  /// Deleted records whose deletion is older than [olderThanMs] (a stamp, in
+  /// milliseconds) and already on Drive: their marker can be forgotten.
+  Future<List<SyncRecord>> oldTombstones(int olderThanMs) async {
+    final rows =
+        await (db.select(db.recordRows)..where(
+              (t) =>
+                  t.dirty.equals(false) &
+                  t.updatedAt.isSmallerThanValue(olderThanMs),
+            ))
+            .get();
+    return [
+      for (final r in rows)
+        if (_tryDecode(r) case final rec? when rec.deleted) rec,
+    ];
+  }
+
+  /// Forgets a record altogether (its row; the Drive file is the caller's).
+  Future<void> purge(String kind, String id) => (db.delete(
+    db.recordRows,
+  )..where((t) => t.kind.equals(kind) & t.id.equals(id))).go();
 
   Future<int> dirtyCount() async =>
       (await (db.selectOnly(db.recordRows)
@@ -113,7 +258,7 @@ class RecordRepository {
 
   /// Clears the dirty flag only if the row still holds exactly what was
   /// uploaded; an edit made while the upload ran stays queued.
-  Future<void> markClean(SyncRecord uploaded) async {
+  Future<void> markClean(SyncRecord uploaded) => db.transaction(() async {
     final row =
         await (db.select(db.recordRows)..where(
               (t) => t.kind.equals(uploaded.kind) & t.id.equals(uploaded.id),
@@ -127,7 +272,7 @@ class RecordRepository {
           ))
           .write(const RecordRowsCompanion(dirty: Value(false)));
     }
-  }
+  });
 
   Future<void> _put(SyncRecord r, {required bool dirty}) => db
       .into(db.recordRows)

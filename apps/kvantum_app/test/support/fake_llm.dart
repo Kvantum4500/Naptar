@@ -10,6 +10,12 @@ class FakeLlm implements LLMProvider {
   final List<LlmRequest> requests = [];
   final List<String> models = [];
 
+  /// How often the connection was closed (once per request in the app).
+  int closed = 0;
+
+  @override
+  void close() => closed++;
+
   @override
   Future<LlmReply> generate(String model, LlmRequest request) async {
     requests.add(request);

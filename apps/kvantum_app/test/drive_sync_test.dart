@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/drive/drive_remote.dart';
 import 'package:kvantum_app/drive/drive_sync_engine.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
@@ -190,6 +191,70 @@ void main() {
     },
   );
 
+  group('a stamp from years ahead is no clock error', () {
+    const day = 86400 * 1000;
+
+    SyncRecord stamped(String id, int daysAhead) =>
+        SyncRecord(id: id, kind: kindTask).edit(
+          taskFields(title: 'Távoli'),
+          ts: clock + daysAhead * day,
+          dev: 'B',
+        );
+
+    test(
+      'a record stamped years ahead is not taken, one weeks ahead is',
+      () async {
+        drive.externalWrite('task-far.json', stamped('far', 400).encode());
+        drive.externalWrite('task-near.json', stamped('near', 20).encode());
+        final r = await engine.sync();
+        expect(r.pulled, 1);
+        expect(r.skippedCorrupt, 1);
+        expect(await repo.get(kindTask, 'far'), isNull);
+        expect(await repo.get(kindTask, 'near'), isNotNull);
+      },
+    );
+
+    test('a forged copy of our own record is overwritten by ours', () async {
+      await addTask('t1', 'Helyi');
+      await engine.sync();
+      final id = drive.files.keys.single;
+      drive.externalWrite(
+        'task-t1.json',
+        SyncRecord(id: 't1', kind: kindTask)
+            .edit(
+              taskFields(title: 'Hamis'),
+              ts: clock + 800 * day,
+              dev: 'B',
+            )
+            .encode(),
+      );
+      await repo.edit(kindTask, 't1', {'notes': 'változás'});
+      await engine.sync();
+      final onDrive = TaskView(SyncRecord.decode(drive.files[id]!.content));
+      expect(onDrive.title, 'Helyi');
+      expect(onDrive.notes, 'változás');
+    });
+  });
+
+  test(
+    'a remote copy far bigger than any record is overwritten by ours',
+    () async {
+      await addTask('t1', 'Helyi');
+      await engine.sync();
+      final id = drive.files.keys.single;
+      drive.failReadOf = (n) =>
+          n == 'task-t1.json' ? const DriveFileTooBig(99999999) : null;
+      await repo.edit(kindTask, 't1', {'notes': 'változás'});
+      final r = await engine.sync();
+      expect(r.pushed, 1);
+      expect(
+        TaskView(SyncRecord.decode(drive.files[id]!.content)).notes,
+        'változás',
+      );
+      expect(drive.files.length, 1, reason: 'no second file');
+    },
+  );
+
   test('expired page token: full resync, nothing duplicated', () async {
     await addTask('t1', 'x');
     await engine.sync();
@@ -281,5 +346,167 @@ void main() {
     await addTask('t1', 'x');
     await Future.wait([engine.sync(), engine.sync(), engine.sync()]);
     expect(drive.creates, 1);
+  });
+
+  // ---- the feedback after a workout (2e) is a record like the others
+  group('the workout feedback', () {
+    final id = workoutLogId('e1', DateTime.utc(2026, 5, 5, 18));
+
+    Map<String, Object?> answers({int? body, int? mind, int? exp}) =>
+        workoutLogFields(
+          title: 'Gym',
+          date: DateTime.utc(2026, 5, 5),
+          minutes: 60,
+          sport: 'gym',
+          bodyLoad: body,
+          mindLoad: mind,
+          experience: exp,
+        );
+
+    test('it is uploaded under its own file name, once', () async {
+      await repo.edit(kindWorkoutLog, id, answers(body: 4));
+      final r = await engine.sync();
+      expect(r.pushed, 1);
+      expect(drive.files.values.single.name, 'workoutlog-$id.json');
+      expect((await engine.sync()).pushed, 0);
+      expect(drive.writes, 1);
+    });
+
+    test('another device\'s feedback arrives and is read', () async {
+      final bDb = await newDb();
+      final rec = await repoFor(
+        bDb,
+        'B',
+      ).edit(kindWorkoutLog, id, answers(body: 5, exp: 2));
+      drive.externalWrite('workoutlog-$id.json', rec.encode());
+      final r = await engine.sync();
+      expect(r.pulled, 1);
+      expect(r.skippedCorrupt, 0);
+      final v = WorkoutLogView((await repo.get(kindWorkoutLog, id))!);
+      expect((v.bodyLoad, v.experience, v.sport), (5, 2, 'gym'));
+      expect(drive.writes, 0);
+      await bDb.close();
+    });
+
+    test(
+      'two devices answered different questions: both answers survive',
+      () async {
+        await repo.edit(kindWorkoutLog, id, answers(body: 4));
+        final bDb = await newDb();
+        final recB = await repoFor(
+          bDb,
+          'B',
+        ).edit(kindWorkoutLog, id, answers(mind: 2, exp: 5));
+        drive.externalWrite('workoutlog-$id.json', recB.encode());
+        await engine.sync();
+        expect(drive.files.length, 1);
+        for (final rec in [
+          await repo.get(kindWorkoutLog, id),
+          SyncRecord.decode(drive.files.values.single.content),
+        ]) {
+          final v = WorkoutLogView(rec!);
+          expect((v.bodyLoad, v.mindLoad, v.experience), (4, 2, 5));
+        }
+        await bDb.close();
+      },
+    );
+
+    test(
+      'a file whose body does not match its name is skipped as corrupt',
+      () async {
+        final rec = await repo.edit(kindWorkoutLog, id, answers(body: 3));
+        drive.externalWrite('workoutlog-someone-else.json', rec.encode());
+        final r = await engine.sync();
+        expect(r.skippedCorrupt, 1);
+        expect(await repo.get(kindWorkoutLog, 'someone-else'), isNull);
+      },
+    );
+
+    test('a full resync re-queues a feedback file Drive lost', () async {
+      await repo.edit(kindWorkoutLog, id, answers(body: 4));
+      await engine.sync();
+      drive.files.clear();
+      drive.expireToken = true;
+      await engine.sync();
+      expect(drive.files.values.single.name, 'workoutlog-$id.json');
+    });
+  });
+
+  group('files from a newer version of the app', () {
+    const future =
+        '{"v":2,"id":"t1","kind":"task","f":{"title":"a different shape"}}';
+
+    test(
+      'are not read, not overwritten and not mistaken for damaged ones',
+      () async {
+        await addTask('t1', 'Helyi');
+        drive.externalWrite('task-t1.json', future);
+        final r = await engine.sync();
+        expect(r.newerFormat, 1);
+        expect(r.skippedCorrupt, 0);
+        expect(r.pushed, 0);
+        expect(drive.files.values.single.content, future, reason: 'untouched');
+        expect(drive.writes, 0);
+        expect(await repo.dirtyCount(), 1, reason: 'ours waits for the update');
+      },
+    );
+
+    test('and stay that way run after run', () async {
+      await addTask('t1', 'Helyi');
+      drive.externalWrite('task-t1.json', future);
+      for (var i = 0; i < 3; i++) {
+        final r = await engine.sync();
+        expect(r.newerFormat, i == 0 ? 1 : lessThanOrEqualTo(1));
+        expect(drive.files.values.single.content, future);
+      }
+      expect(drive.writes, 0);
+    });
+
+    test('duplicates of such a file are not cleaned up', () async {
+      drive.externalWrite('task-t1.json', future);
+      drive.externalWrite('task-t1.json', future, duplicate: true);
+      await engine.sync();
+      expect(drive.files.length, 2);
+      expect(drive.deletes, 0);
+    });
+
+    test('a readable file next to them is handled as usual', () async {
+      drive.externalWrite('task-t1.json', future);
+      final other = repoFor(await newDb(), 'B');
+      final rec = await addTask('t2', 'Rendes', r: other);
+      drive.externalWrite('task-t2.json', rec.encode());
+      final r = await engine.sync();
+      expect((r.pulled, r.newerFormat), (1, 1));
+      expect(TaskView((await repo.get(kindTask, 't2'))!).title, 'Rendes');
+    });
+
+    test(
+      'once the file is in the old format again, it merges normally',
+      () async {
+        await addTask('t1', 'Helyi');
+        drive.externalWrite('task-t1.json', future);
+        await engine.sync();
+        final id = drive.files.keys.single;
+        drive.externalDelete(id);
+        drive.externalWrite(
+          'task-t1.json',
+          (await repo.get(kindTask, 't1'))!.encode(),
+        );
+        await engine.sync();
+        expect(await repo.dirtyCount(), 0);
+      },
+    );
+
+    test('a really damaged file is still replaced by ours', () async {
+      await addTask('t1', 'Helyi');
+      drive.externalWrite('task-t1.json', '{"id":"t1","kind":"task","f":5}');
+      final r = await engine.sync();
+      expect(r.skippedCorrupt, 1);
+      expect(r.newerFormat, 0);
+      expect(
+        SyncRecord.decode(drive.files.values.single.content)['title'],
+        'Helyi',
+      );
+    });
   });
 }
