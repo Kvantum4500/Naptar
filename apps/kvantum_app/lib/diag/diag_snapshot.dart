@@ -100,7 +100,7 @@ class DiagSnapshot {
 /// Hungarian names of the sync channels.
 const channelLabels = {
   channelCalendar: 'Naptár',
-  channelDrive: 'Drive (feladatok, check-inek)',
+  channelDrive: 'Drive (feladatok, check-inek, napló, étkezés, beállítások)',
   channelFinance: 'Pénzügy (levelek)',
 };
 

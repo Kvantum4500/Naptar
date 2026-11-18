@@ -159,7 +159,10 @@ void main() {
       expect(find.textContaining('Adatbázis: séma'), findsOneWidget);
       expect(find.textContaining('esemény 1'), findsOneWidget);
       expect(find.text('Naptár'), findsWidgets);
-      expect(find.text('Drive (feladatok, check-inek)'), findsOneWidget);
+      expect(
+        find.text('Drive (feladatok, check-inek, napló, étkezés, beállítások)'),
+        findsOneWidget,
+      );
       expect(find.text('Pénzügy (levelek)'), findsOneWidget);
       expect(find.text('még nem volt futás'), findsOneWidget);
       expect(

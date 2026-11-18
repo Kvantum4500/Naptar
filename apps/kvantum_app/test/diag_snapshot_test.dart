@@ -102,7 +102,7 @@ void main() {
         'Függő módosítás: 2 (feladva: 1)',
         'Következő próba: 2026-11-12 14:35',
         'Naptár: hiba (kód: parked)',
-        'Drive (feladatok, check-inek): rendben',
+        'Drive (feladatok, check-inek, napló, étkezés, beállítások): rendben',
         'Pénzügy (levelek): még nem volt futás',
         '1. módosítás, 5. próba, a Google nem fogadta el (kód: 400, invalid) [feladva]',
         '2026-11-12 Naptár: 40 hívás · 37 rendben · 1 elutasítva · 2 korlátozva',
