@@ -225,16 +225,20 @@ class UndoService {
     }
   }
 
-  /// Tells the user something in the bar of the app (a change that did not go
-  /// through, say): lifted over the round buttons of the page and not wider than
-  /// a phone's bar, like the "Visszavonás" bar. A bar that is up is not waited
-  /// for: what is told is more urgent, and what it offered is final then.
+  /// Tells the user that something did not go through (a change that was not
+  /// saved, an undo that could not be done): in the colours of an error, lifted
+  /// over the round buttons of the page and not wider than a phone's bar, like
+  /// the "Visszavonás" bar. A bar that is up is not waited for: what is told is
+  /// more urgent, and what it offered is final once it has gone.
   void say(UndoSite site, String text) {
     try {
+      final scheme = Theme.of(site.messenger.context).colorScheme;
       site.messenger.clearSnackBars();
       site.messenger.showSnackBar(
         SnackBar(
-          content: Text(text),
+          // (the words say what went wrong; the colour, that it is one)
+          backgroundColor: scheme.errorContainer,
+          content: Text(text, style: TextStyle(color: scheme.onErrorContainer)),
           duration: const Duration(seconds: 6),
           persist: false,
           behavior: SnackBarBehavior.floating,

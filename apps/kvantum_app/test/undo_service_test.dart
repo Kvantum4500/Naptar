@@ -312,6 +312,33 @@ void main() {
       await shutdown(tester, db);
     });
 
+    for (final dark in [false, true]) {
+      testWidgets('is in the colours of an error, readable, 4.5 : 1 '
+          '(${dark ? 'dark' : 'light'} theme)', (tester) async {
+        await boot(
+          tester,
+          theme: dark ? ThemeData(brightness: Brightness.dark) : null,
+        );
+        await tapSay(tester);
+        final scheme = Theme.of(tester.element(find.byType(SnackBar)))
+            .colorScheme;
+        final bar = tester.widget<SnackBar>(find.byType(SnackBar));
+        expect(bar.backgroundColor, scheme.errorContainer);
+        final text = tester.widget<Text>(
+          find.descendant(
+            of: find.byType(SnackBar),
+            matching: find.text('Nem sikerült elmenteni.'),
+          ),
+        );
+        expect(text.style!.color, scheme.onErrorContainer);
+        expect(
+          contrastRatio(scheme.onErrorContainer, scheme.errorContainer),
+          greaterThanOrEqualTo(4.5),
+        );
+        await shutdown(tester, db);
+      });
+    }
+
     testWidgets('sits well above the bottom edge, clear of a round button', (
       tester,
     ) async {
