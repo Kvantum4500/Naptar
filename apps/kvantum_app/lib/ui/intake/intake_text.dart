@@ -1,9 +1,22 @@
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../../sync/error_catalog.dart';
 import '../format.dart';
 
 // The words of the food and fluid page: pure functions, so that what the page
 // and a screen reader say can be tested without drawing anything.
+
+/// What the bar says when a change that has no form of its own did not go
+/// through: what was tried ([what], "törölni az ételt") and why, in words the
+/// user can use. The sentence the catalog adds to an error nobody foresaw, that
+/// what was typed is not lost, is left out: there was nothing typed.
+String failureLine(String what, Object error) {
+  final info = errorInfoFor(error);
+  final why = info.action == ErrorAction.diagnostics
+      ? '${info.title} Részletek: Diagnosztika.'
+      : info.text;
+  return 'Nem sikerült $what: $why';
+}
 
 /// How far a day is from a goal, in words: "még 780 kcal", "a cél teljesült"
 /// or "150 kcal a cél fölött" (told by [amount], the number with its unit).

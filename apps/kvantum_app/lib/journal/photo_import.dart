@@ -44,15 +44,16 @@ enum PhotoProblem {
 
   /// The picture was made but could not be saved.
   notSaved,
+
+  /// A HEIC / HEIF file, which this device has no decoder for (Windows has
+  /// none). It is not taken in as the file it is: what the diary keeps is
+  /// always a JPEG without the data of the camera.
+  heic,
 }
 
 /// What a round of choosing made.
 class PhotoImportResult {
-  const PhotoImportResult(
-    this.added, {
-    this.problems = const {},
-    this.keptAsTheyWere = 0,
-  });
+  const PhotoImportResult(this.added, {this.problems = const {}});
 
   /// The pictures that are in the diary now, in the order they were chosen.
   final List<PhotoRef> added;
@@ -60,11 +61,7 @@ class PhotoImportResult {
   /// How many files each problem hit.
   final Map<PhotoProblem, int> problems;
 
-  /// How many pictures were taken in as the files they were (a kind this
-  /// device cannot convert): they are kept, but may not show here.
-  final int keptAsTheyWere;
-
-  bool get hasProblems => problems.isNotEmpty || keptAsTheyWere > 0;
+  bool get hasProblems => problems.isNotEmpty;
 
   /// What to tell the user, in a sentence or two; null when all went well.
   String? get notice {
@@ -91,12 +88,13 @@ class PhotoImportResult {
       (n) => 'nincs elég hely az eszközön, $n kép nem került be',
     );
     add(PhotoProblem.notSaved, (n) => '$n képet nem sikerült elmenteni');
-    if (keptAsTheyWere > 0) {
-      parts.add(
-        '$keptAsTheyWere kép eredeti formában került be, '
-        'és lehet, hogy ezen az eszközön nem jelenik meg',
-      );
-    }
+    // (last: it is two sentences, and the second says what to do)
+    add(
+      PhotoProblem.heic,
+      (n) =>
+          '$n HEIC/HEIF kép ezen az eszközön nem alakítható át, ezért '
+          'kimaradt. Mentsd el JPEG vagy PNG formátumban, és azt add hozzá',
+    );
     if (parts.isEmpty) return null;
     final text = parts.join('; ');
     return '${text[0].toUpperCase()}${text.substring(1)}.';
@@ -114,9 +112,10 @@ class PhotoImportError implements Exception {
 }
 
 /// Takes the chosen files into the diary: each is read, made smaller and
-/// written as a JPEG without the data of the camera, under a new id; a kind
-/// this device cannot convert (HEIC on Windows) is kept as it was, if it is
-/// not too big. Nothing but a code goes to the log.
+/// written as a JPEG without the data of the camera, under a new id. A file
+/// this device cannot convert (HEIC on Windows) is not taken in: a copy of it
+/// would carry the place and the time of the shot, could not be shown here and
+/// could not travel to the other devices. Nothing but a code goes to the log.
 class PhotoImporter {
   PhotoImporter({
     required this.files,
@@ -131,10 +130,10 @@ class PhotoImporter {
   final String Function() _newId;
   final DiagLog? log;
 
-  /// The endings of the kinds that the phones decode and others may not: only
-  /// these are kept when they cannot be converted (a JPEG that cannot be read
-  /// is damaged, and a copy of it would help nobody).
-  static const _keepable = {'heic', 'heif'};
+  /// The endings of the kinds that the phones decode and others may not: a
+  /// file of one of these that cannot be converted is told apart from a file
+  /// that is no picture (the way out is another format).
+  static const _heicEndings = {'heic', 'heif'};
 
   /// Takes in at most [room] of [picked], in order.
   Future<PhotoImportResult> import(
@@ -143,7 +142,6 @@ class PhotoImporter {
   }) async {
     final added = <PhotoRef>[];
     final problems = <PhotoProblem, int>{};
-    var kept = 0;
     void hit(PhotoProblem p) => problems[p] = (problems[p] ?? 0) + 1;
 
     for (final file in picked) {
@@ -178,36 +176,30 @@ class PhotoImporter {
       } catch (_) {
         made = null;
       }
-      final String name;
-      final PhotoRef ref;
-      final Uint8List out;
-      if (made != null) {
-        name = '$id.jpg';
-        out = made.jpeg;
-        ref = PhotoRef(
-          id: id,
-          width: made.width,
-          height: made.height,
-          bytes: made.jpeg.length,
-        );
-      } else {
+      if (made == null) {
         final ext = p.extension(file.name).toLowerCase().replaceFirst('.', '');
-        if (!_keepable.contains(ext)) {
+        if (_heicEndings.contains(ext)) {
+          log?.info('journal', 'photo.heic_unsupported');
+          hit(PhotoProblem.heic);
+        } else {
           log?.error(
             'journal',
             'photo.decode_failed',
             const PhotoImportError('decode'),
           );
           hit(PhotoProblem.notAPicture);
-          continue;
         }
-        name = '$id.$ext';
-        out = bytes;
-        ref = PhotoRef(id: id, ext: ext, bytes: bytes.length);
-        log?.info('journal', 'photo.kept_as_is');
+        continue;
       }
+      final name = '$id.jpg';
+      final ref = PhotoRef(
+        id: id,
+        width: made.width,
+        height: made.height,
+        bytes: made.jpeg.length,
+      );
       try {
-        await files.write(name, out);
+        await files.write(name, made.jpeg);
       } catch (e) {
         final full = _isDiskFull(e);
         log?.error(
@@ -218,10 +210,9 @@ class PhotoImporter {
         hit(full ? PhotoProblem.diskFull : PhotoProblem.notSaved);
         continue;
       }
-      if (made == null) kept++;
       added.add(ref);
     }
-    return PhotoImportResult(added, problems: problems, keptAsTheyWere: kept);
+    return PhotoImportResult(added, problems: problems);
   }
 }
 

@@ -195,33 +195,28 @@ void main() {
       },
     );
 
-    test('what was kept as it was is a thing to tell, too', () {
+    test('a round with a problem of any kind is a thing to tell', () {
       expect(const PhotoImportResult([]).hasProblems, isFalse);
-      expect(
-        const PhotoImportResult([], keptAsTheyWere: 1).hasProblems,
-        isTrue,
-      );
-      expect(
-        const PhotoImportResult(
-          [],
-          problems: {PhotoProblem.tooBig: 1},
-        ).hasProblems,
-        isTrue,
-      );
+      for (final problem in PhotoProblem.values) {
+        expect(
+          PhotoImportResult([], problems: {problem: 1}).hasProblems,
+          isTrue,
+          reason: '$problem',
+        );
+      }
     });
 
-    test(
-      'a picture kept as it was is told to the log, without its name',
-      () async {
-        final r = await importer().import([
-          pick('Titkos-nyaralas.heic', first: 0),
-        ], room: 5);
-        expect(r.keptAsTheyWere, 1);
-        final text = await logText();
-        expect(text, contains('photo.kept_as_is'));
-        expect(text, isNot(contains('Titkos')));
-      },
-    );
+    test('a HEIC file that cannot be converted is told to the log by a code, '
+        'without its name', () async {
+      final r = await importer().import([
+        pick('Titkos-nyaralas.heic', first: 0),
+      ], room: 5);
+      expect(r.problems, {PhotoProblem.heic: 1});
+      final text = await logText();
+      expect(text, contains('photo.heic_unsupported'));
+      expect(text, isNot(contains('photo.decode_failed')));
+      expect(text, isNot(contains('Titkos')));
+    });
 
     test(
       'a file that is no picture is told to the log, without its name',
@@ -236,13 +231,20 @@ void main() {
       },
     );
 
-    test('is not counted as kept when it could not be written', () async {
-      files.failWrite = FileSystemException('x', '/p', const OSError('io', 5));
-      final r = await importer().import([pick('a.heic', first: 0)], room: 5);
-      expect(r.added, isEmpty);
-      expect(r.keptAsTheyWere, 0);
-      expect(r.problems, {PhotoProblem.notSaved: 1});
-    });
+    test(
+      'a HEIC file is never written, so a write error cannot touch it',
+      () async {
+        files.failWrite = FileSystemException(
+          'x',
+          '/p',
+          const OSError('io', 5),
+        );
+        final r = await importer().import([pick('a.heic', first: 0)], room: 5);
+        expect(r.added, isEmpty);
+        expect(r.problems, {PhotoProblem.heic: 1});
+        expect(files.names, isEmpty);
+      },
+    );
 
     test('a full disk is told by its codes on Linux, Android and Windows', () async {
       for (final code in [28, 112, 39]) {
@@ -330,6 +332,34 @@ void main() {
       expect(listed.single.name, 'a1.jpg');
       expect(listed.single.modified.toUtc(), when);
       expect(listed.single.size, 1);
+    });
+
+    test('tells the same of a half-written file, and lists it apart', () async {
+      final files = DirPhotoFiles(dir);
+      await files.write('a1.jpg', Uint8List.fromList([1]));
+      File('${dir.path}/b2.jpg.tmp').writeAsBytesSync([7, 7, 7]);
+      final when = DateTime.utc(2026, 11, 1, 12);
+      File('${dir.path}/b2.jpg.tmp').setLastModifiedSync(when);
+      final leftovers = await files.listLeftovers();
+      expect(leftovers.single.name, 'b2.jpg.tmp');
+      expect(leftovers.single.modified.toUtc(), when);
+      expect(leftovers.single.size, 3);
+      expect((await files.list()).single.name, 'a1.jpg');
+    });
+
+    test('a write that is cut short is what the sweep later finds', () async {
+      // (the file a write puts down first is the very name the sweep looks for)
+      final files = DirPhotoFiles(dir);
+      await Directory('${dir.path}/a1.jpg').create(); // a folder is in the way
+      await expectLater(
+        files.write('a1.jpg', Uint8List.fromList([1])),
+        throwsA(isA<FileSystemException>()),
+      );
+      // the failed write cleaned up after itself ...
+      expect(await files.listLeftovers(), isEmpty);
+      // ... and one that died without the chance to is found by its name
+      File('${dir.path}/a1.jpg.tmp').writeAsBytesSync([1]);
+      expect((await files.listLeftovers()).map((f) => f.name), ['a1.jpg.tmp']);
     });
   });
 }

@@ -5,12 +5,15 @@ import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../intake/intake_providers.dart';
 import '../../providers.dart';
+import '../../sync/error_catalog.dart' show errorInfoFor;
 import '../day_utils.dart';
 import '../format.dart';
 
 // The forms of the food and fluid page: a food, a drink, the goals. Each is a
-// dialog that makes the checked entry itself and hands it back; the page writes
-// it and offers "Visszavonás".
+// dialog that makes the checked entry itself and hands it to the page, which
+// writes it and offers "Visszavonás". The form waits for that: when the write
+// fails it stays open, with what was typed and the words of the error (the page
+// has logged the cause), as the editor of the diary does.
 
 /// The minute of the day on the wall clock of the display zone, now.
 int intakeMinuteNow(WidgetRef ref) {
@@ -36,6 +39,40 @@ class FluidEdit {
   const FluidEdit(this.before, this.after);
   final FluidEntry? before;
   final FluidEntry? after;
+}
+
+/// What the page does with what a form made: it writes it. It throws when it
+/// cannot, and the form says so and stays.
+typedef FoodApply = Future<void> Function(FoodEdit edit);
+typedef FluidApply = Future<void> Function(FluidEdit edit);
+typedef GoalsApply = Future<void> Function(IntakeGoals goals);
+
+/// What the three forms share of the writing: while it goes on the form is held
+/// (nothing to tap twice, no way to close it), and when it fails the form stays,
+/// with the words of the error.
+mixin _Writes<W extends StatefulWidget> on State<W> {
+  bool _busy = false;
+
+  /// Runs [write] and closes the form after it. When it throws, [fail] is told
+  /// the words for the user and the form is free again.
+  Future<void> _write(
+    Future<void> Function() write,
+    void Function(String words) fail,
+  ) async {
+    setState(() => _busy = true);
+    try {
+      await write();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          fail(errorInfoFor(e).text);
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.pop(context);
+  }
 }
 
 Future<TimeOfDay?> _pickTime(BuildContext context, int minute) =>
@@ -103,25 +140,28 @@ Widget _errorLine(Key key, String? error, BuildContext context) => error == null
 
 // -------------------------------------------------------------------- food
 
-Future<FoodEdit?> showFoodDialog(
+Future<void> showFoodDialog(
   BuildContext context, {
   required DateTime day,
+  required FoodApply apply,
   FoodEntry? existing,
-}) => showDialog<FoodEdit>(
+}) => showDialog<void>(
   context: context,
-  builder: (_) => _FoodDialog(day: day, existing: existing),
+  builder: (_) => _FoodDialog(day: day, existing: existing, apply: apply),
 );
 
 class _FoodDialog extends ConsumerStatefulWidget {
-  const _FoodDialog({required this.day, this.existing});
+  const _FoodDialog({required this.day, required this.apply, this.existing});
   final DateTime day;
   final FoodEntry? existing;
+  final FoodApply apply;
 
   @override
   ConsumerState<_FoodDialog> createState() => _FoodDialogState();
 }
 
-class _FoodDialogState extends ConsumerState<_FoodDialog> {
+class _FoodDialogState extends ConsumerState<_FoodDialog>
+    with _Writes<_FoodDialog> {
   late final TextEditingController _name;
   late final TextEditingController _kcal;
   late final TextEditingController _protein;
@@ -184,9 +224,10 @@ class _FoodDialogState extends ConsumerState<_FoodDialog> {
     setState(() => _day = DateTime.utc(d.year, d.month, d.day));
   }
 
-  void _save() {
+  Future<void> _save() async {
+    final FoodEntry entry;
     try {
-      final entry = FoodEntry.checked(
+      entry = FoodEntry.checked(
         id: widget.existing?.id ?? ref.read(intakeOpsProvider).newId(),
         day: _day,
         minute: _minute,
@@ -197,11 +238,20 @@ class _FoodDialogState extends ConsumerState<_FoodDialog> {
         carbs: _number(_carbs),
         fat: _number(_fat),
       );
-      Navigator.pop(context, FoodEdit(widget.existing, entry));
     } on ArgumentError catch (e) {
       setState(() => _error = '${e.message}');
+      return;
     }
+    await _write(
+      () => widget.apply(FoodEdit(widget.existing, entry)),
+      (words) => _error = words,
+    );
   }
+
+  Future<void> _delete(FoodEntry existing) => _write(
+    () => widget.apply(FoodEdit(existing, null)),
+    (words) => _error = words,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -209,172 +259,184 @@ class _FoodDialogState extends ConsumerState<_FoodDialog> {
     final today = ref.watch(todayProvider);
     final suggestions = suggestFoods(log, _name.text, today, limit: 6);
     final existing = widget.existing;
-    return AlertDialog(
-      scrollable: true,
-      title: Text(existing == null ? 'Étel felvétele' : 'Étel szerkesztése'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            key: const Key('food-name'),
-            controller: _name,
-            autofocus: existing == null,
-            maxLength: maxFoodName,
-            textInputAction: TextInputAction.next,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Étel neve (nem kötelező)',
-              counterText: '',
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        scrollable: true,
+        title: Text(existing == null ? 'Étel felvétele' : 'Étel szerkesztése'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const Key('food-name'),
+              controller: _name,
+              autofocus: existing == null,
+              maxLength: maxFoodName,
+              textInputAction: TextInputAction.next,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Étel neve (nem kötelező)',
+                counterText: '',
+              ),
             ),
-          ),
-          if (suggestions.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Korábbi ételeid',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            const SizedBox(height: 4),
+            if (suggestions.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Korábbi ételeid',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (var i = 0; i < suggestions.length; i++)
+                    ActionChip(
+                      key: Key('suggest-$i'),
+                      label: Text(
+                        '${suggestions[i].name} · '
+                        '${formatKcal(suggestions[i].kcal)}',
+                      ),
+                      onPressed: () => _use(suggestions[i]),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 4,
               children: [
-                for (var i = 0; i < suggestions.length; i++)
-                  ActionChip(
-                    key: Key('suggest-$i'),
-                    label: Text(
-                      '${suggestions[i].name} · '
-                      '${formatKcal(suggestions[i].kcal)}',
-                    ),
-                    onPressed: () => _use(suggestions[i]),
+                for (final m in Meal.values)
+                  ChoiceChip(
+                    key: Key('meal-${m.key}'),
+                    label: Text(m.label),
+                    selected: _meal == m,
+                    onSelected: (_) => setState(() {
+                      _meal = m;
+                      _mealTouched = true;
+                    }),
                   ),
               ],
             ),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final m in Meal.values)
-                ChoiceChip(
-                  key: Key('meal-${m.key}'),
-                  label: Text(m.label),
-                  selected: _meal == m,
-                  onSelected: (_) => setState(() {
-                    _meal = m;
-                    _mealTouched = true;
-                  }),
+            const SizedBox(height: 8),
+            _numberField(
+              const Key('food-kcal'),
+              _kcal,
+              'Kalória',
+              suffix: 'kcal',
+              helper: 'Ha üresen hagyod, a makrókból számolom.',
+            ),
+            TextButton.icon(
+              key: const Key('food-macros-toggle'),
+              onPressed: () => setState(() => _macros = !_macros),
+              icon: Icon(_macros ? Icons.expand_less : Icons.expand_more),
+              label: const Text('Makrók (gramm)'),
+            ),
+            if (_macros) ...[
+              _numberField(
+                const Key('food-protein'),
+                _protein,
+                'Fehérje',
+                suffix: 'g',
+                maxLength: 3,
+              ),
+              _numberField(
+                const Key('food-carbs'),
+                _carbs,
+                'Szénhidrát',
+                suffix: 'g',
+                maxLength: 3,
+              ),
+              _numberField(
+                const Key('food-fat'),
+                _fat,
+                'Zsír',
+                suffix: 'g',
+                maxLength: 3,
+              ),
+            ],
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('food-day'),
+                  onPressed: _date,
+                  icon: const Icon(Icons.event),
+                  label: Text(fmtDateLong(_day)),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _numberField(
-            const Key('food-kcal'),
-            _kcal,
-            'Kalória',
-            suffix: 'kcal',
-            helper: 'Ha üresen hagyod, a makrókból számolom.',
-          ),
-          TextButton.icon(
-            key: const Key('food-macros-toggle'),
-            onPressed: () => setState(() => _macros = !_macros),
-            icon: Icon(_macros ? Icons.expand_less : Icons.expand_more),
-            label: const Text('Makrók (gramm)'),
-          ),
-          if (_macros) ...[
-            _numberField(
-              const Key('food-protein'),
-              _protein,
-              'Fehérje',
-              suffix: 'g',
-              maxLength: 3,
+                OutlinedButton.icon(
+                  key: const Key('food-time'),
+                  onPressed: _time,
+                  icon: const Icon(Icons.schedule),
+                  label: Text(minuteText(_minute)),
+                ),
+              ],
             ),
-            _numberField(
-              const Key('food-carbs'),
-              _carbs,
-              'Szénhidrát',
-              suffix: 'g',
-              maxLength: 3,
-            ),
-            _numberField(
-              const Key('food-fat'),
-              _fat,
-              'Zsír',
-              suffix: 'g',
-              maxLength: 3,
-            ),
+            _errorLine(const Key('food-error'), _error, context),
           ],
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              OutlinedButton.icon(
-                key: const Key('food-day'),
-                onPressed: _date,
-                icon: const Icon(Icons.event),
-                label: Text(fmtDateLong(_day)),
-              ),
-              OutlinedButton.icon(
-                key: const Key('food-time'),
-                onPressed: _time,
-                icon: const Icon(Icons.schedule),
-                label: Text(minuteText(_minute)),
-              ),
-            ],
+        ),
+        actions: [
+          if (existing != null)
+            TextButton(
+              key: const Key('food-delete'),
+              onPressed: _busy ? null : () => _delete(existing),
+              child: const Text('Törlés'),
+            ),
+          TextButton(
+            key: const Key('food-cancel'),
+            onPressed: _busy ? null : () => Navigator.pop(context),
+            child: const Text('Mégse'),
           ),
-          _errorLine(const Key('food-error'), _error, context),
+          FilledButton(
+            key: const Key('food-save'),
+            onPressed: _busy ? null : _save,
+            child: Text(_busy ? 'Mentés…' : 'Mentés'),
+          ),
         ],
       ),
-      actions: [
-        if (existing != null)
-          TextButton(
-            key: const Key('food-delete'),
-            onPressed: () => Navigator.pop(context, FoodEdit(existing, null)),
-            child: const Text('Törlés'),
-          ),
-        TextButton(
-          key: const Key('food-cancel'),
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Mégse'),
-        ),
-        FilledButton(
-          key: const Key('food-save'),
-          onPressed: _save,
-          child: const Text('Mentés'),
-        ),
-      ],
     );
   }
 }
 
 // ------------------------------------------------------------------- drink
 
-Future<FluidEdit?> showFluidDialog(
+Future<void> showFluidDialog(
   BuildContext context, {
   required DateTime day,
+  required FluidApply apply,
   FluidEntry? existing,
   DrinkKind kind = DrinkKind.water,
-}) => showDialog<FluidEdit>(
+}) => showDialog<void>(
   context: context,
-  builder: (_) => _FluidDialog(day: day, existing: existing, kind: kind),
+  builder: (_) =>
+      _FluidDialog(day: day, existing: existing, kind: kind, apply: apply),
 );
 
 /// The amounts the form offers to fill in.
 const fluidAmounts = [100, 200, 300, 500, 1000];
 
 class _FluidDialog extends ConsumerStatefulWidget {
-  const _FluidDialog({required this.day, required this.kind, this.existing});
+  const _FluidDialog({
+    required this.day,
+    required this.kind,
+    required this.apply,
+    this.existing,
+  });
   final DateTime day;
   final FluidEntry? existing;
   final DrinkKind kind;
+  final FluidApply apply;
 
   @override
   ConsumerState<_FluidDialog> createState() => _FluidDialogState();
 }
 
-class _FluidDialogState extends ConsumerState<_FluidDialog> {
+class _FluidDialogState extends ConsumerState<_FluidDialog>
+    with _Writes<_FluidDialog> {
   late final TextEditingController _ml;
   late DrinkKind _kind;
   late int _minute;
@@ -409,134 +471,150 @@ class _FluidDialogState extends ConsumerState<_FluidDialog> {
     setState(() => _day = DateTime.utc(d.year, d.month, d.day));
   }
 
-  void _save() {
+  Future<void> _save() async {
     final ml = _number(_ml);
     if (ml == null) {
       setState(() => _error = 'Add meg a mennyiséget.');
       return;
     }
+    final FluidEntry entry;
     try {
-      final entry = FluidEntry.checked(
+      entry = FluidEntry.checked(
         id: widget.existing?.id ?? ref.read(intakeOpsProvider).newId(),
         day: _day,
         minute: _minute,
         ml: ml,
         kind: _kind,
       );
-      Navigator.pop(context, FluidEdit(widget.existing, entry));
     } on ArgumentError catch (e) {
       setState(() => _error = '${e.message}');
+      return;
     }
+    await _write(
+      () => widget.apply(FluidEdit(widget.existing, entry)),
+      (words) => _error = words,
+    );
   }
+
+  Future<void> _delete(FluidEntry existing) => _write(
+    () => widget.apply(FluidEdit(existing, null)),
+    (words) => _error = words,
+  );
 
   @override
   Widget build(BuildContext context) {
     final existing = widget.existing;
-    return AlertDialog(
-      scrollable: true,
-      title: Text(existing == null ? 'Ital felvétele' : 'Ital szerkesztése'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _numberField(
-            const Key('fluid-ml'),
-            _ml,
-            'Mennyiség',
-            suffix: 'ml',
-            autofocus: existing == null,
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final ml in fluidAmounts)
-                ActionChip(
-                  key: Key('fluid-fill-$ml'),
-                  label: Text(formatDeciliters(ml)),
-                  onPressed: () => setState(() => _ml.text = '$ml'),
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        scrollable: true,
+        title: Text(existing == null ? 'Ital felvétele' : 'Ital szerkesztése'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _numberField(
+              const Key('fluid-ml'),
+              _ml,
+              'Mennyiség',
+              suffix: 'ml',
+              autofocus: existing == null,
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final ml in fluidAmounts)
+                  ActionChip(
+                    key: Key('fluid-fill-$ml'),
+                    label: Text(formatDeciliters(ml)),
+                    onPressed: () => setState(() => _ml.text = '$ml'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final k in DrinkKind.values)
+                  ChoiceChip(
+                    key: Key('kind-${k.key}'),
+                    label: Text(k.label),
+                    selected: _kind == k,
+                    onSelected: (_) => setState(() => _kind = k),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('fluid-day'),
+                  onPressed: _date,
+                  icon: const Icon(Icons.event),
+                  label: Text(fmtDateLong(_day)),
                 ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final k in DrinkKind.values)
-                ChoiceChip(
-                  key: Key('kind-${k.key}'),
-                  label: Text(k.label),
-                  selected: _kind == k,
-                  onSelected: (_) => setState(() => _kind = k),
+                OutlinedButton.icon(
+                  key: const Key('fluid-time'),
+                  onPressed: _time,
+                  icon: const Icon(Icons.schedule),
+                  label: Text(minuteText(_minute)),
                 ),
-            ],
+              ],
+            ),
+            _errorLine(const Key('fluid-error'), _error, context),
+          ],
+        ),
+        actions: [
+          if (existing != null)
+            TextButton(
+              key: const Key('fluid-delete'),
+              onPressed: _busy ? null : () => _delete(existing),
+              child: const Text('Törlés'),
+            ),
+          TextButton(
+            key: const Key('fluid-cancel'),
+            onPressed: _busy ? null : () => Navigator.pop(context),
+            child: const Text('Mégse'),
           ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              OutlinedButton.icon(
-                key: const Key('fluid-day'),
-                onPressed: _date,
-                icon: const Icon(Icons.event),
-                label: Text(fmtDateLong(_day)),
-              ),
-              OutlinedButton.icon(
-                key: const Key('fluid-time'),
-                onPressed: _time,
-                icon: const Icon(Icons.schedule),
-                label: Text(minuteText(_minute)),
-              ),
-            ],
+          FilledButton(
+            key: const Key('fluid-save'),
+            onPressed: _busy ? null : _save,
+            child: Text(_busy ? 'Mentés…' : 'Mentés'),
           ),
-          _errorLine(const Key('fluid-error'), _error, context),
         ],
       ),
-      actions: [
-        if (existing != null)
-          TextButton(
-            key: const Key('fluid-delete'),
-            onPressed: () => Navigator.pop(context, FluidEdit(existing, null)),
-            child: const Text('Törlés'),
-          ),
-        TextButton(
-          key: const Key('fluid-cancel'),
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Mégse'),
-        ),
-        FilledButton(
-          key: const Key('fluid-save'),
-          onPressed: _save,
-          child: const Text('Mentés'),
-        ),
-      ],
     );
   }
 }
 
 // ------------------------------------------------------------------- goals
 
-/// Asks for the goals; null when the form is cancelled. A field left empty is
-/// a goal that is not set.
-Future<IntakeGoals?> showGoalsDialog(
+/// Asks for the goals and hands them to [apply] (which saves them); nothing is
+/// saved when the form is cancelled. A field left empty is a goal that is not
+/// set.
+Future<void> showGoalsDialog(
   BuildContext context, {
   required IntakeGoals current,
-}) => showDialog<IntakeGoals>(
+  required GoalsApply apply,
+}) => showDialog<void>(
   context: context,
-  builder: (_) => _GoalsDialog(current: current),
+  builder: (_) => _GoalsDialog(current: current, apply: apply),
 );
 
 class _GoalsDialog extends StatefulWidget {
-  const _GoalsDialog({required this.current});
+  const _GoalsDialog({required this.current, required this.apply});
   final IntakeGoals current;
+  final GoalsApply apply;
 
   @override
   State<_GoalsDialog> createState() => _GoalsDialogState();
 }
 
-class _GoalsDialogState extends State<_GoalsDialog> {
+class _GoalsDialogState extends State<_GoalsDialog> with _Writes<_GoalsDialog> {
   late final TextEditingController _kcal;
   late final TextEditingController _protein;
   late final TextEditingController _carbs;
@@ -563,78 +641,81 @@ class _GoalsDialogState extends State<_GoalsDialog> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    final IntakeGoals goals;
     try {
-      Navigator.pop(
-        context,
-        IntakeGoals.checked(
-          kcal: _number(_kcal),
-          protein: _number(_protein),
-          carbs: _number(_carbs),
-          fat: _number(_fat),
-          ml: _number(_ml),
-        ),
+      goals = IntakeGoals.checked(
+        kcal: _number(_kcal),
+        protein: _number(_protein),
+        carbs: _number(_carbs),
+        fat: _number(_fat),
+        ml: _number(_ml),
       );
     } on ArgumentError catch (e) {
       setState(() => _error = '${e.message}');
+      return;
     }
+    await _write(() => widget.apply(goals), (words) => _error = words);
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    scrollable: true,
-    title: const Text('Napi célok'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'A célokat te adod meg, a program nem javasol értéket. Amit üresen '
-          'hagysz, ahhoz nincs cél. A célok a többi eszközödre is átmennek '
-          '(szinkronizálódnak).',
-          style: Theme.of(context).textTheme.bodySmall,
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: AlertDialog(
+      scrollable: true,
+      title: const Text('Napi célok'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'A célokat te adod meg, a program nem javasol értéket. Amit üresen '
+            'hagysz, ahhoz nincs cél. A célok a többi eszközödre is átmennek '
+            '(szinkronizálódnak).',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          _numberField(
+            const Key('goal-kcal'),
+            _kcal,
+            'Kalória',
+            suffix: 'kcal',
+            maxLength: 5,
+          ),
+          _numberField(
+            const Key('goal-protein'),
+            _protein,
+            'Fehérje',
+            suffix: 'g',
+          ),
+          _numberField(
+            const Key('goal-carbs'),
+            _carbs,
+            'Szénhidrát',
+            suffix: 'g',
+          ),
+          _numberField(const Key('goal-fat'), _fat, 'Zsír', suffix: 'g'),
+          _numberField(
+            const Key('goal-ml'),
+            _ml,
+            'Folyadék',
+            suffix: 'ml',
+            maxLength: 5,
+          ),
+          _errorLine(const Key('goals-error'), _error, context),
+        ],
+      ),
+      actions: [
+        TextButton(
+          key: const Key('goals-cancel'),
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('Mégse'),
         ),
-        _numberField(
-          const Key('goal-kcal'),
-          _kcal,
-          'Kalória',
-          suffix: 'kcal',
-          maxLength: 5,
+        FilledButton(
+          key: const Key('goals-save'),
+          onPressed: _busy ? null : _save,
+          child: Text(_busy ? 'Mentés…' : 'Mentés'),
         ),
-        _numberField(
-          const Key('goal-protein'),
-          _protein,
-          'Fehérje',
-          suffix: 'g',
-        ),
-        _numberField(
-          const Key('goal-carbs'),
-          _carbs,
-          'Szénhidrát',
-          suffix: 'g',
-        ),
-        _numberField(const Key('goal-fat'), _fat, 'Zsír', suffix: 'g'),
-        _numberField(
-          const Key('goal-ml'),
-          _ml,
-          'Folyadék',
-          suffix: 'ml',
-          maxLength: 5,
-        ),
-        _errorLine(const Key('goals-error'), _error, context),
       ],
     ),
-    actions: [
-      TextButton(
-        key: const Key('goals-cancel'),
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Mégse'),
-      ),
-      FilledButton(
-        key: const Key('goals-save'),
-        onPressed: _save,
-        child: const Text('Mentés'),
-      ),
-    ],
   );
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
+import '../../diag/diag_log.dart';
 import '../../intake/intake_ops.dart';
 import '../../intake/intake_providers.dart';
 import '../../providers.dart';
@@ -41,23 +42,71 @@ class _IntakePageState extends ConsumerState<IntakePage> {
     if (d != null) ref.read(intakeDayProvider.notifier).set(d);
   }
 
+  // ------------------------------------------------------------- failures
+
+  /// Runs one change of the log. When it fails, the cause goes to the log (the
+  /// [code] says which change it was) and the error goes on to whoever waits
+  /// for it: a form, which says so and stays open with what was typed, or
+  /// [_tapped].
+  Future<void> _change(String code, Future<void> Function() change) async {
+    try {
+      await change();
+    } catch (e, st) {
+      ref.read(diagLogProvider).error('intake', code, e, st);
+      rethrow;
+    }
+  }
+
+  /// A change that has no form to say how it went (the bin, the quick drink
+  /// buttons): when it fails, the bar says so ([what] is what was tried).
+  Future<void> _tapped(
+    String code,
+    String what,
+    _Undo u,
+    Future<void> Function() change,
+  ) async {
+    try {
+      await _change(code, change);
+    } catch (e) {
+      u.service.say(u.site, failureLine(what, e));
+    }
+  }
+
   // ---------------------------------------------------------------- food
 
   Future<void> _addFood() async {
     final day = ref.read(intakeDayProvider);
     final undo = _Undo.of(context, ref);
-    final edit = await showFoodDialog(context, day: day);
-    if (edit != null) await _applyFood(edit, undo);
+    await showFoodDialog(
+      context,
+      day: day,
+      apply: (edit) =>
+          _change('food.save_failed', () => _applyFood(edit, undo)),
+    );
   }
 
   Future<void> _editFood(FoodEntry f) async {
     final undo = _Undo.of(context, ref);
-    final edit = await showFoodDialog(context, day: f.day, existing: f);
-    if (edit != null) await _applyFood(edit, undo);
+    await showFoodDialog(
+      context,
+      day: f.day,
+      existing: f,
+      apply: (edit) => _change(
+        edit.after == null ? 'food.delete_failed' : 'food.save_failed',
+        () => _applyFood(edit, undo),
+      ),
+    );
   }
 
-  Future<void> _deleteFood(FoodEntry f) =>
-      _applyFood(FoodEdit(f, null), _Undo.of(context, ref));
+  Future<void> _deleteFood(FoodEntry f) {
+    final u = _Undo.of(context, ref);
+    return _tapped(
+      'food.delete_failed',
+      'törölni az ételt',
+      u,
+      () => _applyFood(FoodEdit(f, null), u),
+    );
+  }
 
   Future<void> _applyFood(FoodEdit edit, _Undo u) async {
     final before = edit.before, after = edit.after;
@@ -100,37 +149,57 @@ class _IntakePageState extends ConsumerState<IntakePage> {
     final day = ref.read(intakeDayProvider);
     final u = _Undo.of(context, ref);
     final kind = _kind;
-    final entry = await u.ops.addFluid(
-      day: day,
-      minute: intakeStartMinute(ref, day),
-      ml: ml,
-      kind: kind,
-    );
-    u.service.offer(
-      u.site,
-      message: '${formatVolume(ml)} ${kind.label.toLowerCase()} felvéve',
-      undo: () async {
-        await u.ops.removeFluid(entry);
-        return true;
-      },
-    );
+    await _tapped('fluid.add_failed', 'felvenni az italt', u, () async {
+      final entry = await u.ops.addFluid(
+        day: day,
+        minute: intakeStartMinute(ref, day),
+        ml: ml,
+        kind: kind,
+      );
+      u.service.offer(
+        u.site,
+        message: '${formatVolume(ml)} ${kind.label.toLowerCase()} felvéve',
+        undo: () async {
+          await u.ops.removeFluid(entry);
+          return true;
+        },
+      );
+    });
   }
 
   Future<void> _otherDrink() async {
     final day = ref.read(intakeDayProvider);
     final u = _Undo.of(context, ref);
-    final edit = await showFluidDialog(context, day: day, kind: _kind);
-    if (edit != null) await _applyFluid(edit, u);
+    await showFluidDialog(
+      context,
+      day: day,
+      kind: _kind,
+      apply: (edit) => _change('fluid.save_failed', () => _applyFluid(edit, u)),
+    );
   }
 
   Future<void> _editFluid(FluidEntry w) async {
     final u = _Undo.of(context, ref);
-    final edit = await showFluidDialog(context, day: w.day, existing: w);
-    if (edit != null) await _applyFluid(edit, u);
+    await showFluidDialog(
+      context,
+      day: w.day,
+      existing: w,
+      apply: (edit) => _change(
+        edit.after == null ? 'fluid.delete_failed' : 'fluid.save_failed',
+        () => _applyFluid(edit, u),
+      ),
+    );
   }
 
-  Future<void> _deleteFluid(FluidEntry w) =>
-      _applyFluid(FluidEdit(w, null), _Undo.of(context, ref));
+  Future<void> _deleteFluid(FluidEntry w) {
+    final u = _Undo.of(context, ref);
+    return _tapped(
+      'fluid.delete_failed',
+      'törölni az italt',
+      u,
+      () => _applyFluid(FluidEdit(w, null), u),
+    );
+  }
 
   Future<void> _applyFluid(FluidEdit edit, _Undo u) async {
     final before = edit.before, after = edit.after;
@@ -170,10 +239,14 @@ class _IntakePageState extends ConsumerState<IntakePage> {
 
   Future<void> _goals() async {
     final current = ref.read(intakeGoalsProvider).value ?? const IntakeGoals();
-    final goals = await showGoalsDialog(context, current: current);
-    if (goals != null) {
-      await ref.read(intakeGoalsProvider.notifier).save(goals);
-    }
+    await showGoalsDialog(
+      context,
+      current: current,
+      apply: (goals) => _change(
+        'goals.save_failed',
+        () => ref.read(intakeGoalsProvider.notifier).save(goals),
+      ),
+    );
   }
 
   // --------------------------------------------------------------- build

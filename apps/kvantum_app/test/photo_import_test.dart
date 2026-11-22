@@ -10,8 +10,9 @@ import 'package:kvantum_app/journal/photo_pipeline.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 /// Taking the chosen pictures into the diary (8th round): each becomes a file
-/// of its own with an id for a name, what cannot be converted is told or kept,
-/// and nothing of the original file's name goes anywhere.
+/// of its own with an id for a name, what cannot be converted is told (9th
+/// round: it is never kept as the file it was), and nothing of the original
+/// file's name goes anywhere.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -164,29 +165,27 @@ void main() {
       expect(files.names, isEmpty);
     });
 
-    test(
-      'of a kind this device cannot convert (HEIC) are kept as they were',
-      () async {
-        final r = await importer().import([
-          pick('IMG_1.HEIC', first: 0, length: 50),
-          pick('b.heif', first: 0),
-        ], room: 12);
-        expect(r.added.map((p) => p.fileName), ['id1.heic', 'id2.heif']);
-        expect(
-          r.added.first,
-          const PhotoRef(id: 'id1', ext: 'heic', bytes: 50),
-        );
-        expect(r.keptAsTheyWere, 2);
-        expect((await files.read('id1.heic'))!.length, 50);
-        expect(
-          r.notice,
-          '2 kép eredeti formában került be, és lehet, hogy ezen az eszközön nem jelenik meg.',
-        );
-      },
-    );
+    test('of a kind this device cannot convert (HEIC) are not taken in as they were', () async {
+      // (a copy would carry the place and the time of the shot, could not be
+      // shown here and could not go to the other devices)
+      final r = await importer().import([
+        pick('IMG_1.HEIC', first: 0, length: 50),
+        pick('b.heif', first: 0),
+        pick('ok.jpg'),
+      ], room: 12);
+      expect(r.added.map((p) => p.fileName), ['id3.jpg']);
+      expect(r.problems, {PhotoProblem.heic: 2});
+      expect(files.names.toList(), ['id3.jpg']);
+      expect(
+        r.notice,
+        '2 HEIC/HEIF kép ezen az eszközön nem alakítható át, ezért kimaradt. '
+        'Mentsd el JPEG vagy PNG formátumban, és azt add hozzá.',
+      );
+      expect(r.hasProblems, isTrue);
+    });
 
     test(
-      'of a kind that should be readable but is not are not kept (damaged)',
+      'of a kind that should be readable but is not are no pictures',
       () async {
         final r = await importer().import([
           pick('x.jpg', first: 0),
@@ -194,10 +193,21 @@ void main() {
           pick('z.webp', first: 0),
         ], room: 12);
         expect(r.added, isEmpty);
-        expect(r.keptAsTheyWere, 0);
+        expect(r.problems, {PhotoProblem.notAPicture: 3});
         expect(files.names, isEmpty);
       },
     );
+
+    test('a HEIC that a device can read is a picture like any other', () async {
+      // (a phone has the decoder: what comes out is a JPEG, the ending of the
+      // file it came from is gone)
+      final r = await importer().import([
+        pick('IMG_2.HEIC', first: 5),
+      ], room: 12);
+      expect(r.added.map((p) => p.fileName), ['id1.jpg']);
+      expect(r.problems, isEmpty);
+      expect(r.notice, isNull);
+    });
 
     test('that the processor fails on with an error are no pictures', () async {
       final r = await importer(processor: (_) => throw StateError('baj'))
@@ -302,6 +312,24 @@ void main() {
         expect(
           r.notice,
           '1 kép túl nagy (legfeljebb 40 MB); 1 fájl nem kép, vagy ezen az eszközön nem olvasható.',
+        );
+      },
+    );
+
+    test(
+      'the way out of a HEIC file is said last, in a sentence of its own',
+      () async {
+        final r = await importer().import([
+          pick('a.heic', first: 0),
+          pick('big.jpg', size: maxPhotoSourceBytes + 1),
+          pick('b.txt', first: 0),
+        ], room: 12);
+        expect(
+          r.notice,
+          '1 kép túl nagy (legfeljebb 40 MB); '
+          '1 fájl nem kép, vagy ezen az eszközön nem olvasható; '
+          '1 HEIC/HEIF kép ezen az eszközön nem alakítható át, ezért kimaradt. '
+          'Mentsd el JPEG vagy PNG formátumban, és azt add hozzá.',
         );
       },
     );

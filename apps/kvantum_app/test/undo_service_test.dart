@@ -52,6 +52,13 @@ class _Host extends ConsumerWidget {
                 ),
             child: Text(key),
           ),
+        ElevatedButton(
+          key: const Key('say'),
+          onPressed: () => ref
+              .read(undoServiceProvider)
+              .say(UndoSite.of(context), 'Nem sikerült elmenteni.'),
+          child: const Text('say'),
+        ),
       ],
     ),
   );
@@ -281,6 +288,102 @@ void main() {
       await tapOffer(tester, 'offer-a');
       expect(card(tester).bottom, lessThanOrEqualTo(800 - 88));
       await shutdown(tester, db);
+    });
+  });
+
+  group('a message of its own', () {
+    Future<void> tapSay(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('say')));
+      await tester.pump(); // the bar starts to slide in
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('is plain words in the same bar, with no button to tap', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tapSay(tester);
+      expect(find.text('Nem sikerült elmenteni.'), findsOneWidget);
+      expect(find.text('Visszavonás'), findsNothing);
+      expect(
+        tester.widget<SnackBar>(find.byType(SnackBar)).behavior,
+        SnackBarBehavior.floating,
+      );
+      await shutdown(tester, db);
+    });
+
+    testWidgets('sits well above the bottom edge, clear of a round button', (
+      tester,
+    ) async {
+      await boot(tester);
+      await tapSay(tester);
+      expect(card(tester).bottom, lessThanOrEqualTo(800 - 88));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is not wider than a phone bar on a big window', (
+      tester,
+    ) async {
+      await boot(tester, size: const Size(1280, 800));
+      await tapSay(tester);
+      expect(card(tester).width, lessThanOrEqualTo(560));
+      await shutdown(tester, db);
+    });
+
+    testWidgets('fills a phone window apart from its margins', (tester) async {
+      await boot(tester, size: const Size(400, 800));
+      await tapSay(tester);
+      expect(card(tester).width, 400 - 24);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('stays six seconds, and then goes by itself', (tester) async {
+      await boot(tester);
+      await tapSay(tester);
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.text('Nem sikerült elmenteni.'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Nem sikerült elmenteni.'), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('does not wait behind a bar that is up: what that offered is '
+        'final once it has gone', (tester) async {
+      await boot(tester);
+      await tapOffer(tester, 'offer-a');
+      expect(hold().isHeld('a'), isTrue);
+      await tester.tap(find.byKey(const Key('say')));
+      await tester.pumpAndSettle();
+      expect(find.text('Nem sikerült elmenteni.'), findsOneWidget);
+      expect(find.text('A törölve'), findsNothing);
+      expect(hold().isHeld('a'), isFalse);
+      expect(sync.requests, 1, reason: 'what waited goes up');
+      expect(calls, isEmpty, reason: 'nothing was taken back');
+      await shutdown(tester, db);
+    });
+
+    testWidgets('with no page left to show it, says nothing and breaks '
+        'nothing', (tester) async {
+      late UndoSite site;
+      late UndoService service;
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) {
+                site = UndoSite.of(context);
+                service = ref.read(undoServiceProvider);
+                return const SizedBox(); // (no Scaffold: nowhere to show it)
+              },
+            ),
+          ),
+        ),
+      );
+      expect(() => service.say(site, 'Senki nem látja.'), returnsNormally);
+      await tester.pump();
+      expect(find.text('Senki nem látja.'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 

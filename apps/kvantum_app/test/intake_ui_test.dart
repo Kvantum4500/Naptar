@@ -1,16 +1,25 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/data/db.dart';
+import 'package:kvantum_app/data/synced_settings.dart';
+import 'package:kvantum_app/diag/diag_log.dart';
+import 'package:kvantum_app/intake/intake_ops.dart';
 import 'package:kvantum_app/intake/intake_providers.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/error_catalog.dart';
 import 'package:kvantum_app/ui/charts.dart';
 import 'package:kvantum_app/ui/format.dart';
 import 'package:kvantum_app/ui/intake/intake_page.dart';
 import 'package:kvantum_app/ui/intake/intake_text.dart';
 import 'package:kvantum_core/kvantum_core.dart';
+import 'package:sqlite3/common.dart' show SqliteException;
 
 import 'support/harness.dart';
 import 'support/manual_timers.dart';
@@ -51,6 +60,7 @@ void main() {
     List<FoodEntry> foods = const [],
     List<FluidEntry> drinks = const [],
     IntakeGoals? goals,
+    List<Override> overrides = const [],
   }) async {
     useSize(tester, size: size);
     clock = DateTime.utc(2026, 11, 16, 10, 30);
@@ -62,6 +72,7 @@ void main() {
         extra: [
           appClockProvider.overrideWithValue(() => clock),
           midnightTimerProvider.overrideWithValue(ManualTimers().make),
+          ...overrides,
         ],
         textScale: textScale,
         theme: theme,
@@ -1396,6 +1407,457 @@ void main() {
       await shutdown(tester, db);
     });
   });
+
+  group('a change that cannot be written', () {
+    final diskFull = FileSystemException(
+      'x',
+      '/p',
+      const OSError('No space left on device', 28),
+    );
+    final diskWords = errorInfoFor(diskFull).text;
+    late MemoryDiagSink sink;
+    late DiagLog log;
+
+    setUp(() {
+      sink = MemoryDiagSink();
+      log = DiagLog()..attach(sink);
+    });
+
+    Future<void> bootFailing(
+      WidgetTester tester, {
+      Size size = const Size(400, 1000),
+      double? textScale,
+      ThemeMode themeMode = ThemeMode.light,
+      List<FoodEntry> foods = const [],
+      List<FluidEntry> drinks = const [],
+    }) => boot(
+      tester,
+      size: size,
+      textScale: textScale,
+      theme: appThemeForTest(Brightness.light),
+      darkTheme: appThemeForTest(Brightness.dark),
+      themeMode: themeMode,
+      foods: foods,
+      drinks: drinks,
+      overrides: [
+        intakeOpsProvider.overrideWith(
+          (ref) => _FailingOps(ref.watch(recordRepoProvider)),
+        ),
+        syncedSettingsProvider.overrideWith(
+          (ref) => _FailingSettings(ref.watch(recordRepoProvider)),
+        ),
+        diagLogProvider.overrideWithValue(log),
+      ],
+    );
+
+    _FailingOps ops(WidgetTester tester) =>
+        scope(tester).read(intakeOpsProvider) as _FailingOps;
+
+    _FailingSettings settings(WidgetTester tester) =>
+        scope(tester).read(syncedSettingsProvider) as _FailingSettings;
+
+    void fail(WidgetTester tester, [Object? error]) => ops(tester)
+      ..error = error ?? diskFull
+      ..failing = true;
+
+    Future<String> logged(WidgetTester tester) async {
+      await tester.runAsync(log.flush);
+      return sink.lines.join('\n');
+    }
+
+    String field(WidgetTester tester, String key) =>
+        tester.widget<TextField>(find.byKey(Key(key))).controller!.text;
+
+    String words(WidgetTester tester, String key) =>
+        tester.widget<Text>(find.byKey(Key(key))).data!;
+
+    /// The text of the bar that is up.
+    String bar(WidgetTester tester) => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byType(SnackBar),
+            matching: find.byType(Text),
+          ),
+        )
+        .data!;
+
+    Future<void> tapBin(WidgetTester tester, String row, String tip) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(Key(row)),
+          matching: find.byTooltip(tip),
+        ),
+      );
+      await settle(tester);
+    }
+
+    group('a food', () {
+      testWidgets('stays in its form, with what was typed, and says why', (
+        tester,
+      ) async {
+        await bootFailing(tester);
+        fail(tester);
+        await tapKey(tester, 'intake-add-food');
+        await enter(tester, 'food-name', 'Zabkása tejjel');
+        await enter(tester, 'food-kcal', '320');
+        await tapKey(tester, 'food-save');
+        // the form is still there, with the words of the error
+        expect(find.byKey(const Key('food-save')), findsOneWidget);
+        expect(words(tester, 'food-error'), diskWords);
+        expect(diskWords, startsWith('Elfogyott a hely az eszközön.'));
+        expect(field(tester, 'food-name'), 'Zabkása tejjel');
+        expect(field(tester, 'food-kcal'), '320');
+        // nothing is saved, nothing is offered, nothing is shown
+        expect((await logOf(tester)).foods, isEmpty);
+        expect(find.text('Étel felvéve'), findsNothing);
+        expect(find.text('Visszavonás'), findsNothing);
+        expect(scope(tester).read(intakeDayProvider), today);
+        // the cause is in the log, by its code
+        final text = await logged(tester);
+        expect(text, contains('food.save_failed'));
+        expect(text, isNot(contains('Zabkása')), reason: 'not what was typed');
+        // the buttons are free again; with room on the disk the same tap saves
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('food-save')))
+              .onPressed,
+          isNotNull,
+        );
+        expect(find.text('Mentés'), findsOneWidget);
+        ops(tester).failing = false;
+        await tapKey(tester, 'food-save');
+        expect(find.byKey(const Key('food-save')), findsNothing);
+        expect((await logOf(tester)).foods.single.name, 'Zabkása tejjel');
+        expect(find.text('Étel felvéve'), findsOneWidget);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that is changed stays as it was, and the form says why', (
+        tester,
+      ) async {
+        await bootFailing(tester, foods: [food('a', kcal: 300)]);
+        fail(tester, StateError('belső részlet'));
+        await tapKey(tester, 'food-a');
+        await enter(tester, 'food-kcal', '450');
+        await tapKey(tester, 'food-save');
+        expect(find.byKey(const Key('food-save')), findsOneWidget);
+        // (an error nobody foresaw: told as it is, and the form is the proof
+        // that what was typed is not lost)
+        expect(words(tester, 'food-error'), errorInfoFor(StateError('x')).text);
+        expect(words(tester, 'food-error'), contains('nem vesznek el'));
+        expect(words(tester, 'food-error'), isNot(contains('belső részlet')));
+        expect(field(tester, 'food-kcal'), '450');
+        expect((await logOf(tester)).foods.single.kcal, 300);
+        expect(find.text('Étel módosítva'), findsNothing);
+        expect(await logged(tester), contains('food.save_failed'));
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that cannot be deleted from its form stays, and the form '
+          'says why', (tester) async {
+        await bootFailing(tester, foods: [food('a')]);
+        fail(tester);
+        await tapKey(tester, 'food-a');
+        await tapKey(tester, 'food-delete');
+        expect(find.byKey(const Key('food-save')), findsOneWidget);
+        expect(words(tester, 'food-error'), diskWords);
+        expect((await logOf(tester)).foods.single.id, 'a');
+        expect(find.text('Étel törölve'), findsNothing);
+        expect(find.byKey(const Key('food-a')), findsOneWidget);
+        final text = await logged(tester);
+        expect(text, contains('food.delete_failed'));
+        expect(text, isNot(contains('food.save_failed')));
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that is on another day does not take the page there when '
+          'it was not saved', (tester) async {
+        await bootFailing(tester, foods: [food('a')]);
+        fail(tester);
+        await tapKey(tester, 'food-a');
+        await tapKey(tester, 'food-day');
+        await tester.tap(find.text('20'));
+        await tester.pump();
+        await tester.tap(find.text('OK'));
+        await tester.pump();
+        await tapKey(tester, 'food-save');
+        expect(find.byKey(const Key('food-save')), findsOneWidget);
+        expect(scope(tester).read(intakeDayProvider), today);
+        expect((await logOf(tester)).foods.single.day, today);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that its bin cannot remove says so in the bar, in words '
+          'that fit a tap', (tester) async {
+        await bootFailing(tester, foods: [food('a')]);
+        fail(tester, StateError('belső részlet'));
+        await tapBin(tester, 'food-a', 'Étel törlése');
+        expect(
+          bar(tester),
+          'Nem sikerült törölni az ételt: Programhiba történt. '
+          'Részletek: Diagnosztika.',
+        );
+        expect(bar(tester), isNot(contains('nem vesznek el')));
+        expect(bar(tester), isNot(contains('belső részlet')));
+        expect(find.text('Visszavonás'), findsNothing);
+        expect(find.byKey(const Key('food-a')), findsOneWidget);
+        expect((await logOf(tester)).foods.single.id, 'a');
+        expect(await logged(tester), contains('food.delete_failed'));
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that its bin cannot remove for want of room says what to '
+          'do', (tester) async {
+        await bootFailing(tester, foods: [food('a')]);
+        fail(tester);
+        await tapBin(tester, 'food-a', 'Étel törlése');
+        expect(bar(tester), 'Nem sikerült törölni az ételt: $diskWords');
+        await shutdown(tester, db);
+      });
+
+      testWidgets('is told in the words of the database when that is full', (
+        tester,
+      ) async {
+        await bootFailing(tester);
+        final dbFull = SqliteException(
+          extendedResultCode: 13,
+          message: 'database or disk is full',
+        );
+        fail(tester, dbFull);
+        await tapKey(tester, 'intake-add-food');
+        await enter(tester, 'food-kcal', '320');
+        await tapKey(tester, 'food-save');
+        expect(
+          words(tester, 'food-error'),
+          startsWith('Elfogyott a hely az adatbázis írásához.'),
+        );
+        expect(words(tester, 'food-error'), errorInfoFor(dbFull).text);
+        await shutdown(tester, db);
+      });
+    });
+
+    group('a drink', () {
+      testWidgets('of a quick button that cannot be written says so in the '
+          'bar, and nothing is logged', (tester) async {
+        await bootFailing(tester);
+        fail(tester);
+        await tapKey(tester, 'drink-200');
+        expect(bar(tester), 'Nem sikerült felvenni az italt: $diskWords');
+        expect((await logOf(tester)).fluids, isEmpty);
+        expect(find.textContaining('felvéve'), findsNothing);
+        expect(find.text('Visszavonás'), findsNothing);
+        expect(await logged(tester), contains('fluid.add_failed'));
+        // (the next tap, with room on the disk, goes through)
+        ops(tester).failing = false;
+        await tapKey(tester, 'drink-200');
+        expect((await logOf(tester)).fluids.single.ml, 200);
+        expect(find.text('${formatVolume(200)} víz felvéve'), findsOneWidget);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('of the form stays in it, with the amount, and the form '
+          'says why', (tester) async {
+        await bootFailing(tester);
+        fail(tester);
+        await tapKey(tester, 'drink-other');
+        await enter(tester, 'fluid-ml', '450');
+        await tapKey(tester, 'fluid-save');
+        expect(find.byKey(const Key('fluid-save')), findsOneWidget);
+        expect(words(tester, 'fluid-error'), diskWords);
+        expect(field(tester, 'fluid-ml'), '450');
+        expect((await logOf(tester)).fluids, isEmpty);
+        expect(find.text('Ital felvéve'), findsNothing);
+        expect(await logged(tester), contains('fluid.save_failed'));
+        ops(tester).failing = false;
+        await tapKey(tester, 'fluid-save');
+        expect(find.byKey(const Key('fluid-save')), findsNothing);
+        expect((await logOf(tester)).fluids.single.ml, 450);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that is changed stays as it was, and the form says why', (
+        tester,
+      ) async {
+        await bootFailing(tester, drinks: [drink('w1', ml: 300)]);
+        fail(tester);
+        await tapKey(tester, 'drink-w1');
+        await enter(tester, 'fluid-ml', '450');
+        await tapKey(tester, 'fluid-save');
+        expect(words(tester, 'fluid-error'), diskWords);
+        expect((await logOf(tester)).fluids.single.ml, 300);
+        expect(find.text('Ital módosítva'), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that cannot be deleted from its form stays, and the form '
+          'says why', (tester) async {
+        await bootFailing(tester, drinks: [drink('w1')]);
+        fail(tester);
+        await tapKey(tester, 'drink-w1');
+        await tapKey(tester, 'fluid-delete');
+        expect(find.byKey(const Key('fluid-save')), findsOneWidget);
+        expect(words(tester, 'fluid-error'), diskWords);
+        expect((await logOf(tester)).fluids, hasLength(1));
+        final text = await logged(tester);
+        expect(text, contains('fluid.delete_failed'));
+        expect(text, isNot(contains('fluid.save_failed')));
+        await shutdown(tester, db);
+      });
+
+      testWidgets('that its bin cannot remove says so in the bar', (
+        tester,
+      ) async {
+        await bootFailing(tester, drinks: [drink('w1')]);
+        fail(tester);
+        await tapBin(tester, 'drink-w1', 'Ital törlése');
+        expect(bar(tester), 'Nem sikerült törölni az italt: $diskWords');
+        expect((await logOf(tester)).fluids, hasLength(1));
+        expect(await logged(tester), contains('fluid.delete_failed'));
+        await shutdown(tester, db);
+      });
+    });
+
+    group('the goals', () {
+      testWidgets('stay in their form, with what was typed, and the form says '
+          'why', (tester) async {
+        await bootFailing(tester);
+        settings(tester).error = diskFull;
+        await tapKey(tester, 'intake-goals');
+        await enter(tester, 'goal-kcal', '2200');
+        await enter(tester, 'goal-ml', '2500');
+        await tapKey(tester, 'goals-save');
+        expect(find.byKey(const Key('goals-save')), findsOneWidget);
+        expect(words(tester, 'goals-error'), diskWords);
+        expect(field(tester, 'goal-kcal'), '2200');
+        expect(field(tester, 'goal-ml'), '2500');
+        expect(scope(tester).read(intakeGoalsProvider).value!.isEmpty, isTrue);
+        expect(find.byKey(const Key('intake-kcal-bar')), findsNothing);
+        expect(await logged(tester), contains('goals.save_failed'));
+        settings(tester).error = null;
+        await tapKey(tester, 'goals-save');
+        expect(find.byKey(const Key('goals-save')), findsNothing);
+        expect(scope(tester).read(intakeGoalsProvider).value!.kcal, 2200);
+        await shutdown(tester, db);
+      });
+    });
+
+    group('a form', () {
+      testWidgets('is held while its write goes on: no second tap, no way '
+          'out', (tester) async {
+        await bootFailing(tester);
+        final gate = Completer<void>();
+        ops(tester).gate = gate;
+        await tapKey(tester, 'intake-add-food');
+        await enter(tester, 'food-kcal', '320');
+        await tester.tap(find.byKey(const Key('food-save')));
+        await tester.pump();
+        expect(find.text('Mentés…'), findsOneWidget);
+        for (final key in ['food-save', 'food-cancel']) {
+          final onPressed = key == 'food-save'
+              ? tester.widget<FilledButton>(find.byKey(Key(key))).onPressed
+              : tester.widget<TextButton>(find.byKey(Key(key))).onPressed;
+          expect(onPressed, isNull, reason: key);
+        }
+        // (the way back of the phone does not close it either)
+        await tester
+            .state<NavigatorState>(find.byType(Navigator).first)
+            .maybePop();
+        await tester.pump();
+        expect(find.byKey(const Key('food-save')), findsOneWidget);
+        expect(ops(tester).writes, 1, reason: 'one write, not two');
+        gate.complete();
+        await settle(tester);
+        expect(find.byKey(const Key('food-save')), findsNothing);
+        expect((await logOf(tester)).foods, hasLength(1));
+        await shutdown(tester, db);
+      });
+
+      testWidgets('with a failed write fits at the largest text size, light '
+          'and dark', (tester) async {
+        for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+          await bootFailing(
+            tester,
+            size: const Size(360, 640),
+            textScale: 2,
+            themeMode: mode,
+          );
+          fail(tester);
+          await tapKey(tester, 'intake-add-food');
+          await enter(tester, 'food-kcal', '320');
+          await tapKey(tester, 'food-save', scroll: true);
+          expect(find.byKey(const Key('food-error')), findsOneWidget);
+          await tester.ensureVisible(find.byKey(const Key('food-error')));
+          expect(tester.takeException(), isNull);
+          await shutdown(tester, db);
+        }
+      });
+    });
+  });
+}
+
+/// The ops of the page with writes that fail or wait when a test says so: with
+/// [failing] set, every write throws [error] and writes nothing; with [gate]
+/// set, a write waits for it first. Both are off until a test turns them on
+/// (the page seeds its data through these very ops).
+class _FailingOps extends IntakeOps {
+  _FailingOps(super.repo);
+
+  bool failing = false;
+  Object error = StateError('nincs hely');
+  Completer<void>? gate;
+
+  /// How many writes were begun.
+  int writes = 0;
+
+  Future<T> _go<T>(Future<T> Function() real) async {
+    writes++;
+    final g = gate;
+    if (g != null) await g.future;
+    if (failing) throw error;
+    return real();
+  }
+
+  @override
+  Future<void> putFood(FoodEntry entry) => _go(() => super.putFood(entry));
+
+  @override
+  Future<void> putFluid(FluidEntry entry) => _go(() => super.putFluid(entry));
+
+  @override
+  Future<FluidEntry> addFluid({
+    required DateTime day,
+    required int minute,
+    required int ml,
+    DrinkKind kind = DrinkKind.water,
+  }) => _go(() => super.addFluid(day: day, minute: minute, ml: ml, kind: kind));
+
+  @override
+  Future<void> saveFood(FoodEntry before, FoodEntry after) =>
+      _go(() => super.saveFood(before, after));
+
+  @override
+  Future<void> saveFluid(FluidEntry before, FluidEntry after) =>
+      _go(() => super.saveFluid(before, after));
+
+  @override
+  Future<void> removeFood(FoodEntry e) => _go(() => super.removeFood(e));
+
+  @override
+  Future<void> removeFluid(FluidEntry e) => _go(() => super.removeFluid(e));
+}
+
+/// The synced settings whose saving of the goals fails while [error] is set.
+class _FailingSettings extends SyncedSettings {
+  _FailingSettings(super.repo);
+
+  Object? error;
+
+  @override
+  Future<void> saveIntakeGoals(IntakeGoals goals) {
+    final e = error;
+    if (e != null) throw e;
+    return super.saveIntakeGoals(goals);
+  }
 }
 
 ThemeData appThemeForTest(Brightness b) =>

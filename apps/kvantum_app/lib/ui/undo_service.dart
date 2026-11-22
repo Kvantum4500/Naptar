@@ -216,18 +216,36 @@ class UndoService {
     offer.acted = true; // the closing of the bar must not end the offer
     try {
       final ok = await undo();
-      if (!ok) _say(site, failedMessage);
+      if (!ok) say(site, failedMessage);
     } catch (e, st) {
       _ref.read(diagLogProvider).error('ui', 'undo.failed', e, st);
-      _say(site, 'A visszavonás nem sikerült.');
+      say(site, 'A visszavonás nem sikerült.');
     } finally {
       _finish(offer);
     }
   }
 
-  void _say(UndoSite site, String text) {
+  /// Tells the user something in the bar of the app (a change that did not go
+  /// through, say): lifted over the round buttons of the page and not wider than
+  /// a phone's bar, like the "Visszavonás" bar. A bar that is up is not waited
+  /// for: what is told is more urgent, and what it offered is final then.
+  void say(UndoSite site, String text) {
     try {
-      site.messenger.showSnackBar(SnackBar(content: Text(text)));
+      site.messenger.clearSnackBars();
+      site.messenger.showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: const Duration(seconds: 6),
+          persist: false,
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.fromLTRB(
+            _side(site.width),
+            0,
+            _side(site.width),
+            88,
+          ),
+        ),
+      );
     } catch (_) {
       // the app is closing: nobody is there to read it
     }

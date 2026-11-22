@@ -31,7 +31,8 @@ class HousekeepingReport {
   /// Queue entries of events that no longer exist, removed.
   final int staleQueue;
 
-  /// Pictures of the diary that no entry refers to any more, removed.
+  /// Pictures of the diary that no entry refers to any more, and half-written
+  /// picture files that a cut-short write left behind, removed.
   final int photos;
 
   bool get any => finance + requeued + removed + staleQueue + photos > 0;
@@ -59,8 +60,9 @@ class Housekeeping {
   final EventRepository events;
   final FinanceRepository finance;
 
-  /// Removes the pictures of the diary nobody refers to (and says how many);
-  /// null where there are none to tidy. A failure here does not stop the rest.
+  /// Removes the pictures of the diary nobody refers to and the half-written
+  /// picture files (and says how many); null where there are none to tidy. A
+  /// failure here does not stop the rest.
   final Future<int> Function(DateTime now)? sweepPhotos;
 
   /// The clock (replaced by tests).

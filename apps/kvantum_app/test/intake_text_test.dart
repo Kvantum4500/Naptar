@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ui/intake/intake_text.dart';
 import 'package:kvantum_core/kvantum_core.dart';
+import 'package:sqlite3/common.dart' show SqliteException;
 
 /// The words of the food and fluid page (8th round), without drawing.
 void main() {
@@ -254,4 +259,85 @@ void main() {
       expect(say(week([1001, 1002])), contains('átlag 1${nbsp}002${nbsp}kcal'));
     });
   });
+
+  group('the line of a change that did not go through', () {
+    const what = 'törölni az ételt';
+
+    test('a full device says what to do about it', () {
+      final full = FileSystemException(
+        'x',
+        '/p',
+        const OSError('No space', 28),
+      );
+      expect(
+        failureLine(what, full),
+        'Nem sikerült törölni az ételt: Elfogyott a hely az eszközön. '
+        'Szabadíts fel tárhelyet, és próbáld újra.',
+      );
+    });
+
+    test('a full database says it, and what to do', () {
+      final full = SqliteException(extendedResultCode: 13, message: 'tele');
+      expect(
+        failureLine(what, full),
+        'Nem sikerült törölni az ételt: Elfogyott a hely az adatbázis '
+        'írásához. Szabadíts fel tárhelyet, és indítsd újra a programot.',
+      );
+    });
+
+    test('an error nobody foresaw points to the Diagnostics, and does not '
+        'say that what was typed is not lost', () {
+      for (final e in <Object>[StateError('belső'), _Weird()]) {
+        final line = failureLine(what, e);
+        expect(line, endsWith('Részletek: Diagnosztika.'), reason: '$e');
+        expect(line, startsWith('Nem sikerült törölni az ételt: '));
+        expect(line, isNot(contains('nem vesznek el')));
+        expect(line, isNot(contains('belső')));
+      }
+      expect(
+        failureLine(what, StateError('x')),
+        'Nem sikerült törölni az ételt: Programhiba történt. '
+        'Részletek: Diagnosztika.',
+      );
+      expect(
+        failureLine('felvenni az italt', _Weird()),
+        'Nem sikerült felvenni az italt: Váratlan hiba történt. '
+        'Részletek: Diagnosztika.',
+      );
+    });
+
+    test('an error of the system, which has advice of its own, points to the '
+        'Diagnostics, too', () {
+      expect(
+        failureLine(what, PlatformException(code: 'x')),
+        'Nem sikerült törölni az ételt: A rendszer hibát jelzett. '
+        'Részletek: Diagnosztika.',
+      );
+    });
+
+    test('an error that is only a matter of trying again keeps its own '
+        'advice', () {
+      expect(
+        failureLine(what, TimeoutException('lassú')),
+        'Nem sikerült törölni az ételt: A szolgáltatás nem válaszolt időben. '
+        'Próbáld újra egy perc múlva.',
+      );
+    });
+
+    test('never says what the exception said', () {
+      const secret = 'TITKOS-RÉSZLET';
+      for (final e in <Object>[
+        StateError(secret),
+        FileSystemException(secret, '/titkos', const OSError(secret, 28)),
+        SqliteException(extendedResultCode: 13, message: secret),
+        PlatformException(code: 'x', message: secret),
+        TimeoutException(secret),
+      ]) {
+        expect(failureLine(what, e), isNot(contains('TITKOS')), reason: '$e');
+        expect(failureLine(what, e), isNot(contains('titkos')), reason: '$e');
+      }
+    });
+  });
 }
+
+class _Weird {}

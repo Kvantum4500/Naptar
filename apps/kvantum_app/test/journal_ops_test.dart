@@ -284,6 +284,60 @@ void main() {
 
     test('an empty or missing folder lists nothing', () async {
       expect(await files.list(), isEmpty);
+      expect(await files.listLeftovers(), isEmpty);
+    });
+
+    test('lists the half-written files of a cut-short write apart from the pictures', () async {
+      final photos = '${dir.path}/journal/photos';
+      await files.write('a1.jpg', Uint8List.fromList([1, 2]));
+      File('$photos/b2.jpg.tmp').writeAsBytesSync([1, 2, 3]);
+      File('$photos/c3.heic.tmp').writeAsBytesSync([1]);
+      // (not ours: not a picture's name, a folder, nothing before the dot)
+      File('$photos/jegyzet.txt.tmp').writeAsStringSync('x');
+      File('$photos/.jpg.tmp').writeAsStringSync('x');
+      File('$photos/d4.jpg.tmp.tmp').writeAsStringSync('x');
+      Directory('$photos/mappa.jpg.tmp').createSync();
+      final leftovers = await files.listLeftovers();
+      expect(
+        {for (final f in leftovers) f.name},
+        {'b2.jpg.tmp', 'c3.heic.tmp'},
+      );
+      expect(leftovers.firstWhere((f) => f.name == 'b2.jpg.tmp').size, 3);
+      // (and they are not pictures: the list of pictures never shows them)
+      expect({for (final f in await files.list()) f.name}, {'a1.jpg'});
+    });
+
+    test(
+      'removes a half-written file by its name, and only such a name',
+      () async {
+        final photos = '${dir.path}/journal/photos';
+        await files.write('a1.jpg', Uint8List.fromList([1]));
+        File('$photos/b2.jpg.tmp').writeAsBytesSync([1]);
+        await files.deleteLeftover('b2.jpg.tmp');
+        expect(File('$photos/b2.jpg.tmp').existsSync(), isFalse);
+        await files.deleteLeftover('b2.jpg.tmp'); // (already gone: no error)
+        for (final name in ['a1.jpg', '../x.jpg.tmp', 'a/b.jpg.tmp', 'x.tmp']) {
+          await expectLater(
+            files.deleteLeftover(name),
+            throwsArgumentError,
+            reason: name,
+          );
+        }
+        expect(await files.exists('a1.jpg'), isTrue);
+      },
+    );
+
+    test('names the half-written file of a picture, and nothing else', () {
+      expect(isPhotoTempName('a1.jpg.tmp'), isTrue);
+      expect(isPhotoTempName('abc-123_X.webp.tmp'), isTrue);
+      expect(isPhotoTempName('a1.jpg'), isFalse);
+      expect(isPhotoTempName('a1.tmp'), isFalse);
+      expect(isPhotoTempName('.tmp'), isFalse);
+      expect(isPhotoTempName('a1.jpg.tmp.tmp'), isFalse);
+      expect(isPhotoTempName('../a1.jpg.tmp'), isFalse);
+      expect(isPhotoTempName('a b.jpg.tmp'), isFalse);
+      expect(isPhotoTempName('a1.jpg.temp'), isFalse);
+      expect(photoTempEnding, '.tmp');
     });
 
     test('refuses a name that is not an id and a picture ending', () async {
@@ -406,6 +460,109 @@ void main() {
       put('orphan.jpg');
       expect(await sweep.run(now), 1);
     });
+
+    group('the half-written files of a cut-short write', () {
+      void leftover(String name, {Duration age = const Duration(hours: 5)}) =>
+          files.putLeftover(name, age: age);
+
+      test('goes when it is old, and counts with the pictures', () async {
+        leftover('a1.jpg.tmp');
+        put('orphan.jpg');
+        expect(await sweep.run(now), 2);
+        expect(files.leftoverNames, isEmpty);
+        expect(files.names, isEmpty);
+      });
+
+      test('stays while a write may still be at it', () async {
+        leftover('young.jpg.tmp', age: const Duration(minutes: 30));
+        leftover('older.jpg.tmp', age: const Duration(hours: 3));
+        expect(await sweep.run(now), 1);
+        expect(files.leftoverNames.toSet(), {'young.jpg.tmp'});
+      });
+
+      test('the grace is an hour, to the minute', () async {
+        expect(leftoverPhotoGrace, const Duration(hours: 1));
+        leftover('young.jpg.tmp', age: const Duration(minutes: 59));
+        leftover('exact.jpg.tmp', age: leftoverPhotoGrace);
+        leftover('older.jpg.tmp', age: const Duration(hours: 1, minutes: 1));
+        expect(await sweep.run(now), 2);
+        expect(files.leftoverNames.toSet(), {'young.jpg.tmp'});
+      });
+
+      test('goes even when there is no picture in the folder', () async {
+        leftover('a1.jpg.tmp');
+        expect(await files.list(), isEmpty);
+        expect(await sweep.run(now), 1);
+      });
+
+      test('is not what keeps a picture: that is the entry\'s doing', () async {
+        await ops.save(entry('e1', photos: [const PhotoRef(id: 'kept')]));
+        put('kept.jpg');
+        leftover('kept.jpg.tmp'); // (the write of a new copy was cut short)
+        expect(await sweep.run(now), 1);
+        expect(files.names.toSet(), {'kept.jpg'});
+      });
+
+      test('the sweep keeps its own grace to its own pictures', () async {
+        final strict = PhotoSweep(
+          files: files,
+          records: repo,
+          drafts: drafts,
+          grace: const Duration(days: 10),
+          leftoverGrace: const Duration(hours: 10),
+        );
+        put('orphan.jpg'); // (5 days old: young for this sweep)
+        leftover('a1.jpg.tmp'); // (5 hours old: young for this sweep)
+        expect(await strict.run(now), 0);
+        leftover('b2.jpg.tmp', age: const Duration(hours: 11));
+        expect(await strict.run(now), 1);
+      });
+    });
+
+    group('in a real folder', () {
+      late Directory dir;
+      late DirPhotoFiles real;
+
+      setUp(() {
+        dir = Directory.systemTemp.createTempSync('kvantum-sweep');
+        real = DirPhotoFiles(dir);
+        sweep = PhotoSweep(files: real, records: repo, drafts: drafts);
+      });
+      tearDown(() => dir.deleteSync(recursive: true));
+
+      void age(String name, Duration by) =>
+          File('${dir.path}/$name').setLastModifiedSync(now.subtract(by));
+
+      test(
+        'removes the old leftover and the old orphan, and no more',
+        () async {
+          await ops.save(entry('e1', photos: [const PhotoRef(id: 'kept')]));
+          await real.write('kept.jpg', Uint8List.fromList([1]));
+          await real.write('orphan.jpg', Uint8List.fromList([1]));
+          File('${dir.path}/old.jpg.tmp').writeAsBytesSync([1]);
+          File('${dir.path}/young.jpg.tmp').writeAsBytesSync([1]);
+          File('${dir.path}/jegyzet.txt.tmp').writeAsStringSync('x');
+          Directory('${dir.path}/mappa.jpg.tmp').createSync();
+          for (final n in ['kept.jpg', 'orphan.jpg']) {
+            age(n, const Duration(days: 5));
+          }
+          age('old.jpg.tmp', const Duration(hours: 5));
+          age('young.jpg.tmp', const Duration(minutes: 10));
+          age('jegyzet.txt.tmp', const Duration(days: 30));
+          expect(await sweep.run(now), 2);
+          final names = {
+            for (final e in dir.listSync())
+              e.uri.pathSegments.where((s) => s.isNotEmpty).last,
+          };
+          expect(names, {
+            'kept.jpg',
+            'young.jpg.tmp',
+            'jegyzet.txt.tmp',
+            'mappa.jpg.tmp',
+          });
+        },
+      );
+    });
   });
 
   group('the daily upkeep', () {
@@ -414,6 +571,7 @@ void main() {
         clock: () => DateTime.utc(2026, 11, 16, 12),
       );
       files.put('orphan.jpg', Uint8List(1), age: const Duration(days: 9));
+      files.putLeftover('cut.jpg.tmp', age: const Duration(hours: 9));
       final h = Housekeeping(
         events: EventRepository(db),
         finance: FinanceRepository(db, clock: () => nowMs),
@@ -425,10 +583,12 @@ void main() {
         ).run,
       );
       final report = (await h.runIfDue())!;
-      expect(report.photos, 1);
+      // (the picture nobody refers to, and the half-written file)
+      expect(report.photos, 2);
       expect(report.any, isTrue);
-      expect(report.toJson()['photos'], 1);
+      expect(report.toJson()['photos'], 2);
       expect(files.names, isEmpty);
+      expect(files.leftoverNames, isEmpty);
     });
 
     test('goes on when the folder cannot be tidied', () async {
@@ -489,8 +649,8 @@ void main() {
           ],
         );
         addTearDown(c.dispose);
-        // (no engine can read these bytes: an ending the phone may keep as it
-        // is stays, anything else is no picture and is told to the log)
+        // (no engine can read these bytes: a HEIC file is told apart from
+        // one that is no picture, and neither is kept)
         PickedPhoto file(String name) => PickedPhoto(
           name: name,
           size: 4,
@@ -500,11 +660,15 @@ void main() {
           file('scan.heic'),
           file('notes.txt'),
         ], room: 5);
-        expect(result.added, hasLength(1));
-        expect(files.names.single, '${result.added.single.id}.heic');
+        expect(result.added, isEmpty);
+        expect(result.problems, {
+          PhotoProblem.heic: 1,
+          PhotoProblem.notAPicture: 1,
+        });
+        expect(files.names, isEmpty);
         await log.flush();
         final text = sink.lines.join('\n');
-        expect(text, contains('photo.kept_as_is'));
+        expect(text, contains('photo.heic_unsupported'));
         expect(text, contains('photo.decode_failed'));
         // (codes only: no name of a chosen file)
         expect(text, isNot(contains('scan')));

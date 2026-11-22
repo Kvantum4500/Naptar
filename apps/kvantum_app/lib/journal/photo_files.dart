@@ -19,6 +19,16 @@ final _fileName = RegExp(
 /// picture's ending, nothing else (no path, no dots in front, no spaces).
 bool isPhotoFileName(String name) => _fileName.hasMatch(name);
 
+/// The ending of the file a picture is written to first (and then moved to its
+/// name): what is left of a write that was cut short.
+const photoTempEnding = '.tmp';
+
+/// Whether [name] is the half-written file of a picture: a picture's name and
+/// [photoTempEnding], nothing else.
+bool isPhotoTempName(String name) =>
+    name.endsWith(photoTempEnding) &&
+    isPhotoFileName(name.substring(0, name.length - photoTempEnding.length));
+
 /// Where the pictures of the diary are kept: a folder on the device (next to
 /// the database; in memory in tests). They are not records and do not travel:
 /// the other devices of the user only know that the picture exists.
@@ -36,6 +46,14 @@ abstract class PhotoFiles {
   /// Every picture file there is (files that are not named like ours are not
   /// listed: they are not ours to touch).
   Future<List<StoredPhoto>> list();
+
+  /// The half-written files that a write cut short left behind (named like a
+  /// picture, with [photoTempEnding] after it). They are not pictures and are
+  /// not in [list].
+  Future<List<StoredPhoto>> listLeftovers();
+
+  /// Removes one of them, by the name [listLeftovers] gave.
+  Future<void> deleteLeftover(String name);
 }
 
 /// The pictures in a folder.
@@ -69,7 +87,7 @@ class DirPhotoFiles implements PhotoFiles {
     await dir.create(recursive: true);
     // (a half-written picture is never the one that is looked at: it is
     // written under another name and then moved)
-    final tmp = File('${f.path}.tmp');
+    final tmp = File('${f.path}$photoTempEnding');
     try {
       await tmp.writeAsBytes(bytes, flush: true);
       await tmp.rename(f.path);
@@ -92,13 +110,34 @@ class DirPhotoFiles implements PhotoFiles {
   }
 
   @override
-  Future<List<StoredPhoto>> list() async {
+  Future<List<StoredPhoto>> list() => _filesNamed(isPhotoFileName);
+
+  @override
+  Future<List<StoredPhoto>> listLeftovers() => _filesNamed(isPhotoTempName);
+
+  @override
+  Future<void> deleteLeftover(String name) async {
+    if (!isPhotoTempName(name)) {
+      throw ArgumentError.value(name, 'name', 'not a half-written picture');
+    }
+    try {
+      await File(p.join(dir.path, name)).delete();
+    } on PathNotFoundException {
+      // (already gone)
+    }
+  }
+
+  /// The files (not folders, not links) of the folder whose name [wanted]
+  /// accepts; none when there is no folder yet.
+  Future<List<StoredPhoto>> _filesNamed(
+    bool Function(String name) wanted,
+  ) async {
     if (!await dir.exists()) return const [];
     final out = <StoredPhoto>[];
     await for (final e in dir.list(followLinks: false)) {
       if (e is! File) continue;
       final name = p.basename(e.path);
-      if (!isPhotoFileName(name)) continue;
+      if (!wanted(name)) continue;
       final stat = await e.stat();
       out.add(StoredPhoto(name, stat.size, stat.modified));
     }
@@ -114,6 +153,7 @@ class MemoryPhotoFiles implements PhotoFiles {
   final DateTime Function() _clock;
   final _bytes = <String, Uint8List>{};
   final _modified = <String, DateTime>{};
+  final _leftovers = <String, StoredPhoto>{};
 
   /// What the next write throws (a full disk, in a test); null: nothing.
   Object? failWrite;
@@ -125,6 +165,19 @@ class MemoryPhotoFiles implements PhotoFiles {
   void put(String name, Uint8List bytes, {Duration age = Duration.zero}) {
     _bytes[name] = bytes;
     _modified[name] = _clock().subtract(age);
+  }
+
+  /// The names of the half-written files there are.
+  Iterable<String> get leftoverNames => _leftovers.keys;
+
+  /// Puts the half-written file of a picture there as if a write had been cut
+  /// short [age] ago ([name] is the name of the leftover: the picture's name
+  /// and [photoTempEnding]).
+  void putLeftover(String name, {int size = 1, Duration age = Duration.zero}) {
+    if (!isPhotoTempName(name)) {
+      throw ArgumentError.value(name, 'name', 'not a half-written picture');
+    }
+    _leftovers[name] = StoredPhoto(name, size, _clock().subtract(age));
   }
 
   @override
@@ -155,4 +208,15 @@ class MemoryPhotoFiles implements PhotoFiles {
       if (isPhotoFileName(e.key))
         StoredPhoto(e.key, e.value.length, _modified[e.key]!),
   ];
+
+  @override
+  Future<List<StoredPhoto>> listLeftovers() async => [..._leftovers.values];
+
+  @override
+  Future<void> deleteLeftover(String name) async {
+    if (!isPhotoTempName(name)) {
+      throw ArgumentError.value(name, 'name', 'not a half-written picture');
+    }
+    _leftovers.remove(name);
+  }
 }
