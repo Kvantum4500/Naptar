@@ -5,10 +5,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import '../../journal/journal_providers.dart';
+import '../../sync/photo_sync_switch.dart';
 
-/// What a place-holder says where the picture is not on this device (it was
-/// taken on another one: the pictures do not travel).
+/// What a place-holder says where the picture is not on this device and is not
+/// on its way (it was taken on another one, and the pictures do not travel
+/// here: nobody is signed in, or the switch is off).
 const photoElsewhereText = 'Ez a kép a másik eszközön van.';
+
+/// What a place-holder says where the picture is not on this device yet, and
+/// is on its way from Drive.
+const photoComingText =
+    'A kép a Drive-ról érkezik, a következő szinkronnál megjelenik.';
 
 /// What a place-holder says where the picture is here, but this device cannot
 /// show it (a kind it has no decoder for).
@@ -50,12 +57,16 @@ class PhotoThumb extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final pixels = side * MediaQuery.devicePixelRatioOf(context);
     final bytes = ref.watch(photoBytesProvider(photo.fileName));
+    // (a picture that travels, when the pictures are on their way here)
+    final coming = photo.syncable && ref.watch(photoSyncActiveProvider);
     final Widget content = bytes.when(
       data: (b) => b == null
           ? _Placeholder(
               side: side,
-              icon: Icons.cloud_off_outlined,
-              tip: photoElsewhereText,
+              icon: coming
+                  ? Icons.cloud_download_outlined
+                  : Icons.cloud_off_outlined,
+              tip: coming ? photoComingText : photoElsewhereText,
             )
           : Image.memory(
               b,
@@ -146,9 +157,18 @@ class PhotoFull extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final bytes = ref.watch(photoBytesProvider(photo.fileName));
+    final coming = photo.syncable && ref.watch(photoSyncActiveProvider);
     return bytes.when(
       data: (b) => b == null
-          ? const _FullMessage(photoElsewhereText, Icons.cloud_off_outlined)
+          ? (coming
+                ? const _FullMessage(
+                    photoComingText,
+                    Icons.cloud_download_outlined,
+                  )
+                : const _FullMessage(
+                    photoElsewhereText,
+                    Icons.cloud_off_outlined,
+                  ))
           : Image.memory(
               b,
               fit: BoxFit.contain,

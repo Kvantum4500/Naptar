@@ -104,6 +104,7 @@ void main() {
         'Naptár: hiba (kód: parked)',
         'Drive (feladatok, check-inek, napló, étkezés, beállítások): rendben',
         'Pénzügy (levelek): még nem volt futás',
+        'Képek (a napló képei, Drive): még nem volt futás',
         '1. módosítás, 5. próba, a Google nem fogadta el (kód: 400, invalid) [feladva]',
         '2026-11-12 Naptár: 40 hívás · 37 rendben · 1 elutasítva · 2 korlátozva',
         '- A Google ma 2 alkalommal korlátozta a kéréseket.',
@@ -112,6 +113,32 @@ void main() {
       ]) {
         expect(r, contains(part), reason: part);
       }
+    });
+
+    test('tells what the pictures did, in a line of their own', () {
+      final r = renderReport(
+        snap(
+          channels: {
+            channelPhotos: ChannelStatus(
+              lastTry: DateTime(2026, 11, 12, 14, 29),
+              lastOk: DateTime(2026, 11, 12, 14, 10),
+              code: 'quota',
+              pulled: 2,
+              pushed: 3,
+              failed: 1,
+            ),
+          },
+        ),
+      );
+      expect(
+        r,
+        contains(
+          'Képek (a napló képei, Drive): hiba (kód: quota)'
+          ' · utolsó próba 2026-11-12 14:29'
+          ' · utolsó siker 2026-11-12 14:10'
+          ' · 2 le, 3 fel, 1 nem ment át',
+        ),
+      );
     });
 
     test('never contains the title of an event', () {

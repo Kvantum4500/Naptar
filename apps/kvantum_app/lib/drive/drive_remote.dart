@@ -16,9 +16,13 @@ class DriveRecordFile {
 
 /// Id and name of a file in the app folder (no content).
 class DriveName {
-  const DriveName({required this.id, required this.name});
+  const DriveName({required this.id, required this.name, this.created});
   final String id;
   final String name;
+
+  /// When the file was made in Drive; null when the listing did not say (an
+  /// update of a file does not change it).
+  final DateTime? created;
 }
 
 class DrivePull {
@@ -63,6 +67,20 @@ abstract class DriveRemote {
     String? fileId,
     required String name,
     required String content,
+  });
+
+  /// The bytes of a file of any kind (a picture), or null when it no longer
+  /// exists. Throws [DriveFileTooBig] for a file larger than [maxBytes]: the
+  /// size the server announces is looked at first, then what really arrives.
+  Future<Uint8List?> readBytes(String fileId, {required int maxBytes});
+
+  /// Creates (fileId null) or overwrites a file of any kind, with the media
+  /// type [contentType]; returns its id.
+  Future<String> writeBytes({
+    String? fileId,
+    required String name,
+    required Uint8List bytes,
+    required String contentType,
   });
 
   /// Files whose name starts with [prefix] (names only, oldest name first).

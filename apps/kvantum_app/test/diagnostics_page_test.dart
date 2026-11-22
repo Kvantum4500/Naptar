@@ -164,7 +164,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Pénzügy (levelek)'), findsOneWidget);
-      expect(find.text('még nem volt futás'), findsOneWidget);
+      expect(find.text('Képek (a napló képei, Drive)'), findsOneWidget);
+      // (the finance mail and the pictures have not been looked at yet)
+      expect(find.text('még nem volt futás'), findsNWidgets(2));
       expect(
         find.textContaining('1 módosítást nem sikerült elküldeni'),
         findsOneWidget,

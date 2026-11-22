@@ -1,9 +1,16 @@
-/// The three channels one sync run goes over. They run independently: a
-/// problem with one never blocks the others.
+/// The channels one sync run goes over. They run independently: a problem
+/// with one never blocks the others. The pictures of the diary are the last
+/// and the slowest: they follow the records, and never hold anything up.
 const channelCalendar = 'calendar';
 const channelDrive = 'drive';
 const channelFinance = 'finance';
-const syncChannels = [channelCalendar, channelDrive, channelFinance];
+const channelPhotos = 'photos';
+const syncChannels = [
+  channelCalendar,
+  channelDrive,
+  channelFinance,
+  channelPhotos,
+];
 
 /// What the last run that looked at one channel found there.
 class ChannelStatus {

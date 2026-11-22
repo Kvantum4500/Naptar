@@ -12,6 +12,7 @@ import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/journal/journal_draft_store.dart';
 import 'package:kvantum_app/journal/journal_ops.dart';
 import 'package:kvantum_app/journal/journal_providers.dart';
+import 'package:kvantum_app/journal/photo_arrivals.dart';
 import 'package:kvantum_app/journal/photo_files.dart';
 import 'package:kvantum_app/journal/photo_import.dart';
 import 'package:kvantum_app/journal/photo_picker.dart';
@@ -19,6 +20,8 @@ import 'package:kvantum_app/journal/photo_pipeline.dart'
     show maxPhotoSourceBytes;
 import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/error_catalog.dart';
+import 'package:kvantum_app/sync/photo_sync_switch.dart';
+import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_app/ui/format.dart';
 import 'package:kvantum_app/ui/journal/entries_page.dart';
 import 'package:kvantum_app/ui/journal/entry_editor.dart';
@@ -309,6 +312,110 @@ void main() {
       expect(find.byIcon(Icons.cloud_off_outlined), findsOneWidget);
       expect(find.byTooltip(photoElsewhereText), findsOneWidget);
       await shutdown(tester, db);
+    });
+
+    group('a picture that is not here yet', () {
+      /// Signed in to Google: pictures are on their way.
+      List<Override> signedIn() => [
+        syncControllerProvider.overrideWith(_SignedIn.new),
+      ];
+
+      Future<void> entryWith(WidgetTester tester, PhotoRef p) async {
+        await tester.runAsync(
+          () =>
+              scope(tester)
+                  .read(journalOpsProvider)
+                  .save(entry('a', photos: [p])),
+        );
+        await settle(tester);
+      }
+
+      testWidgets('is on its way from Drive when the pictures are on, and '
+          'says so', (tester) async {
+        await boot(tester, extra: signedIn());
+        await entryWith(tester, photo('coming', here: false));
+        expect(find.byIcon(Icons.cloud_download_outlined), findsOneWidget);
+        expect(find.byIcon(Icons.cloud_off_outlined), findsNothing);
+        expect(find.byTooltip(photoComingText), findsOneWidget);
+        expect(find.byTooltip(photoElsewhereText), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('is on another device when nobody is signed in', (
+        tester,
+      ) async {
+        await boot(tester);
+        await entryWith(tester, photo('far', here: false));
+        expect(find.byTooltip(photoElsewhereText), findsOneWidget);
+        expect(find.byTooltip(photoComingText), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('is on another device when the switch of the pictures is '
+          'off', (tester) async {
+        await boot(
+          tester,
+          extra: [
+            ...signedIn(),
+            photoSyncSwitchProvider.overrideWith(_Off.new),
+          ],
+        );
+        await entryWith(tester, photo('far', here: false));
+        expect(find.byTooltip(photoElsewhereText), findsOneWidget);
+        expect(find.byTooltip(photoComingText), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('of a kind that does not travel is on another device, '
+          'whatever the switch says', (tester) async {
+        await boot(tester, extra: signedIn());
+        await entryWith(tester, const PhotoRef(id: 'old', ext: 'heic'));
+        expect(find.byTooltip(photoElsewhereText), findsOneWidget);
+        expect(find.byTooltip(photoComingText), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('says the same, in words, in the viewer', (tester) async {
+        await boot(tester, extra: signedIn());
+        await entryWith(tester, photo('coming', here: false));
+        await tester.tap(find.byKey(const Key('entry-a')));
+        await settle(tester);
+        await tester.tap(find.byKey(const Key('entry-photo-coming')));
+        await settle(tester);
+        expect(find.text(photoComingText), findsWidgets);
+        expect(find.text(photoElsewhereText), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('takes the place of the place-holder when it arrives, and '
+          'no other picture is read again', (tester) async {
+        final store = _CountingStore();
+        files = store;
+        await boot(tester, extra: signedIn());
+        final here = photo('here');
+        final coming = photo('coming', here: false);
+        await tester.runAsync(
+          () =>
+              scope(tester)
+                  .read(journalOpsProvider)
+                  .save(entry('a', photos: [here, coming])),
+        );
+        await settle(tester);
+        expect(find.byIcon(Icons.cloud_download_outlined), findsOneWidget);
+        expect(find.byType(Image), findsOneWidget);
+        store.reads.clear();
+        // the picture comes from Drive: the file is written, and the screens
+        // are told
+        files.put('coming.jpg', tinyJpeg);
+        scope(tester)
+            .read(photoArrivalsProvider.notifier)
+            .arrived(['coming.jpg']);
+        await settle(tester);
+        expect(find.byIcon(Icons.cloud_download_outlined), findsNothing);
+        expect(find.byType(Image), findsNWidgets(2));
+        expect(store.reads, ['coming.jpg'], reason: 'only the one that came');
+        await shutdown(tester, db);
+      });
     });
 
     testWidgets('an entry is read out as one thing', (tester) async {
@@ -1584,6 +1691,32 @@ class _SlowImporter extends PhotoImporter {
     List<PickedPhoto> picked, {
     required int room,
   }) => gate.future;
+}
+
+/// A signed-in sync: the pictures are on their way.
+class _SignedIn extends SyncController {
+  @override
+  SyncState build() => const SyncState(configured: true, signedIn: true);
+
+  @override
+  void requestSync() {}
+}
+
+/// The switch of the pictures, off.
+class _Off extends PhotoSyncSwitch {
+  @override
+  bool build() => false;
+}
+
+/// A store that says which pictures were read.
+class _CountingStore extends MemoryPhotoFiles {
+  final reads = <String>[];
+
+  @override
+  Future<Uint8List?> read(String name) {
+    reads.add(name);
+    return super.read(name);
+  }
 }
 
 /// A store that gives an error when a picture is read.

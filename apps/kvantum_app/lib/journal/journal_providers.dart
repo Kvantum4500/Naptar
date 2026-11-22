@@ -7,6 +7,7 @@ import '../diag/diag_log.dart';
 import '../providers.dart';
 import '../sync/sync_controller.dart';
 import 'journal_ops.dart';
+import 'photo_arrivals.dart';
 import 'photo_import.dart';
 
 /// The diary: the entries that are not deleted, the newest first.
@@ -31,8 +32,10 @@ final photoImporterProvider = Provider<PhotoImporter>(
 );
 
 /// The bytes of a picture file of this device, or null when it is not here
-/// (it was taken on another device). Kept while a screen shows it.
+/// (it was taken on another device, and has not come yet). Kept while a screen
+/// shows it; read again when the file arrives from Drive ([PhotoArrivals]).
 final photoBytesProvider = FutureProvider.autoDispose
-    .family<Uint8List?, String>(
-      (ref, fileName) => ref.watch(photoFilesProvider).read(fileName),
-    );
+    .family<Uint8List?, String>((ref, fileName) {
+      ref.watch(photoArrivalsProvider.select((m) => m[fileName]));
+      return ref.watch(photoFilesProvider).read(fileName);
+    });

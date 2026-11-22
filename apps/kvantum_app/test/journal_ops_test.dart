@@ -13,6 +13,7 @@ import 'package:kvantum_app/diag/diag_log.dart';
 import 'package:kvantum_app/journal/journal_draft_store.dart';
 import 'package:kvantum_app/journal/journal_ops.dart';
 import 'package:kvantum_app/journal/journal_providers.dart';
+import 'package:kvantum_app/journal/photo_arrivals.dart';
 import 'package:kvantum_app/journal/photo_files.dart';
 import 'package:kvantum_app/journal/photo_import.dart';
 import 'package:kvantum_app/journal/photo_sweep.dart';
@@ -632,6 +633,46 @@ void main() {
         expect(await c.read(photoBytesProvider('b2.jpg').future), isNull);
       },
     );
+
+    test('is read again when the file arrives from Drive, and only that '
+        'one', () async {
+      final files = MemoryPhotoFiles();
+      final c = ProviderContainer(
+        overrides: [
+          ...baseOverrides(db),
+          photoFilesProvider.overrideWithValue(files),
+        ],
+      );
+      addTearDown(c.dispose);
+      c.listen(photoBytesProvider('a1.jpg'), (_, _) {});
+      c.listen(photoBytesProvider('b2.jpg'), (_, _) {});
+      expect(await c.read(photoBytesProvider('a1.jpg').future), isNull);
+      expect(await c.read(photoBytesProvider('b2.jpg').future), isNull);
+      files
+        ..put('a1.jpg', Uint8List.fromList([1]))
+        ..put('b2.jpg', Uint8List.fromList([2]));
+      // (a file that was written and not announced is not looked for again)
+      expect(await c.read(photoBytesProvider('a1.jpg').future), isNull);
+      c.read(photoArrivalsProvider.notifier).arrived(['a1.jpg']);
+      expect(await c.read(photoBytesProvider('a1.jpg').future), [1]);
+      expect(await c.read(photoBytesProvider('b2.jpg').future), isNull);
+    });
+  });
+
+  group('the arrivals of the pictures', () {
+    test('are counted by file, and nothing told changes nothing', () {
+      final c = ProviderContainer(overrides: baseOverrides(db));
+      addTearDown(c.dispose);
+      expect(c.read(photoArrivalsProvider), isEmpty);
+      final n = c.read(photoArrivalsProvider.notifier);
+      n.arrived(['a.jpg']);
+      expect(c.read(photoArrivalsProvider), {'a.jpg': 1});
+      n.arrived(['a.jpg', 'b.jpg']);
+      expect(c.read(photoArrivalsProvider), {'a.jpg': 2, 'b.jpg': 1});
+      final before = c.read(photoArrivalsProvider);
+      n.arrived(const []);
+      expect(identical(c.read(photoArrivalsProvider), before), isTrue);
+    });
   });
 
   group('the pieces the app puts together', () {

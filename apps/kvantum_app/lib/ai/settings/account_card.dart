@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../sync/photo_sync_switch.dart';
 import '../../sync/sync_controller.dart';
 import '../../ui/diagnostics_page.dart';
 import '../../ui/format.dart';
@@ -127,7 +128,22 @@ class AccountSyncBody extends ConsumerWidget {
             key: const Key('account-error'),
             style: small?.copyWith(color: scheme.error),
           ),
-        const SizedBox(height: 12),
+        if (s.photoNote != null)
+          Text(
+            s.photoNote!,
+            key: const Key('account-photo-note'),
+            style: small,
+          ),
+        const SizedBox(height: 4),
+        SwitchListTile(
+          key: const Key('photo-sync-switch'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Képek szinkronja'),
+          subtitle: const Text(photoSyncSwitchHelp),
+          value: ref.watch(photoSyncSwitchProvider),
+          onChanged: (on) => ref.read(photoSyncSwitchProvider.notifier).set(on),
+        ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,

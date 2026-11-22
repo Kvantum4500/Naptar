@@ -14,8 +14,10 @@ import '../drive/drive_remote.dart';
 import '../drive/drive_sync_engine.dart';
 import '../drive/finance_mailbox.dart';
 import '../drive/google_drive_remote.dart';
+import '../drive/photo_sync.dart';
 import '../google/google_auth_service.dart';
 import '../google/google_calendar_remote.dart';
+import '../journal/photo_arrivals.dart';
 import '../providers.dart';
 import 'api_errors.dart';
 import 'channel_status.dart';
@@ -78,6 +80,7 @@ class SyncState {
     this.pending = 0,
     this.error,
     this.financeNote,
+    this.photoNote,
     this.nextAttempt,
     this.mismatch,
     this.parked = 0,
@@ -92,6 +95,11 @@ class SyncState {
 
   /// What the last finance mail run did (null when nothing happened).
   final String? financeNote;
+
+  /// What the last run did with the pictures of the diary (sent, fetched, still
+  /// to come), or why it could not (Drive is full, this device is). It is no
+  /// error of the sync: the state of the sync does not depend on it.
+  final String? photoNote;
   final DateTime? lastSync;
   final int pending;
   final String? error;
@@ -120,6 +128,7 @@ class SyncState {
     String? error,
     bool clearError = false,
     String? financeNote,
+    Object? photoNote = _unset,
     Object? nextAttempt = _unset,
     Object? mismatch = _unset,
     int? parked,
@@ -133,6 +142,9 @@ class SyncState {
     pending: pending ?? this.pending,
     error: clearError ? null : (error ?? this.error),
     financeNote: financeNote ?? this.financeNote,
+    photoNote: identical(photoNote, _unset)
+        ? this.photoNote
+        : photoNote as String?,
     nextAttempt: identical(nextAttempt, _unset)
         ? this.nextAttempt
         : nextAttempt as DateTime?,
@@ -186,6 +198,7 @@ class _Outcome {
 class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
   SyncEngine? _engine;
   DriveSyncEngine? _drive;
+  PhotoSyncEngine? _photos;
   DriveRemote? _driveRemote;
   FinanceMailbox? _mail;
   SyncResetOps? _reset;
@@ -253,6 +266,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     _debounce?.cancel();
     _engine = null;
     _drive = null;
+    _photos = null;
     _driveRemote = null;
     _mail = null;
     _reset = null;
@@ -295,6 +309,17 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
     final driveRemote = ref.read(driveFactoryProvider)(tapped);
     _driveRemote = driveRemote;
     _drive = DriveSyncEngine(records, driveRemote, log: _log);
+    late final PhotoSyncEngine photos;
+    photos = PhotoSyncEngine(
+      records: records,
+      remote: driveRemote,
+      files: ref.read(photoFilesProvider),
+      now: _now,
+      log: _log,
+      // (the app went to the background, or this is not the account any more)
+      shouldStop: () => !_foreground || !identical(_photos, photos),
+    );
+    _photos = photos;
     final mail = FinanceMailbox(
       ref.read(financeRepoProvider),
       driveRemote,
@@ -720,6 +745,89 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       }
     }
 
+    // The pictures of the diary go last: they are the slow part, and the
+    // calendar, the records and the mail must not wait for them. They follow
+    // the entries, so they go when the records of Drive went through, and when
+    // the switch of this device is on. What goes wrong with them is theirs: it
+    // is told on their own line, and is no error of the sync.
+    String? photoNote;
+    final photos = _photos;
+    if (photos != null &&
+        driveReport != null &&
+        !driveReport.stoppedEarly &&
+        await photoSyncEnabled(ref.read(recordRepoProvider))) {
+      try {
+        final r = await photos.sync();
+        String? code;
+        String? line;
+        if (r.stoppedEarly) {
+          code = 'transient';
+          line = transientText('Képek', r.hint);
+          if (r.hint?.throttled ?? false) {
+            // (a limit is the account's: every channel waits for it)
+            noteHint(r.hint);
+            failed = true;
+          }
+        } else if (r.quotaFull) {
+          code = 'quota';
+          line = photoQuotaText;
+        } else if (r.diskFull) {
+          code = 'disk_full';
+          line = photoDiskText;
+        } else if (r.failed > 0) {
+          code = 'partial';
+          line = photoPartialText(r.failed);
+        } else if (r.skipped > 0) {
+          code = 'skipped';
+          line = photoSkippedText(r.skipped);
+        }
+        channel(
+          channelPhotos,
+          code: code,
+          lines: [?line],
+          pulled: r.downloaded,
+          pushed: r.uploaded,
+          refused: r.failed + r.skipped,
+        );
+        if (code != null) {
+          _log.info(
+            'sync',
+            'photos.$code',
+            data: {
+              'up': r.uploaded,
+              'down': r.downloaded,
+              'waiting': r.waiting,
+              'failed': r.failed,
+              'skipped': r.skipped,
+            },
+          );
+        }
+        photoNote =
+            line ??
+            photoNoteText(
+              uploaded: r.uploaded,
+              downloaded: r.downloaded,
+              waiting: r.waiting,
+            );
+        busy |= r.busy;
+        more |= r.more;
+        if (r.arrived.isNotEmpty) {
+          ref.read(photoArrivalsProvider.notifier).arrived(r.arrived);
+        }
+      } catch (e, st) {
+        if (isAuthExpired(e)) {
+          await _expireLogin();
+          return const _Outcome(expired: true);
+        }
+        channel(
+          channelPhotos,
+          code: 'unexpected',
+          lines: [unexpectedText('Képek')],
+        );
+        _log.error('sync', 'photos.unexpected', e, st);
+      }
+    }
+
     await _keepDiagnostics(driveNewer: driveNewer, financeNewer: financeNewer);
 
     final pending =
@@ -731,6 +839,7 @@ class SyncController extends Notifier<SyncState> with WidgetsBindingObserver {
       pending: pending,
       lastSync: ok ? _now() : null,
       financeNote: note,
+      photoNote: photoNote,
       parked: parked,
       mismatch: mismatch,
       error: errors.isEmpty ? null : errors.join(' · '),

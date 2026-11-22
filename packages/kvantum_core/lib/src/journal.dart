@@ -7,10 +7,13 @@ import 'sync_record.dart';
 //
 // Where it lives: ONE synced record per ENTRY ([kindJournal], id = a uuid).
 // The text of an entry goes to Drive and into the backup like the check-ins do;
-// the PICTURES do not: a record only says which pictures belong to the entry
-// (an id, a size), the files themselves stay on the device that took them in
-// (the other devices show a place-holder). A deletion is the usual soft delete
-// of a record, so "Visszavonás" can take it back.
+// the PICTURES do not travel in the record: it only says which pictures belong
+// to the entry (an id, a size). The files themselves are kept on the device
+// that took them in, and the app carries each of them to Drive on its own, as a
+// file named by [PhotoRef.driveName]; the other devices fetch what they lack
+// (until it arrives they show a place-holder). They are in no backup: the copy
+// in Drive is the copy. A deletion is the usual soft delete of a record, so
+// "Visszavonás" can take it back.
 //
 // The time of an entry is a floating wall-clock time ("2026-11-16T08:15"), no
 // zone: the diary says when it felt like, wherever the device is.
@@ -53,6 +56,17 @@ const photoExtensions = {
 };
 
 final _safeId = RegExp(r'^[A-Za-z0-9_-]{1,40}$');
+
+/// What the name of a picture in the hidden folder of Drive begins with. It is
+/// no kind of record ([syncedKinds]) and not the mail of the finances ("fin-"),
+/// so the sync of the records leaves such files alone and they are no records.
+const photoDrivePrefix = 'photo-';
+
+/// The name of a picture in Drive: [photoDrivePrefix], an id, ".jpg". Group 1
+/// is the id. Nothing else is in a name: no path, no title, no date.
+final photoDriveNamePattern = RegExp(
+  '^$photoDrivePrefix([A-Za-z0-9_-]{1,40})\\.jpg\$',
+);
 
 /// Control characters except the line break and the tab.
 final _controls = RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]');
@@ -154,6 +168,15 @@ class PhotoRef {
 
   /// The name of the file on the device.
   String get fileName => '$id.$ext';
+
+  /// Whether this picture travels between the devices: only a JPEG does. Every
+  /// picture the diary takes in is one; a reference to a file of another kind
+  /// (which a first version kept as it was) stays on the device that has it.
+  bool get syncable => ext == 'jpg';
+
+  /// The name of this picture in the hidden folder of Drive (see
+  /// [photoDriveNamePattern]); null for a picture that does not travel.
+  String? get driveName => syncable ? '$photoDrivePrefix$id.jpg' : null;
 
   Map<String, Object?> toJson() => {
     'id': id,

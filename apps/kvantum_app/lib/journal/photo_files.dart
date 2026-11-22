@@ -29,9 +29,19 @@ bool isPhotoTempName(String name) =>
     name.endsWith(photoTempEnding) &&
     isPhotoFileName(name.substring(0, name.length - photoTempEnding.length));
 
+/// Whether [e] says that the device is full (ENOSPC on Linux and Android,
+/// ERROR_DISK_FULL / ERROR_HANDLE_DISK_FULL on Windows).
+bool isDiskFull(Object e) {
+  if (e is! FileSystemException) return false;
+  final code = e.osError?.errorCode;
+  return code == 28 || code == 112 || code == 39;
+}
+
 /// Where the pictures of the diary are kept: a folder on the device (next to
-/// the database; in memory in tests). They are not records and do not travel:
-/// the other devices of the user only know that the picture exists.
+/// the database; in memory in tests). They are not records: the record of an
+/// entry only says that the picture exists. The files themselves are carried
+/// to the other devices of the user, and fetched from them, by the picture
+/// sync (`PhotoSyncEngine`); they are in no backup.
 abstract class PhotoFiles {
   Future<bool> exists(String name);
 

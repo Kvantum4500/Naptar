@@ -16,7 +16,8 @@ import 'support/harness.dart';
 /// The diary on two devices and in a backup (8th round): the text of an entry
 /// goes through Drive and into a backup, a title changed on one device and a
 /// text changed on the other both stay, a deletion travels, and the pictures
-/// themselves go nowhere: only the entry's words that they exist.
+/// themselves are no part of the records: only the entry's words that they
+/// exist (the files travel on their own way: see photo_sync_test).
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   setUpAll(ensureTimeZones);

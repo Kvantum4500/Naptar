@@ -54,7 +54,8 @@ Future<({String? password})?> askSavePassword(
       'A fájlba minden belekerül: a naptár, a pénzügyek, a feladatok, a '
       'check-inek, a kézikönyv, az edzésnapló, az étkezési napló és a napló '
       'bejegyzéseinek szövege, a beállításaid (bér, célok, terv-kívánságok); '
-      'a napló képei nem (azok csak azon az eszközön vannak). Jelszóval '
+      'a napló képei nem (azok a Drive-szinkronnal kerülnek a Drive-ra). '
+      'Jelszóval '
       'zárhatod '
       '(AES-256-os zip, bármely tömörítő megnyitja a jelszóval); hagyd '
       'üresen, ha nem kérsz jelszót.',

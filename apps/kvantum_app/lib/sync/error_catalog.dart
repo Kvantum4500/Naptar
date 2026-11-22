@@ -50,6 +50,36 @@ String refusedText(String channel, int n) =>
 String skippedText(String channel, int n) =>
     '$channel: $n Google-esemény nem olvasható be, kihagytam.';
 
+// -------------------------------------------- the pictures of the diary
+
+const photoQuotaText =
+    'Képek: a Google Drive tárhelye betelt, a képek feltöltése szünetel. '
+    'Szabadíts fel helyet a Drive-on.';
+
+const photoDiskText =
+    'Képek: nincs elég hely az eszközön a képek letöltéséhez.';
+
+String photoPartialText(int n) =>
+    'Képek: $n képet most nem sikerült átvinni, később újra próbálom.';
+
+String photoSkippedText(int n) =>
+    'Képek: $n kép túl nagy vagy nem használható, ezeket kihagytam.';
+
+/// What the last run did with the pictures, in a line; null when it did and
+/// has nothing to do with none.
+String? photoNoteText({
+  required int uploaded,
+  required int downloaded,
+  required int waiting,
+}) {
+  final parts = [
+    if (uploaded > 0) '$uploaded feltöltve',
+    if (downloaded > 0) '$downloaded letöltve',
+    if (waiting > 0) 'még $waiting vár',
+  ];
+  return parts.isEmpty ? null : 'Képek: ${parts.join(', ')}.';
+}
+
 String newerFormatText(String channel, int n) =>
     '$channel: $n elemet az alkalmazás egy újabb verziója írt; ezeket nem '
     'bántom, és nem is írom felül. Telepítsd az újabb verziót.';

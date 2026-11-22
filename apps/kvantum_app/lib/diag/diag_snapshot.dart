@@ -102,6 +102,7 @@ const channelLabels = {
   channelCalendar: 'Naptár',
   channelDrive: 'Drive (feladatok, check-inek, napló, étkezés, beállítások)',
   channelFinance: 'Pénzügy (levelek)',
+  channelPhotos: 'Képek (a napló képei, Drive)',
 };
 
 const serviceLabels = {

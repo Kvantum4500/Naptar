@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:kvantum_core/kvantum_core.dart';
@@ -201,7 +200,7 @@ class PhotoImporter {
       try {
         await files.write(name, made.jpeg);
       } catch (e) {
-        final full = _isDiskFull(e);
+        final full = isDiskFull(e);
         log?.error(
           'journal',
           full ? 'photo.disk_full' : 'photo.write_failed',
@@ -214,12 +213,4 @@ class PhotoImporter {
     }
     return PhotoImportResult(added, problems: problems);
   }
-}
-
-/// Whether [e] says that the device is full (ENOSPC on Linux and Android,
-/// ERROR_DISK_FULL / ERROR_HANDLE_DISK_FULL on Windows).
-bool _isDiskFull(Object e) {
-  if (e is! FileSystemException) return false;
-  final code = e.osError?.errorCode;
-  return code == 28 || code == 112 || code == 39;
 }

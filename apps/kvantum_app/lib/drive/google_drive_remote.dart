@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data' show BytesBuilder;
+import 'dart:typed_data' show BytesBuilder, Uint8List;
 
 import 'package:googleapis/drive/v3.dart' as d;
 import 'package:http/http.dart' as http;
@@ -138,6 +138,18 @@ class GoogleDriveRemote implements DriveRemote {
 
   @override
   Future<String?> read(String fileId) async {
+    final bytes = await _download(fileId, maxReadBytes);
+    return bytes == null ? null : utf8.decode(bytes);
+  }
+
+  @override
+  Future<Uint8List?> readBytes(String fileId, {required int maxBytes}) =>
+      _download(fileId, maxBytes);
+
+  /// The bytes of a file, null when it is gone. [max] is the most that is
+  /// taken: what the server announces is looked at first, then what really
+  /// arrives (a file that is bigger than what the app writes is not read).
+  Future<Uint8List?> _download(String fileId, int max) async {
     try {
       final media = await _g(
         () => _api.files.get(
@@ -145,19 +157,17 @@ class GoogleDriveRemote implements DriveRemote {
           downloadOptions: d.DownloadOptions.fullMedia,
         ),
       ) as d.Media;
-      // (what the server announces, when it does; then what really arrives: a
-      // file that is bigger than anything the app writes is not read)
       final announced = media.length;
-      if (announced != null && announced > maxReadBytes) {
+      if (announced != null && announced > max) {
         await media.stream.listen((_) {}).cancel();
         throw DriveFileTooBig(announced);
       }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in media.stream) {
         bytes.add(chunk);
-        if (bytes.length > maxReadBytes) throw DriveFileTooBig(bytes.length);
+        if (bytes.length > max) throw DriveFileTooBig(bytes.length);
       }
-      return utf8.decode(bytes.takeBytes());
+      return bytes.takeBytes();
     } on _Gone {
       return null;
     }
@@ -189,12 +199,12 @@ class GoogleDriveRemote implements DriveRemote {
           q: 'trashed = false',
           pageSize: 200,
           pageToken: page,
-          $fields: 'nextPageToken,files(id,name)',
+          $fields: 'nextPageToken,files(id,name,createdTime)',
         ),
       );
       for (final f in res.files ?? const <d.File>[]) {
         if (f.id != null && f.name != null && f.name!.startsWith(prefix)) {
-          out.add(DriveName(id: f.id!, name: f.name!));
+          out.add(DriveName(id: f.id!, name: f.name!, created: f.createdTime));
         }
       }
       page = res.nextPageToken;
@@ -208,17 +218,26 @@ class GoogleDriveRemote implements DriveRemote {
     String? fileId,
     required String name,
     required String content,
+  }) => writeBytes(
+    fileId: fileId,
+    name: name,
+    bytes: Uint8List.fromList(utf8.encode(content)),
+    contentType: 'application/json',
+  );
+
+  @override
+  Future<String> writeBytes({
+    String? fileId,
+    required String name,
+    required Uint8List bytes,
+    required String contentType,
   }) async {
-    final bytes = utf8.encode(content);
-    d.Media media() => d.Media(
-      Stream.value(bytes),
-      bytes.length,
-      contentType: 'application/json',
-    );
+    d.Media media() =>
+        d.Media(Stream.value(bytes), bytes.length, contentType: contentType);
     if (fileId == null) {
       final created = await _g(
         () => _api.files.create(
-          d.File(name: name, parents: [_space], mimeType: 'application/json'),
+          d.File(name: name, parents: [_space], mimeType: contentType),
           uploadMedia: media(),
           $fields: 'id',
         ),
@@ -237,7 +256,7 @@ class GoogleDriveRemote implements DriveRemote {
       return updated.id!;
     } on _Gone {
       // the file was removed meanwhile: create it again
-      return write(name: name, content: content);
+      return writeBytes(name: name, bytes: bytes, contentType: contentType);
     }
   }
 

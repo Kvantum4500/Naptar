@@ -262,6 +262,68 @@ void main() {
     );
   });
 
+  group('the lines of the pictures of the diary', () {
+    test('a full Drive and a full device say what is the matter, and what '
+        'waits', () {
+      expect(
+        photoQuotaText,
+        'Képek: a Google Drive tárhelye betelt, a képek feltöltése szünetel. '
+        'Szabadíts fel helyet a Drive-on.',
+      );
+      expect(
+        photoDiskText,
+        'Képek: nincs elég hely az eszközön a képek letöltéséhez.',
+      );
+    });
+
+    test('some that went wrong, or were left out, are counted', () {
+      expect(
+        photoPartialText(3),
+        'Képek: 3 képet most nem sikerült átvinni, később újra próbálom.',
+      );
+      expect(
+        photoSkippedText(2),
+        'Képek: 2 kép túl nagy vagy nem használható, ezeket kihagytam.',
+      );
+    });
+
+    test('the note says what was done, in this order, and nothing of what '
+        'was not', () {
+      expect(
+        photoNoteText(uploaded: 2, downloaded: 3, waiting: 4),
+        'Képek: 2 feltöltve, 3 letöltve, még 4 vár.',
+      );
+      expect(
+        photoNoteText(uploaded: 1, downloaded: 0, waiting: 0),
+        'Képek: 1 feltöltve.',
+      );
+      expect(
+        photoNoteText(uploaded: 0, downloaded: 5, waiting: 0),
+        'Képek: 5 letöltve.',
+      );
+      expect(
+        photoNoteText(uploaded: 0, downloaded: 0, waiting: 7),
+        'Képek: még 7 vár.',
+      );
+      expect(photoNoteText(uploaded: 0, downloaded: 0, waiting: 0), isNull);
+    });
+
+    test('none of them has an exception or a name in it', () {
+      for (final line in [
+        photoQuotaText,
+        photoDiskText,
+        photoPartialText(1),
+        photoSkippedText(1),
+        unexpectedText('Képek'),
+        transientText('Képek', null),
+      ]) {
+        expect(line, startsWith('Képek'));
+        expect(line, isNot(contains('Exception')));
+        expect(line, isNot(contains('photo-')));
+      }
+    });
+  });
+
   test('the "unexpected" line sends the user to the Diagnostics page', () {
     expect(unexpectedText('Naptár'), contains('Diagnosztika'));
     expect(unexpectedText('Naptár'), isNot(contains('Szinkron → Részletek')));

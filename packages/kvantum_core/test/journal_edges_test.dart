@@ -420,4 +420,89 @@ void main() {
       );
     });
   });
+
+  group('the name of a picture in Drive (9th round)', () {
+    test('is the prefix, the id and .jpg, and nothing else', () {
+      expect(photoDrivePrefix, 'photo-');
+      expect(const PhotoRef(id: 'abc-123_X').driveName, 'photo-abc-123_X.jpg');
+      for (final id in ['a', 'a' * 40, 'A-b_9', '0123456789']) {
+        final p = PhotoRef(id: id, width: 4, height: 3, bytes: 7);
+        expect(p.driveName, 'photo-$id.jpg', reason: id);
+        expect(p.driveName, 'photo-${p.fileName}', reason: id);
+        expect(photoDriveNamePattern.firstMatch(p.driveName!)![1], id);
+      }
+    });
+
+    test('only a JPEG travels: any other kind has no name there', () {
+      expect(const PhotoRef(id: 'a').syncable, isTrue);
+      expect(const PhotoRef(id: 'a', ext: 'jpg').syncable, isTrue);
+      for (final ext in photoExtensions.where((e) => e != 'jpg')) {
+        final p = PhotoRef(id: 'a', ext: ext);
+        expect(p.syncable, isFalse, reason: ext);
+        expect(p.driveName, isNull, reason: ext);
+      }
+    });
+
+    test('the pattern takes a name this makes, and no other', () {
+      for (final good in [
+        'photo-a.jpg',
+        'photo-${'x' * 40}.jpg',
+        'photo-a_B-9.jpg',
+      ]) {
+        expect(photoDriveNamePattern.hasMatch(good), isTrue, reason: good);
+      }
+      for (final bad in [
+        'photo-.jpg',
+        'photo-${'x' * 41}.jpg',
+        'photo-a.png',
+        'photo-a.jpeg',
+        'photo-a.JPG',
+        'photo-a.jpg.tmp',
+        'photo-a.jpg ',
+        ' photo-a.jpg',
+        'photo-a/b.jpg',
+        'photo-a b.jpg',
+        'photo-a.b.jpg',
+        'Photo-a.jpg',
+        'a.jpg',
+        'photo_a.jpg',
+        'xphoto-a.jpg',
+        'photo-a.jpg\n',
+      ]) {
+        expect(photoDriveNamePattern.hasMatch(bad), isFalse, reason: bad);
+      }
+    });
+
+    test('is never taken for a record, nor a record for a picture', () {
+      // (the sync of the records reads every file whose name is a record's:
+      // a picture must never be one, and the mail of the finances is "fin-")
+      for (final kind in syncedKinds) {
+        expect(
+          recordFileNamePattern.hasMatch('photo-a.jpg'),
+          isFalse,
+          reason: kind,
+        );
+        expect(
+          safeRecordFileNamePattern.hasMatch('photo-a.jpg'),
+          isFalse,
+          reason: kind,
+        );
+        expect(
+          photoDriveNamePattern.hasMatch(recordFileName(kind, 'a')),
+          isFalse,
+          reason: kind,
+        );
+        expect(kind.startsWith(photoDrivePrefix), isFalse, reason: kind);
+      }
+      expect('fin-peer-x.json'.startsWith(photoDrivePrefix), isFalse);
+      expect(photoDrivePrefix.startsWith('fin-'), isFalse);
+    });
+
+    test('a reference read from a record has a name that fits the pattern', () {
+      final p = PhotoRef.tryParse({'id': 'a1', 'w': 1, 'h': 1, 'b': 1})!;
+      expect(photoDriveNamePattern.hasMatch(p.driveName!), isTrue);
+      final other = PhotoRef.tryParse({'id': 'a1', 'x': 'heic'})!;
+      expect(other.driveName, isNull);
+    });
+  });
 }

@@ -414,7 +414,8 @@ class _BackupBodyState extends ConsumerState<BackupBody> {
           'Teljes mentés a naptárról, a pénzügyekről, a feladatokról, a '
           'check-inekről, a kézikönyvről, az edzésnaplóról, az étkezési '
           'naplóról, a napló bejegyzéseinek szövegéről és a beállításokról '
-          '(a napló képei nincsenek benne). A program '
+          '(a napló képei nincsenek benne: azok a Drive-szinkronnal kerülnek '
+          'a Drive-ra). A program '
           'indulásakor, legfeljebb naponta egyszer készül; az utolsó 7 nap '
           'mentéséből a napi legfrissebb, előtte 4 hétre hetente egy marad meg.',
         ),

@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:kvantum_app/ai/ai_providers.dart';
@@ -7,7 +8,11 @@ import 'package:kvantum_app/ai/ai_settings.dart';
 import 'package:kvantum_app/ai/settings/account_card.dart';
 import 'package:kvantum_app/ai/settings_page.dart';
 import 'package:kvantum_app/data/db.dart';
+import 'package:kvantum_app/data/record_repository.dart';
+import 'package:kvantum_app/drive/photo_sync.dart';
+import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/error_catalog.dart';
+import 'package:kvantum_app/sync/photo_sync_switch.dart';
 import 'package:kvantum_app/sync/remote.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_app/ui/diagnostics_page.dart';
@@ -35,6 +40,8 @@ class _Ctl extends SyncController {
   Future<void> syncNow({bool manual = false}) async =>
       calls.add(manual ? 'now-manual' : 'now');
   @override
+  void requestSync() => calls.add('request');
+  @override
   Future<void> resetSync() async => calls.add('reset');
   @override
   Future<void> keepLocalAfterMismatch() async => calls.add('keep');
@@ -49,6 +56,7 @@ SyncState signedIn({
   DateTime? last,
   SyncBindingMismatch? mismatch,
   ({int done, int total})? upload,
+  String? photoNote,
 }) => SyncState(
   configured: true,
   signedIn: true,
@@ -60,6 +68,7 @@ SyncState signedIn({
   lastSync: last ?? DateTime(2026, 11, 12, 9, 30),
   mismatch: mismatch,
   upload: upload,
+  photoNote: photoNote,
 );
 
 void main() {
@@ -76,15 +85,20 @@ void main() {
     WidgetTester tester, {
     SyncState? state,
     bool settle = true,
+    double? textScale,
+    Size size = const Size(900, 6400),
+    Future<void> Function(AppDatabase db)? seed,
   }) async {
     // tall, so that the whole list is built at once
-    useSize(tester, size: const Size(900, 6400));
+    useSize(tester, size: size);
     db = await newDb();
+    if (seed != null) await tester.runAsync(() => seed(db));
     ctl = state == null ? null : _Ctl(state);
     await tester.pumpWidget(
       app(
         const SettingsPage(),
         db,
+        textScale: textScale,
         extra: [
           apiKeyStoreProvider.overrideWithValue(MemoryApiKeyStore(null)),
           currentBuildProvider.overrideWith((ref) async => 7),
@@ -192,6 +206,111 @@ void main() {
         await shutdown(tester, db);
       },
     );
+  });
+
+  group('the pictures on the account card', () {
+    ProviderContainer scope(WidgetTester tester) =>
+        ProviderScope.containerOf(tester.element(find.byType(SettingsPage)));
+
+    Future<String?> kept(WidgetTester tester) => tester
+        .runAsync(
+          () => scope(tester).read(recordRepoProvider).meta(photoSyncKey),
+        )
+        .then((v) => v);
+
+    bool isOn(WidgetTester tester) => tester
+        .widget<SwitchListTile>(find.byKey(const Key('photo-sync-switch')))
+        .value;
+
+    testWidgets('a signed-in account has the switch, on from the start, with '
+        'its words', (tester) async {
+      await boot(tester, state: signedIn());
+      expect(find.byKey(const Key('photo-sync-switch')), findsOneWidget);
+      expect(find.text('Képek szinkronja'), findsOneWidget);
+      expect(find.text(photoSyncSwitchHelp), findsOneWidget);
+      expect(photoSyncSwitchHelp, contains('Google Drive'));
+      expect(photoSyncSwitchHelp, contains('Mobilneten'));
+      expect(isOn(tester), isTrue);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('is not offered to someone who is not signed in', (
+      tester,
+    ) async {
+      await boot(
+        tester,
+        state: const SyncState(configured: true, signedIn: false),
+      );
+      expect(find.byKey(const Key('photo-sync-switch')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a tap turns it off, and that is kept on this device', (
+      tester,
+    ) async {
+      await boot(tester, state: signedIn());
+      await tester.tap(find.byKey(const Key('photo-sync-switch')));
+      await tester.pumpAndSettle();
+      expect(isOn(tester), isFalse);
+      expect(await kept(tester), 'off');
+      expect(ctl!.calls, isNot(contains('request')), reason: 'nothing to send');
+      await shutdown(tester, db);
+    });
+
+    testWidgets('a second tap turns it on, and asks the sync to run', (
+      tester,
+    ) async {
+      await boot(tester, state: signedIn());
+      await tester.tap(find.byKey(const Key('photo-sync-switch')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('photo-sync-switch')));
+      await tester.pumpAndSettle();
+      expect(isOn(tester), isTrue);
+      expect(await kept(tester), isNull, reason: 'on is what nothing says');
+      expect(ctl!.calls, ['request']);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('starts off when it was turned off before', (tester) async {
+      await boot(
+        tester,
+        state: signedIn(),
+        seed: (db) =>
+            RecordRepository(db, deviceId: 'x').setMeta(photoSyncKey, 'off'),
+      );
+      expect(isOn(tester), isFalse);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('the line about the pictures is there when the run had '
+        'something to say', (tester) async {
+      await boot(tester, state: signedIn());
+      expect(find.byKey(const Key('account-photo-note')), findsNothing);
+      await shutdown(tester, db);
+      await boot(
+        tester,
+        state: signedIn(photoNote: 'Képek: 2 feltöltve, még 1 vár.'),
+      );
+      expect(find.text('Képek: 2 feltöltve, még 1 vár.'), findsOneWidget);
+      expect(find.byKey(const Key('account-photo-note')), findsOneWidget);
+      // (it is no error: the card is not red and does not say "Hiba")
+      expect(find.byKey(const Key('account-error')), findsNothing);
+      await shutdown(tester, db);
+    });
+
+    testWidgets('fits at the largest text size on a phone', (tester) async {
+      await boot(
+        tester,
+        state: signedIn(
+          photoNote: 'Képek: 12 feltöltve, 3 letöltve, még 5 vár.',
+        ),
+        textScale: 2,
+        size: const Size(360, 6400),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('photo-sync-switch')), findsOneWidget);
+      await shutdown(tester, db);
+    });
   });
 
   group('the account card', () {

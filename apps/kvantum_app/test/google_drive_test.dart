@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -579,6 +580,291 @@ void main() {
     test('delete ignores an already deleted file', () async {
       final f = Fake((r) => _err(404, 'gone'));
       await GoogleDriveRemote(f.client).delete('x');
+    });
+  });
+
+  group('files of bytes (the pictures of the diary)', () {
+    // (not text: bytes that are no UTF-8, as a JPEG begins)
+    final jpeg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x80, 0x00, 0x7F]);
+
+    http.Response bytesOf(List<int> b) =>
+        http.Response.bytes(b, 200, headers: {'content-type': 'image/jpeg'});
+
+    test('are read as they are, which the text read cannot do', () async {
+      final f = Fake((r) => bytesOf(jpeg));
+      expect(
+        await GoogleDriveRemote(f.client).readBytes('a', maxBytes: 100),
+        jpeg,
+      );
+      expect(f.reqs.single.method, 'GET');
+      expect(f.reqs.single.url.path, endsWith('/files/a'));
+      expect(f.reqs.single.url.queryParameters['alt'], 'media');
+      await expectLater(
+        GoogleDriveRemote(Fake((r) => bytesOf(jpeg)).client).read('a'),
+        throwsFormatException,
+      );
+    });
+
+    test('a file that is gone is null', () async {
+      final gone = Fake((r) => _err(404, 'not found'));
+      expect(
+        await GoogleDriveRemote(gone.client).readBytes('a', maxBytes: 100),
+        isNull,
+      );
+    });
+
+    group('are not read beyond the size that was asked for', () {
+      /// A server that says the file is [announced] bytes long and gives
+      /// [chunks].
+      GoogleDriveRemote server(
+        int announced,
+        List<List<int>> chunks, {
+        int textLimit = 1000,
+      }) {
+        final body = StreamController<List<int>>();
+        chunks.forEach(body.add);
+        body.close();
+        return GoogleDriveRemote(
+          MockClient.streaming(
+            (req, _) async => http.StreamedResponse(
+              body.stream,
+              200,
+              headers: {
+                'content-type': 'image/jpeg',
+                'content-length': '$announced',
+              },
+            ),
+          ),
+          maxReadBytes: textLimit,
+        );
+      }
+
+      test('exactly the limit is read, one byte more is refused', () async {
+        final ten = List.filled(10, 7);
+        expect(
+          await server(10, [ten]).readBytes('a', maxBytes: 10),
+          Uint8List.fromList(ten),
+        );
+        await expectLater(
+          server(11, [List.filled(11, 7)]).readBytes('a', maxBytes: 10),
+          throwsA(isA<DriveFileTooBig>()),
+        );
+      });
+
+      test('a size announced over the limit is refused, and told', () {
+        return expectLater(
+          server(11, [
+            [1],
+          ]).readBytes('a', maxBytes: 10),
+          throwsA(isA<DriveFileTooBig>().having((e) => e.bytes, 'bytes', 11)),
+        );
+      });
+
+      test('what really arrives counts, whatever the server announced', () {
+        // (nothing announced that is too much, but twelve bytes come)
+        return expectLater(
+          server(5, [
+            List.filled(7, 1),
+            List.filled(5, 1),
+          ]).readBytes('a', maxBytes: 10),
+          throwsA(isA<DriveFileTooBig>().having((e) => e.bytes, 'bytes', 12)),
+        );
+      });
+
+      test('the limit is the one asked for, not the one for text', () async {
+        // (a picture is bigger than any record: its own limit applies)
+        final fifteen = List.filled(15, 3);
+        final remote = server(15, [fifteen], textLimit: 10);
+        expect(
+          await remote.readBytes('a', maxBytes: 20),
+          Uint8List.fromList(fifteen),
+        );
+        await expectLater(
+          server(15, [fifteen], textLimit: 10).read('a'),
+          throwsA(isA<DriveFileTooBig>()),
+        );
+      });
+    });
+
+    test(
+      'are created in appDataFolder with the name and the media type',
+      () async {
+        final f = Fake((r) => _json({'id': 'new1'}));
+        final id = await GoogleDriveRemote(f.client).writeBytes(
+          name: 'photo-a1.jpg',
+          bytes: jpeg,
+          contentType: 'image/jpeg',
+        );
+        expect(id, 'new1');
+        final r = f.reqs.single;
+        expect(r.method, 'POST');
+        expect(r.url.path, contains('/upload/drive/v3/files'));
+        expect(r.url.queryParameters['uploadType'], 'multipart');
+        expect(r.body, contains('"name":"photo-a1.jpg"'));
+        expect(r.body, contains('"mimeType":"image/jpeg"'));
+        expect(r.body, contains('appDataFolder'));
+        expect(r.body.toLowerCase(), contains('content-type: image/jpeg'));
+        // the bytes travel base64-encoded inside the multipart body
+        expect(r.body, contains(base64.encode(jpeg)));
+      },
+    );
+
+    test(
+      'are overwritten by id (PATCH), and created again when gone',
+      () async {
+        final upd = Fake((r) => _json({'id': 'f1'}));
+        expect(
+          await GoogleDriveRemote(upd.client).writeBytes(
+            fileId: 'f1',
+            name: 'photo-a1.jpg',
+            bytes: jpeg,
+            contentType: 'image/jpeg',
+          ),
+          'f1',
+        );
+        expect(upd.reqs.single.method, 'PATCH');
+        expect(upd.reqs.single.url.path, endsWith('/files/f1'));
+        expect(upd.reqs.single.body, contains(base64.encode(jpeg)));
+
+        var n = 0;
+        final gone = Fake(
+          (r) => ++n == 1 ? _err(404, 'File not found') : _json({'id': 'f2'}),
+        );
+        expect(
+          await GoogleDriveRemote(gone.client).writeBytes(
+            fileId: 'f1',
+            name: 'photo-a1.jpg',
+            bytes: jpeg,
+            contentType: 'image/jpeg',
+          ),
+          'f2',
+        );
+        expect(gone.reqs.last.method, 'POST');
+        expect(gone.reqs.last.body, contains('"name":"photo-a1.jpg"'));
+        expect(gone.reqs.last.body, contains('"mimeType":"image/jpeg"'));
+      },
+    );
+
+    test('a text file keeps its media type', () async {
+      final f = Fake((r) => _json({'id': 'n'}));
+      await GoogleDriveRemote(f.client)
+          .write(name: 'task-1.json', content: '{}');
+      expect(f.reqs.single.body, contains('"mimeType":"application/json"'));
+      expect(
+        f.reqs.single.body.toLowerCase(),
+        contains('content-type: application/json'),
+      );
+    });
+
+    test('a full Drive is a refusal of this file, not a pause', () async {
+      final f = Fake(
+        (r) => _err(
+          403,
+          'The user storage quota exceeded',
+          'storageQuotaExceeded',
+        ),
+      );
+      await expectLater(
+        GoogleDriveRemote(f.client).writeBytes(
+          name: 'photo-a1.jpg',
+          bytes: jpeg,
+          contentType: 'image/jpeg',
+        ),
+        throwsA(
+          isA<ItemRejectedError>()
+              .having((e) => e.status, 'status', 403)
+              .having((e) => e.reason, 'reason', 'storageQuotaExceeded'),
+        ),
+      );
+    });
+
+    test('a full Drive, as Google files it (the limits of usage), says what '
+        'it is in the text, which is what the picture sync goes by', () async {
+      final f = Fake(
+        (r) => _json({
+          'error': {
+            'code': 403,
+            'message': "The user's Drive storage quota has been exceeded.",
+            'errors': [
+              {'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'},
+            ],
+          },
+        }, 403),
+      );
+      await expectLater(
+        GoogleDriveRemote(f.client).writeBytes(
+          name: 'photo-a1.jpg',
+          bytes: jpeg,
+          contentType: 'image/jpeg',
+        ),
+        throwsA(
+          isA<DriveTransientError>()
+              .having((e) => e.throttled, 'throttled', isTrue)
+              .having(
+                (e) => e.message.toLowerCase(),
+                'message',
+                contains('storagequotaexceeded'),
+              ),
+        ),
+      );
+    });
+
+    test('a limit, a server error and a dead network are a pause', () async {
+      for (final h in <http.Response Function(http.Request)>[
+        (r) => _err(429, 'slow down', 'rateLimitExceeded'),
+        (r) => _err(503, 'x'),
+        (r) => throw const SocketException('no net'),
+      ]) {
+        await expectLater(
+          GoogleDriveRemote(Fake(h).client).readBytes('a', maxBytes: 10),
+          throwsA(isA<DriveTransientError>()),
+        );
+        await expectLater(
+          GoogleDriveRemote(Fake(h).client).writeBytes(
+            name: 'photo-a.jpg',
+            bytes: jpeg,
+            contentType: 'image/jpeg',
+          ),
+          throwsA(isA<DriveTransientError>()),
+        );
+      }
+    });
+
+    group('listed by name', () {
+      test(
+        'tell when each was made, and nothing for what does not say',
+        () async {
+          final f = Fake(
+            (r) => _json({
+              'files': [
+                {
+                  'id': 'b',
+                  'name': 'photo-b.jpg',
+                  'createdTime': '2026-11-03T10:30:00.000Z',
+                },
+                {'id': 'a', 'name': 'photo-a.jpg'},
+                {
+                  'id': 'x',
+                  'name': 'task-x.json',
+                  'createdTime': '2026-11-01T00:00:00Z',
+                },
+              ],
+            }),
+          );
+          final names = await GoogleDriveRemote(f.client).listNames('photo-');
+          expect(
+            [for (final n in names) n.name],
+            ['photo-a.jpg', 'photo-b.jpg'],
+          );
+          expect(names.first.created, isNull);
+          expect(names.last.created, DateTime.utc(2026, 11, 3, 10, 30));
+          expect(
+            f.reqs.single.url.queryParameters['fields'],
+            contains('createdTime'),
+          );
+          expect(f.reqs.single.url.queryParameters['spaces'], 'appDataFolder');
+        },
+      );
     });
   });
 

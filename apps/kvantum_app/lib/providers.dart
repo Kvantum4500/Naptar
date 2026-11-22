@@ -272,7 +272,7 @@ final monthOccurrencesProvider =
 
 /// Where the pictures of the diary are kept: a folder on this device (the
 /// app gives it in `main.dart`; until then, and in tests, they are kept in
-/// memory). They are not records and do not travel.
+/// memory). They are not records; the picture sync carries them to Drive.
 final photoFilesProvider = Provider<PhotoFiles>((_) => MemoryPhotoFiles());
 
 /// The unsaved start of a new diary entry (on this device only).
