@@ -792,12 +792,27 @@ Tesztek: mag 1902 (volt 1663), app 3289 (volt 2845); az elemzők és a formázá
 |---|---|---|
 | étkezés és folyadék | kész | rekordfajta `intake` (havonta egy rekord, tételenként egy mező); kalória + makrók + saját ételek, gyors italgombok, nap-léptető, napi célok (nincs egészségügyi alapérték), 7 / 30 napos trend célvonallal; Visszavonás; a modellnek semmi nem megy el |
 | Napló – bejegyzések | kész | rekordfajta `journal` (bejegyzésenként egy rekord); idővonal, szerkesztő (piszkozat, megerősítés, Visszavonás), keresés; a szöveg a Drive-ra és a mentésbe kerül |
-| Napló – képek | kész, élő próba nélkül | legföljebb 12 kép; a motor dekódol és kicsinyít (1600 px), az `image` csomag JPEG-et ír (85-ös minőség, EXIF nélkül); a képek csak az eszközön vannak (`journal/photos`), nincsenek a Drive-on és a mentésben; képnéző (lapozás, nagyítás); az árva képet a napi karbantartás 2 nap után törli |
+| Napló – képek | kész, élő próba nélkül | legföljebb 12 kép; a motor dekódol és kicsinyít (1600 px), az `image` csomag JPEG-et ír (85-ös minőség, EXIF nélkül); a képek csak az eszközön vannak (`journal/photos`), nincsenek a Drive-on és a mentésben; képnéző (lapozás, nagyítás); az árva képet a napi karbantartás 2 nap után törli *(a 9. körben megfordult: a képek szinkronizálnak a Drive-on át, kapcsolóval)* |
 | szinkronizált beállítások | kész (megfordítja a 2026-11-13-i és a 2026-11-15-i döntést) | `settings/pay`, `settings/goals`, `settings/plan`; mezőnként a későbbi nyer; átvétel a régi `meta` kulcsokból az első indításkor; a mentésben is; az asszisztensnek nem megy el |
 | navigáció | kész | Naptár · Feladatok · Napló · Pénzügyek · Több; az Asszisztens a „Több” menüben |
 | „Hibanapló” | kész | a Diagnosztika „Napló” szavai átneveződtek, hogy ne ütközzenek az új fül nevével |
 | megfigyelések | nyitva | (1) a galéria-választó és a kép-feldolgozás valódi telefonon (memória, sebesség, a megölt háttér utáni piszkozat), a Windows fájlablak, a HEIC; (2) a képnéző érintésérzete és a két lap kinézete valódi képernyőn; (3) a mezőnkénti szinkron két valódi eszközön és az átvétel a régi helyről; (4) a képernyőolvasó (TalkBack, Narrator) az új oldalakon |
-| későbbre | nem része a körnek | a képek szinkronja / külön mentése; kamera közvetlenül az appból (új engedély és csomag); AI-becslés a kalóriára; vonalkód és ételadatbázis; „igyál vizet” emlékeztető; helyi válasz („mennyi kalóriát ettem ma?”); naptár-összekötés |
+| későbbre | nem része a körnek | a képek külön mentése (a szinkronjuk a 9. körben kész); kamera közvetlenül az appból (új engedély és csomag); AI-becslés a kalóriára; vonalkód és ételadatbázis; „igyál vizet” emlékeztető; helyi válasz („mennyi kalóriát ettem ma?”); naptár-összekötés |
+
+## 9. kör
+
+### A 8. kör ismert korlátainak javítása (a képek szinkronja, HEIC, `.tmp`, étkezés-hiba) – kész, a build után kipróbálandó
+
+Tesztek: mag 1907 (volt 1902), app 3450 (volt 3289); az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0). Szándékos elrontás: **229** (az első menetben 199 elbukott, 29 tesztrést jelzett; mind kapott tesztet, most mind elbukik). Az önátnézés két szűkítést talált a képmotoron (a Drive-ról csak olyan kép törlődhet, amelyre semmilyen élő rekord nem hivatkozik; a hibázó átvitel egyre ritkábban próbálkozik), és egy hibát a telt Drive felismerésében (lásd a döntési naplót).
+
+| Tétel | Állapot | Megjegyzés |
+|---|---|---|
+| a képek szinkronja | kész, valódi Drive nélkül | külön motor és csatorna (`PhotoSyncEngine`, `photos`): `photo-<azonosító>.jpg` a Drive `appData`-ban; képenként ≤ 3 MiB, futásonként 6 + 6; visszalépés 1 perctől 6 óráig (a hiányzó és a hibázó képre is); kapcsoló eszközönként (alapból be); napi Drive-rendrakás 7 nap türelemmel és fékkel; a tele Drive felismerése a szövegből; **nincs a mentés-zipben** (a Drive a másolat); a rekord-szinkronhoz nem nyúl |
+| HEIC / HEIF | kész | nincs „eredetiben megtartás”: minden eltett kép EXIF-mentes JPEG; a HEIC külön üzenetet kap; a régi eredetiek olvashatók, de nem szinkronizálnak |
+| a megszakadt képírás (`.tmp`) | kész | a napi takarítás az 1 óránál régebbi maradékot törli; idegen fájlhoz és mappához nem nyúl |
+| az étkezés-mentés hibája | kész | az űrlapon belüli mentés (foglalt jelző, `PopScope`), hibasor az űrlapon, a kuka és a gyors italgombok sávja a hiba színeiben; hibanapló-kódok |
+| megfigyelések | nyitva | (1) a valódi Google Drive: feltöltés, letöltés, lassú net, a mobilnet-forgalom, a telt tárhely szövege; (2) a galéria és a Windows fájlablak (a HEIC üzenet); (3) a TalkBack / Narrator az új soron és a kapcsolón |
+| ismert korlát | nyitva | két eszköz egyszerre ugyanahhoz a bejegyzéshez adott képe: a későbbi mentés nyer, a másik kép kimarad, és később törlődik; az étkezés-oldal olvasási hibája üres napot mutat |
 
 ## I. ZÁRÓ ÁTNÉZÉS (a teljes kör vége: 2026-11-14)
 
