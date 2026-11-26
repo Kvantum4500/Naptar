@@ -47,6 +47,85 @@ Map<String, Object?> okText(String t) => {
 };
 
 void main() {
+  group('output limits', () {
+    Future<Map<String, Object?>> bodyFor(String base, String model) async {
+      late Map<String, Object?> body;
+      await provider((r) async {
+        body = jsonDecode(r.body) as Map<String, Object?>;
+        return _json(okText('ok'));
+      }, base: base).generate(model, request());
+      return body;
+    }
+
+    test(
+      'a reply cap is always set, with the parameter name each service wants',
+      () async {
+        final other = await bodyFor('https://api.example.com/v1', 'm');
+        expect(other['max_tokens'], 2048);
+        expect(other.containsKey('max_completion_tokens'), isFalse);
+        final openai = await bodyFor('https://api.openai.com/v1', 'gpt-x');
+        expect(openai['max_completion_tokens'], 2048);
+        expect(openai.containsKey('max_tokens'), isFalse);
+      },
+    );
+
+    test('Groq gpt-oss thinks briefly; other models are left alone', () async {
+      // the preset lives in the catalog, the provider just applies it
+      Future<Map<String, Object?>> viaCatalog(String id, String model) async {
+        late Map<String, Object?> body;
+        await buildProvider(
+          LlmConfig(provider: id, apiKey: secret),
+          MockClient((r) async {
+            body = jsonDecode(r.body) as Map<String, Object?>;
+            return _json(okText('ok'));
+          }),
+        ).generate(model, request());
+        return body;
+      }
+
+      expect(
+        (await viaCatalog('groq', 'openai/gpt-oss-20b'))['reasoning_effort'],
+        'low',
+      );
+      expect(
+        (await viaCatalog(
+          'groq',
+          'llama-3.3-70b',
+        )).containsKey('reasoning_effort'),
+        isFalse,
+      );
+      expect(
+        (await viaCatalog(
+          'mistral',
+          'openai/gpt-oss-20b',
+        )).containsKey('reasoning_effort'),
+        isFalse,
+      );
+    });
+
+    test('an answer cut off by the length cap is explained', () async {
+      await expectLater(
+        provider(
+          (_) async => _json({
+            'choices': [
+              {
+                'message': {'content': ''},
+                'finish_reason': 'length',
+              },
+            ],
+          }),
+        ).generate('m', request()),
+        throwsA(
+          isA<LlmBadResponse>().having(
+            (e) => e.message,
+            'message',
+            contains('hosszkeret'),
+          ),
+        ),
+      );
+    });
+  });
+
   group('request shape', () {
     test('endpoint, bearer header (never in the URL), system + user messages, tools in function format', () async {
       late http.Request seen;
@@ -269,6 +348,30 @@ void main() {
       ) as LlmRateLimit;
       expect(e.transient, isTrue);
       expect(e.retryAfter, const Duration(seconds: 12));
+    });
+
+    test(
+      'a per-minute token limit that mentions billing is still just a wait',
+      () async {
+        final e = await status(429, {
+          'error': {
+            'message': 'Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM): Limit 8000, Used 5206, Requested 5313. Please try again in 18.8925s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing',
+          },
+        }) as LlmRateLimit;
+        expect(e.billing, isFalse);
+        expect(e.transient, isTrue);
+        expect(e.retryAfter, const Duration(seconds: 19));
+      },
+    );
+
+    test('millisecond hints are read too', () async {
+      final e = await status(429, {
+        'error': {
+          'message':
+              'Rate limit on requests per minute. Please try again in 250ms.',
+        },
+      }) as LlmRateLimit;
+      expect(e.retryAfter, const Duration(seconds: 1));
     });
 
     test('429 daily quota is recognised and not transient', () async {

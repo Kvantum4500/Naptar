@@ -8,6 +8,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../diag/diag_log.dart';
+import '../providers.dart' show appClockProvider, repoProvider;
+import '../sync/error_catalog.dart';
 import 'update_config.dart';
 import 'update_service.dart';
 
@@ -17,14 +20,49 @@ final currentBuildProvider = FutureProvider<int>((ref) async {
   return int.tryParse(info.buildNumber) ?? 0;
 });
 
-final updateServiceProvider = Provider<UpdateService>(
-  (ref) => UpdateService(
-    client: http.Client(),
-    repo: UpdateConfig.repo,
-    token: UpdateConfig.token,
-    platform: currentUpdatePlatform(),
-  ),
+/// What the updater runs with (replaced in tests).
+final updateSettingsProvider = Provider<UpdateSettings>(
+  (ref) => UpdateSettings.fromBuild(),
 );
+
+final updateServiceProvider = Provider<UpdateService>((ref) {
+  final settings = ref.watch(updateSettingsProvider);
+  return UpdateService(
+    client: http.Client(),
+    repo: settings.repo,
+    token: settings.token,
+    platform: currentUpdatePlatform(),
+    publicKeys: settings.publicKeys,
+    requireSignature: settings.requireSignature,
+    log: logUpdate,
+  );
+});
+
+/// Remembered choices of the update dialog (replaceable in tests).
+abstract class UpdatePrefs {
+  /// Also offer preview builds (releases GitHub marks as pre-release: builds
+  /// of work-in-progress branches). On unless the user switched it off.
+  Future<bool> previews();
+  Future<void> setPreviews(bool on);
+}
+
+class MetaUpdatePrefs implements UpdatePrefs {
+  MetaUpdatePrefs(this._read, this._write);
+  final Future<String?> Function(String key) _read;
+  final Future<void> Function(String key, String? value) _write;
+  static const _key = 'update.previews';
+
+  @override
+  Future<bool> previews() async => (await _read(_key)) != 'off';
+
+  @override
+  Future<void> setPreviews(bool on) => _write(_key, on ? null : 'off');
+}
+
+final updatePrefsProvider = Provider<UpdatePrefs>((ref) {
+  final repo = ref.watch(repoProvider);
+  return MetaUpdatePrefs(repo.meta, repo.setMeta);
+});
 
 /// Installs a downloaded package. Replaceable in tests.
 abstract class UpdateInstaller {
@@ -65,7 +103,8 @@ class PlatformUpdateInstaller implements UpdateInstaller {
         await launchNewApp(File(p.join(installDir.path, exeName)));
       } catch (e) {
         logUpdate('launch failed: $e');
-        return 'A frissítés telepítve, de az új verzió nem indult el ($e). Indítsd el kézzel a programot.';
+        return 'A frissítés telepítve, de az új verzió nem indult el. Indítsd '
+            'el kézzel a programot. Napló: $updateLogPath';
       }
       exit(0);
     }
@@ -116,6 +155,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
   double? _progress;
   String? _message;
   int _current = 0;
+  bool _previews = true;
 
   @override
   void initState() {
@@ -129,8 +169,25 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       _message = null;
     });
     _current = await ref.read(currentBuildProvider.future);
-    final s = await ref.read(updateServiceProvider).check(_current);
+    try {
+      _previews = await ref.read(updatePrefsProvider).previews();
+    } catch (_) {
+      _previews = true; // an unreadable preference must not stop the check
+    }
+    final s = await ref
+        .read(updateServiceProvider)
+        .check(_current, includePreviews: _previews);
     if (mounted) setState(() => _status = s);
+  }
+
+  Future<void> _setPreviews(bool on) async {
+    setState(() => _previews = on);
+    try {
+      await ref.read(updatePrefsProvider).setPreviews(on);
+    } catch (_) {
+      // the choice then only holds for this check
+    }
+    await _check();
   }
 
   Future<void> _install(UpdateAvailable a) async {
@@ -149,21 +206,63 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         },
       );
       if (mounted) setState(() => _progress = null);
+      // (right before it is handed over: still the file that was verified)
+      await svc.recheck(file);
       final msg = await ref.read(updateInstallerProvider).install(file, a.info);
       if (mounted) setState(() => _message = msg);
     } on HttpException catch (e) {
       if (mounted) setState(() => _message = e.message);
-    } on FormatException catch (e) {
+    } on FormatException catch (e, st) {
+      logUpdate('package unusable: ${e.message}');
+      ref.read(diagLogProvider).error('update', 'package.unusable', e, st);
       if (mounted) {
-        setState(() => _message = 'A csomag nem használható: ${e.message}');
+        setState(
+          () => _message =
+              'A letöltött csomag nem használható (hibás vagy sérült). '
+              'Próbáld újra.',
+        );
       }
-    } catch (e) {
+    } catch (e, st) {
+      logUpdate('update failed: $e');
+      ref.read(diagLogProvider).error('update', 'install.failed', e, st);
       if (mounted) {
-        setState(() => _message = 'A frissítés nem sikerült: $e');
+        setState(
+          () => _message = 'A frissítés nem sikerült: ${errorInfoFor(e).title}',
+        );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          // (nothing is being downloaded any more, whichever way it ended: a
+          // bar left at "Letöltés… 37%" beside an error would still look busy)
+          _progress = null;
+        });
+      }
     }
+  }
+
+  /// The note that the update token is about to run out (SEC-4), if it is: an
+  /// icon and words, not a colour alone.
+  Widget? _expiryNote(DateTime? expires) {
+    final text = tokenExpiryWarning(expires, ref.read(appClockProvider)());
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: MediaQuery.textScalerOf(context).scale(20),
+            color: Theme.of(context).colorScheme.error,
+            semanticLabel: 'Figyelmeztetés',
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, key: const Key('update-token-warning'))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -186,18 +285,27 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
           SizedBox(width: 14),
-          Text('Frissítés keresése…'),
+          Expanded(child: Text('Frissítés keresése…')),
         ],
       );
     } else {
       switch (s) {
         case UpToDate():
-          content = Text('Naprakész vagy. (Telepített verzió: $_current)');
+          final note = _expiryNote(s.tokenExpires);
+          content = Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Naprakész vagy. (Telepített verzió: $_current)'),
+              ?note,
+            ],
+          );
           actions = [
             TextButton(onPressed: _check, child: const Text('Újra ellenőriz')),
             ...actions,
           ];
         case UpdateAvailable():
+          final note = _expiryNote(s.tokenExpires);
           content = Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,6 +325,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
                 const SizedBox(height: 14),
                 LinearProgressIndicator(
                   value: _progress == 0 ? null : _progress,
+                  semanticsLabel: 'Letöltés',
                 ),
                 const SizedBox(height: 4),
                 Text('Letöltés… ${((_progress ?? 0) * 100).round()}%'),
@@ -225,6 +334,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
                 const SizedBox(height: 12),
                 Text(_message!),
               ],
+              ?note,
               if (Platform.isWindows) ...[
                 const SizedBox(height: 10),
                 const Text(
@@ -244,6 +354,7 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
         case UpdateFailed():
           content = Text(s.message);
           if (s.kind == UpdateErrorKind.network ||
+              s.kind == UpdateErrorKind.rateLimited ||
               s.kind == UpdateErrorKind.other) {
             actions = [
               TextButton(onPressed: _check, child: const Text('Újrapróbál')),
@@ -253,8 +364,32 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
       }
     }
     return AlertDialog(
+      // (large letters and the warning about the key make it longer than a
+      // phone screen: it scrolls)
+      scrollable: true,
       title: const Text('Frissítés'),
-      content: SizedBox(width: 420, child: content),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            content,
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              value: _previews,
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Előzetes (kísérleti) verziókat is keressen'),
+              subtitle: const Text(
+                'Kikapcsolva csak a „stabil”, jóváhagyott kiadásokat kínálja fel.',
+              ),
+              onChanged: _busy ? null : (v) => _setPreviews(v ?? true),
+            ),
+          ],
+        ),
+      ),
       actions: actions,
     );
   }

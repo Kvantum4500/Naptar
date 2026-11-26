@@ -1,0 +1,269 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p328917200000000\"",
+  "summary": "Naptar",
+  "description": "",
+  "updated": "2026-11-13T12:00:00.000Z",
+  "timeZone": "Europe/Budapest",
+  "accessRole": "owner",
+  "defaultReminders": [
+    {
+      "method": "popup",
+      "minutes": 10
+    }
+  ],
+  "nextSyncToken": "SYNC-TOKEN-6",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000076982397\"",
+      "id": "fort1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=fort1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Kétheti edzés",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "fort1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=MO",
+        "EXDATE;TZID=Europe/Budapest:20260518T090000"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000096273184\"",
+      "id": "utcdt1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=utcdt1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Keddi (UTC EXDATE, VALUE=DATE-TIME)",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-05T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-05T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "utcdt1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4",
+        "EXDATE;VALUE=DATE-TIME:20260512T070000Z"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000059056703\"",
+      "id": "mixed1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=mixed1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Napi, két EXDATE",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "mixed1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=DAILY;COUNT=5",
+        "EXDATE;TZID=Europe/Budapest:20260506T090000",
+        "EXDATE:20260507T070000Z"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000011118008\"",
+      "id": "dateonly1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=dateonly1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Pénteki szemét",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "date": "2026-05-29"
+      },
+      "end": {
+        "date": "2026-05-30"
+      },
+      "iCalUID": "dateonly1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;BYDAY=FR;COUNT=5",
+        "EXDATE;VALUE=DATE:20260612"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000044831702\"",
+      "id": "rdate1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=rdate1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Hétfői ebéd",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-06-01T12:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-06-01T13:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "rdate1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=WEEKLY;COUNT=3;BYDAY=MO",
+        "RDATE;TZID=Europe/Budapest:20260617T120000"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000079582223\"",
+      "id": "tworules1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=tworules1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Két szabály",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "tworules1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=DAILY;COUNT=2",
+        "RRULE:FREQ=WEEKLY;COUNT=9"
+      ]
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3400000033344047\"",
+      "id": "localdt1",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=localdt1",
+      "created": "2026-01-05T10:15:00.000Z",
+      "updated": "2026-01-06T08:10:00.495Z",
+      "summary": "Napi, helyi VALUE=DATE-TIME",
+      "creator": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "organizer": {
+        "email": "me@example.com",
+        "self": true
+      },
+      "start": {
+        "dateTime": "2026-05-04T09:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "end": {
+        "dateTime": "2026-05-04T10:00:00+02:00",
+        "timeZone": "Europe/Budapest"
+      },
+      "iCalUID": "localdt1@google.com",
+      "sequence": 0,
+      "reminders": {
+        "useDefault": true
+      },
+      "eventType": "default",
+      "recurrence": [
+        "RRULE:FREQ=DAILY;COUNT=3",
+        "EXDATE;VALUE=DATE-TIME:20260505T090000"
+      ]
+    }
+  ]
+}

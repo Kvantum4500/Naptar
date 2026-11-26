@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,7 +50,7 @@ class _HandbookPageState extends ConsumerState<HandbookPage> {
                   builder: (_) => HandbookEditorPage(id: id, title: title),
                 ),
               );
-              _load();
+              unawaited(_load());
             },
           ),
       ],
@@ -162,7 +164,9 @@ class _HandbookEditorPageState extends ConsumerState<HandbookEditorPage> {
           ],
         ),
         body: !_loaded
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+                child: CircularProgressIndicator(semanticsLabel: 'Betöltés'),
+              )
             : Padding(
                 padding: const EdgeInsets.all(12),
                 child: TextField(

@@ -1,5 +1,7 @@
-import 'package:kvantum_core/kvantum_core.dart';
+import 'dart:async';
+
 import 'package:kvantum_app/sync/remote.dart';
+import 'package:kvantum_core/kvantum_core.dart';
 
 /// In-memory stand-in for Google Calendar with etags, sync tokens and
 /// idempotent upserts (keyed by appEventId, like extendedProperties).
@@ -12,8 +14,59 @@ class FakeRemote implements RemoteCalendar {
   int _nextId = 1;
   bool isCancelled(String g) => _cancelled[g] ?? false;
   bool offline = false;
+
+  /// When set, a FULL listing only returns events ending after this instant
+  /// and reports the window, like the real adapter's "reduced data mode".
+  DateTime? windowStartUtc;
+
+  /// While set, `pull` waits for it: a slow or hung connection.
+  Completer<void>? gate;
+  int pullCalls = 0;
+
+  /// Makes every call fail with this error (e.g. an expired login).
+  Object? failWith;
   bool expireToken = false;
   int upsertCalls = 0;
+
+  /// Which account / calendar this fake claims to be (changed by tests to
+  /// simulate a different login or a re-created calendar).
+  RemoteIdentity who = const RemoteIdentity(
+    account: 'me@example.com',
+    calendar: 'cal-1',
+  );
+
+  /// While set, `pull` behaves as if the calendar did not exist any more.
+  bool calendarGone = false;
+
+  /// Events the adapter "could not read" in the next pulls.
+  List<SkippedRemote> skipped = const [];
+
+  /// Google id -> the appEventId to report for it, whatever was pushed (an
+  /// instance of a series carries a COPY of the series' appEventId).
+  final Map<String, String> inheritedAppId = {};
+
+  /// The sync token of every pull (null: a full listing).
+  final List<String?> pullTokens = [];
+
+  /// The Google id each upload carried (null: it was not linked).
+  final List<String?> upsertLinks = [];
+
+  /// Pushes in the order they arrived: (op, local id).
+  final List<(String, String)> pushLog = [];
+
+  /// Fails the Nth upsert (1-based) with this error instead of storing it.
+  final Map<int, Object> failUpsertAt = {};
+
+  /// Makes the Nth upsert (1-based) wait for its completer, after it was
+  /// logged in [pushLog]: an upload that is on the wire.
+  final Map<int, Completer<void>> upsertGateAt = {};
+
+  /// Makes every delete fail with this error (the pull still works).
+  Object? failDelete;
+
+  /// While set, a `delete` waits for it AFTER it was logged in [pushLog]: a
+  /// deletion that is on the wire (the user can act in the meantime).
+  Completer<void>? deleteGate;
   final Map<String, int> _changedAt = {};
 
   String _etag(String g) => 'etag-${_rev[g]}';
@@ -42,8 +95,20 @@ class FakeRemote implements RemoteCalendar {
   }
 
   @override
-  Future<PullResult> pull(String calendarId, String? syncToken) async {
+  Future<RemoteIdentity> identity(String calendarId) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
+    return who;
+  }
+
+  @override
+  Future<PullResult> pull(String calendarId, String? syncToken) async {
+    pullCalls++;
+    pullTokens.add(syncToken);
+    if (gate != null) await gate!.future;
+    if (failWith != null) throw failWith!;
+    if (offline) throw TransientSyncError('offline');
+    if (calendarGone) throw CalendarGoneError();
     if (expireToken && syncToken != null) {
       expireToken = false;
       throw SyncTokenExpired();
@@ -55,32 +120,56 @@ class FakeRemote implements RemoteCalendar {
       final cancelled = _cancelled[g] ?? false;
       if (syncToken == null && cancelled) continue; // full list omits deleted
       final e = events[g]!;
+      if (syncToken == null &&
+          windowStartUtc != null &&
+          !e.endUtc.isAfter(windowStartUtc!)) {
+        continue; // outside the requested window
+      }
       out.add(
         RemoteChange(
           ref: RemoteEvent(
             calendarId: calendarId,
             googleId: g,
             etag: _etag(g),
-            appEventId: appIdToGoogle.entries
-                .where((x) => x.value == g)
-                .firstOrNull
-                ?.key,
+            appEventId:
+                inheritedAppId[g] ??
+                appIdToGoogle.entries
+                    .where((x) => x.value == g)
+                    .firstOrNull
+                    ?.key,
             iCalUid: 'uid-$g',
             cancelled: cancelled,
+            isInstance: e.recurringEventId != null,
+            originalStart: e.originalStart,
           ),
           event: cancelled ? null : e,
           masterGoogleId: e.recurringEventId,
         ),
       );
     }
-    return PullResult(out, '$_clock');
+    return PullResult(
+      out,
+      '$_clock',
+      windowStartUtc: syncToken == null ? windowStartUtc : null,
+      skipped: skipped,
+    );
   }
 
   @override
   Future<PushResult> upsert(CalEvent event, {String? masterGoogleId}) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
     upsertCalls++;
-    final existing = appIdToGoogle[event.id] ?? event.googleId;
+    pushLog.add(('upsert', event.id));
+    upsertLinks.add(event.googleId);
+    final gate = upsertGateAt[upsertCalls];
+    if (gate != null) await gate.future;
+    final failure = failUpsertAt[upsertCalls];
+    if (failure != null) throw failure;
+    var existing = appIdToGoogle[event.id] ?? event.googleId;
+    // Like Google: a deleted event is not found again by our own id; writing
+    // it makes a NEW event.
+    if (existing != null && (_cancelled[existing] ?? false)) existing = null;
     if (existing != null && events.containsKey(existing)) {
       if (event.etag != null && event.etag != _etag(existing)) {
         throw ConflictException();
@@ -98,7 +187,12 @@ class FakeRemote implements RemoteCalendar {
 
   @override
   Future<void> delete(CalEvent event) async {
+    if (failWith != null) throw failWith!;
     if (offline) throw TransientSyncError('offline');
+    if (failDelete != null) throw failDelete!;
+    pushLog.add(('delete', event.id));
+    final gate = deleteGate;
+    if (gate != null) await gate.future;
     final g = event.googleId ?? appIdToGoogle[event.id];
     if (g != null && events.containsKey(g)) {
       _cancelled[g] = true;

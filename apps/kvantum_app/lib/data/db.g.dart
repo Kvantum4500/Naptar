@@ -2253,6 +2253,408 @@ class DriveFileRowsCompanion extends UpdateCompanion<DriveFileRow> {
   }
 }
 
+class $FinRowsTable extends FinRows with TableInfo<$FinRowsTable, FinRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FinRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jsonMeta = const VerificationMeta('json');
+  @override
+  late final GeneratedColumn<String> json = GeneratedColumn<String>(
+    'json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _deletedMeta = const VerificationMeta(
+    'deleted',
+  );
+  @override
+  late final GeneratedColumn<bool> deleted = GeneratedColumn<bool>(
+    'deleted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("deleted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _dirtyMeta = const VerificationMeta('dirty');
+  @override
+  late final GeneratedColumn<bool> dirty = GeneratedColumn<bool>(
+    'dirty',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("dirty" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    kind,
+    id,
+    json,
+    updatedAt,
+    deleted,
+    dirty,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'fin_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FinRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('json')) {
+      context.handle(
+        _jsonMeta,
+        json.isAcceptableOrUnknown(data['json']!, _jsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jsonMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted')) {
+      context.handle(
+        _deletedMeta,
+        deleted.isAcceptableOrUnknown(data['deleted']!, _deletedMeta),
+      );
+    }
+    if (data.containsKey('dirty')) {
+      context.handle(
+        _dirtyMeta,
+        dirty.isAcceptableOrUnknown(data['dirty']!, _dirtyMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {kind, id};
+  @override
+  FinRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FinRow(
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      json: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}json'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}deleted'],
+      )!,
+      dirty: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}dirty'],
+      )!,
+    );
+  }
+
+  @override
+  $FinRowsTable createAlias(String alias) {
+    return $FinRowsTable(attachedDatabase, alias);
+  }
+}
+
+class FinRow extends DataClass implements Insertable<FinRow> {
+  final String kind;
+  final String id;
+  final String json;
+  final int updatedAt;
+  final bool deleted;
+  final bool dirty;
+  const FinRow({
+    required this.kind,
+    required this.id,
+    required this.json,
+    required this.updatedAt,
+    required this.deleted,
+    required this.dirty,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['kind'] = Variable<String>(kind);
+    map['id'] = Variable<String>(id);
+    map['json'] = Variable<String>(json);
+    map['updated_at'] = Variable<int>(updatedAt);
+    map['deleted'] = Variable<bool>(deleted);
+    map['dirty'] = Variable<bool>(dirty);
+    return map;
+  }
+
+  FinRowsCompanion toCompanion(bool nullToAbsent) {
+    return FinRowsCompanion(
+      kind: Value(kind),
+      id: Value(id),
+      json: Value(json),
+      updatedAt: Value(updatedAt),
+      deleted: Value(deleted),
+      dirty: Value(dirty),
+    );
+  }
+
+  factory FinRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FinRow(
+      kind: serializer.fromJson<String>(json['kind']),
+      id: serializer.fromJson<String>(json['id']),
+      json: serializer.fromJson<String>(json['json']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      deleted: serializer.fromJson<bool>(json['deleted']),
+      dirty: serializer.fromJson<bool>(json['dirty']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'kind': serializer.toJson<String>(kind),
+      'id': serializer.toJson<String>(id),
+      'json': serializer.toJson<String>(json),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+      'deleted': serializer.toJson<bool>(deleted),
+      'dirty': serializer.toJson<bool>(dirty),
+    };
+  }
+
+  FinRow copyWith({
+    String? kind,
+    String? id,
+    String? json,
+    int? updatedAt,
+    bool? deleted,
+    bool? dirty,
+  }) => FinRow(
+    kind: kind ?? this.kind,
+    id: id ?? this.id,
+    json: json ?? this.json,
+    updatedAt: updatedAt ?? this.updatedAt,
+    deleted: deleted ?? this.deleted,
+    dirty: dirty ?? this.dirty,
+  );
+  FinRow copyWithCompanion(FinRowsCompanion data) {
+    return FinRow(
+      kind: data.kind.present ? data.kind.value : this.kind,
+      id: data.id.present ? data.id.value : this.id,
+      json: data.json.present ? data.json.value : this.json,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deleted: data.deleted.present ? data.deleted.value : this.deleted,
+      dirty: data.dirty.present ? data.dirty.value : this.dirty,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FinRow(')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('json: $json, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deleted: $deleted, ')
+          ..write('dirty: $dirty')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(kind, id, json, updatedAt, deleted, dirty);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FinRow &&
+          other.kind == this.kind &&
+          other.id == this.id &&
+          other.json == this.json &&
+          other.updatedAt == this.updatedAt &&
+          other.deleted == this.deleted &&
+          other.dirty == this.dirty);
+}
+
+class FinRowsCompanion extends UpdateCompanion<FinRow> {
+  final Value<String> kind;
+  final Value<String> id;
+  final Value<String> json;
+  final Value<int> updatedAt;
+  final Value<bool> deleted;
+  final Value<bool> dirty;
+  final Value<int> rowid;
+  const FinRowsCompanion({
+    this.kind = const Value.absent(),
+    this.id = const Value.absent(),
+    this.json = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deleted = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FinRowsCompanion.insert({
+    required String kind,
+    required String id,
+    required String json,
+    this.updatedAt = const Value.absent(),
+    this.deleted = const Value.absent(),
+    this.dirty = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : kind = Value(kind),
+       id = Value(id),
+       json = Value(json);
+  static Insertable<FinRow> custom({
+    Expression<String>? kind,
+    Expression<String>? id,
+    Expression<String>? json,
+    Expression<int>? updatedAt,
+    Expression<bool>? deleted,
+    Expression<bool>? dirty,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (kind != null) 'kind': kind,
+      if (id != null) 'id': id,
+      if (json != null) 'json': json,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deleted != null) 'deleted': deleted,
+      if (dirty != null) 'dirty': dirty,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FinRowsCompanion copyWith({
+    Value<String>? kind,
+    Value<String>? id,
+    Value<String>? json,
+    Value<int>? updatedAt,
+    Value<bool>? deleted,
+    Value<bool>? dirty,
+    Value<int>? rowid,
+  }) {
+    return FinRowsCompanion(
+      kind: kind ?? this.kind,
+      id: id ?? this.id,
+      json: json ?? this.json,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deleted: deleted ?? this.deleted,
+      dirty: dirty ?? this.dirty,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (json.present) {
+      map['json'] = Variable<String>(json.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (deleted.present) {
+      map['deleted'] = Variable<bool>(deleted.value);
+    }
+    if (dirty.present) {
+      map['dirty'] = Variable<bool>(dirty.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FinRowsCompanion(')
+          ..write('kind: $kind, ')
+          ..write('id: $id, ')
+          ..write('json: $json, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deleted: $deleted, ')
+          ..write('dirty: $dirty, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2261,6 +2663,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $MetaRowsTable metaRows = $MetaRowsTable(this);
   late final $RecordRowsTable recordRows = $RecordRowsTable(this);
   late final $DriveFileRowsTable driveFileRows = $DriveFileRowsTable(this);
+  late final $FinRowsTable finRows = $FinRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2271,6 +2674,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     metaRows,
     recordRows,
     driveFileRows,
+    finRows,
   ];
 }
 
@@ -3475,6 +3879,226 @@ typedef $$DriveFileRowsTableProcessedTableManager =
       DriveFileRow,
       PrefetchHooks Function()
     >;
+typedef $$FinRowsTableCreateCompanionBuilder = FinRowsCompanion Function({
+  required String kind,
+  required String id,
+  required String json,
+  Value<int> updatedAt,
+  Value<bool> deleted,
+  Value<bool> dirty,
+  Value<int> rowid,
+});
+typedef $$FinRowsTableUpdateCompanionBuilder = FinRowsCompanion Function({
+  Value<String> kind,
+  Value<String> id,
+  Value<String> json,
+  Value<int> updatedAt,
+  Value<bool> deleted,
+  Value<bool> dirty,
+  Value<int> rowid,
+});
+
+class $$FinRowsTableFilterComposer
+    extends Composer<_$AppDatabase, $FinRowsTable> {
+  $$FinRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FinRowsTableOrderingComposer
+    extends Composer<_$AppDatabase, $FinRowsTable> {
+  $$FinRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get json => $composableBuilder(
+    column: $table.json,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get deleted => $composableBuilder(
+    column: $table.deleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get dirty => $composableBuilder(
+    column: $table.dirty,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FinRowsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FinRowsTable> {
+  $$FinRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get json =>
+      $composableBuilder(column: $table.json, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get deleted =>
+      $composableBuilder(column: $table.deleted, builder: (column) => column);
+
+  GeneratedColumn<bool> get dirty =>
+      $composableBuilder(column: $table.dirty, builder: (column) => column);
+}
+
+class $$FinRowsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FinRowsTable,
+          FinRow,
+          $$FinRowsTableFilterComposer,
+          $$FinRowsTableOrderingComposer,
+          $$FinRowsTableAnnotationComposer,
+          $$FinRowsTableCreateCompanionBuilder,
+          $$FinRowsTableUpdateCompanionBuilder,
+          (FinRow, BaseReferences<_$AppDatabase, $FinRowsTable, FinRow>),
+          FinRow,
+          PrefetchHooks Function()
+        > {
+  $$FinRowsTableTableManager(_$AppDatabase db, $FinRowsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FinRowsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FinRowsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FinRowsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> kind = const Value.absent(),
+                Value<String> id = const Value.absent(),
+                Value<String> json = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<bool> deleted = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FinRowsCompanion(
+                kind: kind,
+                id: id,
+                json: json,
+                updatedAt: updatedAt,
+                deleted: deleted,
+                dirty: dirty,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String kind,
+                required String id,
+                required String json,
+                Value<int> updatedAt = const Value.absent(),
+                Value<bool> deleted = const Value.absent(),
+                Value<bool> dirty = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FinRowsCompanion.insert(
+                kind: kind,
+                id: id,
+                json: json,
+                updatedAt: updatedAt,
+                deleted: deleted,
+                dirty: dirty,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$FinRowsTable, FinRow>(table),
+                  BaseReferences<_$AppDatabase, $FinRowsTable, FinRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FinRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FinRowsTable,
+      FinRow,
+      $$FinRowsTableFilterComposer,
+      $$FinRowsTableOrderingComposer,
+      $$FinRowsTableAnnotationComposer,
+      $$FinRowsTableCreateCompanionBuilder,
+      $$FinRowsTableUpdateCompanionBuilder,
+      (FinRow, BaseReferences<_$AppDatabase, $FinRowsTable, FinRow>),
+      FinRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3489,4 +4113,6 @@ class $AppDatabaseManager {
       $$RecordRowsTableTableManager(_db, _db.recordRows);
   $$DriveFileRowsTableTableManager get driveFileRows =>
       $$DriveFileRowsTableTableManager(_db, _db.driveFileRows);
+  $$FinRowsTableTableManager get finRows =>
+      $$FinRowsTableTableManager(_db, _db.finRows);
 }

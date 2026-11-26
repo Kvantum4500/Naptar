@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:kvantum_core/kvantum_core.dart';
 import 'package:test/test.dart';
 
@@ -120,6 +122,39 @@ void main() {
     });
   });
 
+  group('a record file from a newer version', () {
+    test('is told apart from a corrupt one (and never mistaken for it)', () {
+      const newer =
+          '{"v":2,"id":"a","kind":"task","f":{"title":{"x":"a different shape"}}}';
+      expect(
+        () => SyncRecord.decode(newer),
+        throwsA(isA<NewerFormatException>()),
+      );
+      // it is still a FormatException for old code that catches only that,
+      // but the newer-version check comes before the field checks
+      try {
+        SyncRecord.decode(newer);
+      } on NewerFormatException catch (e) {
+        expect(e.version, 2);
+      }
+    });
+
+    test('the version of this build and an old file without one read fine', () {
+      final r = task('7', taskFields(title: 'x'));
+      expect(r.toJson()['v'], syncRecordVersion);
+      expect(SyncRecord.decode(r.encode()).sameAs(r), isTrue);
+      final old = r.toJson()..remove('v');
+      expect(SyncRecord.decode(jsonEncode(old)).sameAs(r), isTrue);
+    });
+
+    test('a real corrupt file is still just a FormatException', () {
+      expect(
+        () => SyncRecord.decode('{"v":1,"id":1}'),
+        throwsA(isNot(isA<NewerFormatException>())),
+      );
+    });
+  });
+
   group('Task model', () {
     test('defaults and validation', () {
       final t = TaskView(task('1', taskFields(title: '  Bevásárlás  ')));
@@ -209,6 +244,28 @@ void main() {
         'checkin-2026-11-04.json',
       );
       expect(recordFileName(kindTask, 'abc'), 'task-abc.json');
+    });
+  });
+
+  group('a number that is no number', () {
+    test('is no priority, no estimate, no rating - and no crash', () {
+      final task = SyncRecord(id: 'a', kind: kindTask).edit(
+        {
+          'title': 'x',
+          'priority': double.infinity,
+          'energyNeed': double.nan,
+          'estimateMin': double.negativeInfinity,
+        },
+        ts: 1,
+        dev: 'A',
+      );
+      final t = TaskView(task);
+      expect((t.priority, t.energyNeed, t.estimateMin), (2, 3, null));
+      final day = SyncRecord(
+        id: '2026-11-16',
+        kind: kindCheckIn,
+      ).edit({'physical': double.infinity, 'mood': 4}, ts: 1, dev: 'A');
+      expect((CheckInView(day).physical, CheckInView(day).mood), (null, 4));
     });
   });
 }

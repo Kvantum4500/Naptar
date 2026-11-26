@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kvantum_app/google/rrule_convert.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 const bp = 'Europe/Budapest';

@@ -1,4 +1,5 @@
-import 'package:kvantum_core/kvantum_core.dart';
+import 'recurrence.dart';
+import 'time.dart';
 
 final _until = RegExp(r'UNTIL=(\d{8})(?:T(\d{6})Z?)?');
 
@@ -16,8 +17,8 @@ DateTime _parseUntil(String ymd, String? hms) => DateTime.utc(
   hms == null ? 59 : int.parse(hms.substring(4, 6)),
 );
 
-/// Google -> local. Google's UNTIL is a UTC instant (timed) or a date
-/// (all-day). Locally UNTIL is a FLOATING wall-clock limit (the day on which
+/// Google / iCalendar -> local. The UNTIL of both is a UTC instant (timed) or
+/// a date (all-day). Locally UNTIL is a FLOATING wall-clock limit (the day on which
 /// an occurrence may still start), which is what the recurrence engine and
 /// the rule editor work with.
 String rruleFromGoogle(String rule, String? tzid, {required bool allDay}) {
@@ -33,7 +34,7 @@ String rruleFromGoogle(String rule, String? tzid, {required bool allDay}) {
   });
 }
 
-/// Local -> Google. For timed events the floating UNTIL is replaced by the UTC
+/// Local -> Google / iCalendar. For timed events the floating UNTIL is replaced by the UTC
 /// instant of the LAST occurrence that is allowed, so a zone offset can never
 /// let one extra occurrence slip in or out. All-day rules use the date form.
 String rruleToGoogle(

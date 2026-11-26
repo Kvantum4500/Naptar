@@ -1,9 +1,8 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'llm_http.dart';
 import 'llm_provider.dart';
 
 /// Google Gemini over the public REST API (`generateContent`, function calling).
@@ -15,11 +14,26 @@ class GeminiProvider implements LLMProvider {
     this._client, {
     required this.apiKey,
     this.baseUrl = 'https://generativelanguage.googleapis.com',
+    this.maxOutputTokens = 4096,
+    this.defaultTemperature = 0.2,
   });
 
   final http.Client _client;
   final String apiKey;
   final String baseUrl;
+
+  /// Upper bound for one reply. The model's hidden "thinking" counts into it,
+  /// so it is not as small as the visible answer alone would need.
+  final int maxOutputTokens;
+
+  /// Used when the request names none; null means it is not sent at all.
+  final double? defaultTemperature;
+
+  static const _cutMessage =
+      'A modell válasza elfogyott a hosszkeretben, mielőtt befejezte volna. Kérj kevesebb napot vagy kevesebb tételt, vagy válassz másik modellt a Beállításokban.';
+
+  @override
+  void close() => _client.close();
 
   Map<String, String> get _headers => {
     'x-goog-api-key': apiKey,
@@ -54,7 +68,11 @@ class GeminiProvider implements LLMProvider {
           'functionCallingConfig': {'mode': 'AUTO'},
         },
       },
-      'generationConfig': {'temperature': r.temperature},
+      'generationConfig': {
+        if ((r.temperature ?? defaultTemperature) != null)
+          'temperature': r.temperature ?? defaultTemperature,
+        'maxOutputTokens': maxOutputTokens,
+      },
     };
     final json = await _post(
       Uri.parse('$baseUrl/v1beta/models/$model:generateContent'),
@@ -116,6 +134,14 @@ class GeminiProvider implements LLMProvider {
     }
     final reason = cand['finishReason'] as String?;
     if (parts.isEmpty) {
+      // the cap was spent (on hidden thinking, mostly) before any answer
+      if (reason == 'MAX_TOKENS') throw const LlmTruncated(_cutMessage);
+      // the model could not write its function call; another go often works
+      if (reason == 'MALFORMED_FUNCTION_CALL') {
+        throw const LlmToolFailed(
+          'A modell nem tudta összeállítani a tervet (hibás eszközhívás). Próbáld újra, vagy válassz másik modellt a Beállításokban.',
+        );
+      }
       throw LlmBadResponse(
         reason == 'SAFETY' || reason == 'PROHIBITED_CONTENT'
             ? 'A választ a modell biztonsági szűrője megállította.'
@@ -123,15 +149,16 @@ class GeminiProvider implements LLMProvider {
       );
     }
     final usage = json['usageMetadata'];
+    int? n(String key) =>
+        usage is Map && usage[key] is num ? (usage[key] as num).toInt() : null;
     return LlmReply(
       parts: parts,
       finishReason: reason,
-      promptTokens: usage is Map
-          ? (usage['promptTokenCount'] as num?)?.toInt()
-          : null,
-      outputTokens: usage is Map
-          ? (usage['candidatesTokenCount'] as num?)?.toInt()
-          : null,
+      promptTokens: n('promptTokenCount'),
+      outputTokens: n('candidatesTokenCount'),
+      // hidden thinking is billed as output but not part of candidatesTokenCount
+      thinkingTokens: n('thoughtsTokenCount'),
+      cachedTokens: n('cachedContentTokenCount'),
     );
   }
 
@@ -173,31 +200,13 @@ class GeminiProvider implements LLMProvider {
   Future<Map<String, dynamic>> _get(Uri url) =>
       _send(() => _client.get(url, headers: _headers));
 
-  Future<Map<String, dynamic>> _send(
-    Future<http.Response> Function() call,
-  ) async {
-    final http.Response res;
-    try {
-      res = await call().timeout(const Duration(seconds: 60));
-    } on SocketException catch (e) {
-      throw LlmNetwork('Nincs kapcsolat: ${e.message}');
-    } on http.ClientException catch (e) {
-      throw LlmNetwork('Nincs kapcsolat: ${e.message}');
-    } on TimeoutException {
-      throw const LlmNetwork('A modell nem válaszolt időben.');
-    }
-    final text = utf8.decode(res.bodyBytes, allowMalformed: true);
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      try {
-        final j = jsonDecode(text);
-        if (j is Map<String, dynamic>) return j;
-      } on FormatException {
-        // falls through
-      }
-      throw const LlmBadResponse('A modell válasza nem értelmezhető.');
-    }
-    throw _errorFor(res.statusCode, text, res.headers);
-  }
+  Future<Map<String, dynamic>> _send(Future<http.Response> Function() call) =>
+      sendJson(
+        call,
+        timeout: const Duration(seconds: 60),
+        errorFor: _errorFor,
+        notJson: 'A modell válasza nem értelmezhető.',
+      );
 
   LlmException _errorFor(int status, String body, Map<String, String> headers) {
     String message = '';
@@ -262,7 +271,7 @@ class GeminiProvider implements LLMProvider {
       return LlmRateLimit(
         text,
         retryAfter: retry,
-        detail: _safeDetail(message),
+        detail: redactSecrets(message, key: apiKey),
         quotaZero: zero,
         daily: daily,
         billing: billing,
@@ -281,10 +290,17 @@ class GeminiProvider implements LLMProvider {
     if (status >= 500) {
       return LlmNetwork(
         'A Gemini szolgáltatás átmenetileg nem elérhető ($status).',
+        status: status,
+      );
+    }
+    // "models/x is not found for API version v1beta ...": the model is gone
+    if (status == 404 || apiStatus == 'NOT_FOUND') {
+      return LlmModelGone(
+        'A Gemini-modell nem található vagy már nem elérhető${message.isEmpty ? '' : ' (${redactSecrets(message, key: apiKey)})'}. Válassz másik modellt a Beállításokban.',
       );
     }
     return LlmBadResponse(
-      'A Gemini hibát jelzett ($status${message.isEmpty ? '' : ': $message'}).',
+      'A Gemini hibát jelzett ($status${message.isEmpty ? '' : ': ${redactSecrets(message, key: apiKey)}'}).',
     );
   }
 }
@@ -320,15 +336,6 @@ String? pickDefaultModel(List<LlmModel> models) {
   return gemini.isEmpty
       ? (models.isEmpty ? null : models.first.id)
       : gemini.first.id;
-}
-
-/// The service message without anything that looks like a key, bounded.
-String _safeDetail(String m) {
-  final clean = m
-      .replaceAll(RegExp(r'AIza[0-9A-Za-z_\-]{10,}'), '[kulcs]')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return clean.length > 400 ? '${clean.substring(0, 400)}…' : clean;
 }
 
 /// Other models worth trying when one has no quota: stable flash first, then

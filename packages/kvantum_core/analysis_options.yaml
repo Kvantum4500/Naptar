@@ -1,30 +1,38 @@
-# This file configures the static analysis results for your project (errors,
-# warnings, and lints).
+# The 'recommended' set of lints from `package:lints` (what pub.dev scores) plus
+# a few rules of our own. The extra rules are of two kinds: ones that catch a
+# real mistake (a forgotten await, a stream that is never cancelled, a check
+# that always gives the same answer) and ones that only keep a convention the
+# code already follows from slipping. A rule is added only when the code is
+# clean under it (or needs a handful of mechanical fixes).
 #
-# This enables the 'recommended' set of lints from `package:lints`.
-# This set helps identify many issues that may lead to problems when running
-# or consuming Dart code, and enforces writing Dart using a single, idiomatic
-# style and format.
-#
-# If you want a smaller set of lints you can change this to specify
-# 'package:lints/core.yaml'. These are just the most critical lints
-# (the recommended set includes the core lints).
-# The core lints are also what is used by pub.dev for scoring packages.
+# For more information about the lint rules, see https://dart.dev/go/core-lints
 
 include: package:lints/recommended.yaml
 
-# Uncomment the following section to specify additional rules.
-
-# linter:
-#   rules:
-#     - camel_case_types
-
-# analyzer:
-#   exclude:
-#     - path/to/excluded/files/**
-
-# For more information about the core and recommended set of lints, see
-# https://dart.dev/go/core-lints
-
-# For additional information about configuring this file, see
-# https://dart.dev/tools/analysis
+linter:
+  rules:
+    # Futures and resources that are easy to forget.
+    - cancel_subscriptions
+    - close_sinks
+    - unawaited_futures
+    # Statements and checks that do nothing (usually a typo).
+    - unnecessary_statements
+    - no_literal_bool_comparisons
+    - noop_primitive_operations
+    - unnecessary_parenthesis
+    - unnecessary_ignore
+    # A release build can shorten class names: never build text from a type.
+    - avoid_type_to_string
+    - no_runtimeType_toString
+    - avoid_unused_constructor_parameters
+    # Conventions the code already follows.
+    - always_declare_return_types
+    - type_annotate_public_apis
+    - prefer_single_quotes
+    - prefer_final_locals
+    - prefer_final_in_for_each
+    - prefer_relative_imports
+    - directives_ordering
+    - use_string_in_part_of_directives
+    - sort_pub_dependencies
+    - unnecessary_library_directive

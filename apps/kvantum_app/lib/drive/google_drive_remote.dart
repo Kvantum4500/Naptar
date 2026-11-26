@@ -1,22 +1,34 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder, Uint8List;
 
 import 'package:googleapis/drive/v3.dart' as d;
 import 'package:http/http.dart' as http;
+import 'package:kvantum_core/kvantum_core.dart' show safeRecordFileNamePattern;
 
+import '../sync/api_errors.dart';
+import '../sync/retry_after_client.dart';
 import 'drive_remote.dart';
 
 const _space = 'appDataFolder';
-final _recordName = RegExp(r'^(task|checkin|handbook)-[A-Za-z0-9._-]+\.json$');
+final _recordName = safeRecordFileNamePattern;
 
 /// [DriveRemote] on top of Drive API v3, limited to the hidden appDataFolder
 /// (scope `drive.appdata`: the app can see nothing else in the user's Drive).
 class GoogleDriveRemote implements DriveRemote {
-  GoogleDriveRemote(this._client);
+  GoogleDriveRemote(this._client, {this.maxReadBytes = driveMaxReadBytes});
 
   final http.Client _client;
+
+  /// The most bytes taken from one file (a parameter for the tests).
+  final int maxReadBytes;
   d.DriveApi get _api => d.DriveApi(_client);
+
+  /// Runs an API call and maps its failures to the sync vocabulary, with the
+  /// server's `Retry-After` when the client in use records it.
+  Future<T> _g<T>(Future<T> Function() call) =>
+      _guard(call, retryAfter: () => retryAfterOf(_client));
 
   // ---------------------------------------------------------------- pull
 
@@ -27,10 +39,11 @@ class GoogleDriveRemote implements DriveRemote {
     final removed = <String>[];
     var token = pageToken;
     String? next;
+    var finTouched = false;
     do {
       final d.ChangeList res;
       try {
-        res = await _guard(
+        res = await _g(
           () => _api.changes.list(
             token,
             spaces: _space,
@@ -48,10 +61,16 @@ class GoogleDriveRemote implements DriveRemote {
           if (c.fileId != null) removed.add(c.fileId!);
           continue;
         }
+        if (f.name != null && f.name!.startsWith('fin-')) finTouched = true;
         if (f.id == null || f.name == null || !_recordName.hasMatch(f.name!)) {
           continue;
         }
-        final content = await read(f.id!);
+        final String? content;
+        try {
+          content = await read(f.id!);
+        } on DriveFileTooBig {
+          continue; // not the app's own file: nothing to take from it
+        }
         if (content != null) {
           files.add(
             DriveRecordFile(id: f.id!, name: f.name!, content: content),
@@ -66,19 +85,21 @@ class GoogleDriveRemote implements DriveRemote {
       files: files,
       removedIds: removed,
       nextToken: next ?? token,
+      // a removed file may be a letter somebody collected: look at the mail
+      finChanged: finTouched || removed.isNotEmpty,
     );
   }
 
   Future<DrivePull> _full() async {
     // The start token is taken BEFORE listing so changes made during the
     // listing are not missed.
-    final start = await _guard(
+    final start = await _g(
       () => _api.changes.getStartPageToken($fields: 'startPageToken'),
     );
     final files = <DriveRecordFile>[];
     String? page;
     do {
-      final res = await _guard(
+      final res = await _g(
         () => _api.files.list(
           spaces: _space,
           q: 'trashed = false',
@@ -91,7 +112,12 @@ class GoogleDriveRemote implements DriveRemote {
         if (f.id == null || f.name == null || !_recordName.hasMatch(f.name!)) {
           continue;
         }
-        final content = await read(f.id!);
+        final String? content;
+        try {
+          content = await read(f.id!);
+        } on DriveFileTooBig {
+          continue; // not the app's own file: nothing to take from it
+        }
         if (content != null) {
           files.add(
             DriveRecordFile(id: f.id!, name: f.name!, content: content),
@@ -112,14 +138,36 @@ class GoogleDriveRemote implements DriveRemote {
 
   @override
   Future<String?> read(String fileId) async {
+    final bytes = await _download(fileId, maxReadBytes);
+    return bytes == null ? null : utf8.decode(bytes);
+  }
+
+  @override
+  Future<Uint8List?> readBytes(String fileId, {required int maxBytes}) =>
+      _download(fileId, maxBytes);
+
+  /// The bytes of a file, null when it is gone. [max] is the most that is
+  /// taken: what the server announces is looked at first, then what really
+  /// arrives (a file that is bigger than what the app writes is not read).
+  Future<Uint8List?> _download(String fileId, int max) async {
     try {
-      final media = await _guard(
+      final media = await _g(
         () => _api.files.get(
           fileId,
           downloadOptions: d.DownloadOptions.fullMedia,
         ),
       ) as d.Media;
-      return await utf8.decoder.bind(media.stream).join();
+      final announced = media.length;
+      if (announced != null && announced > max) {
+        await media.stream.listen((_) {}).cancel();
+        throw DriveFileTooBig(announced);
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in media.stream) {
+        bytes.add(chunk);
+        if (bytes.length > max) throw DriveFileTooBig(bytes.length);
+      }
+      return bytes.takeBytes();
     } on _Gone {
       return null;
     }
@@ -128,7 +176,7 @@ class GoogleDriveRemote implements DriveRemote {
   @override
   Future<List<String>> findByName(String name) async {
     final safe = name.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
-    final res = await _guard(
+    final res = await _g(
       () => _api.files.list(
         spaces: _space,
         q: "name = '$safe' and trashed = false",
@@ -141,21 +189,55 @@ class GoogleDriveRemote implements DriveRemote {
   }
 
   @override
+  Future<List<DriveName>> listNames(String prefix) async {
+    final out = <DriveName>[];
+    String? page;
+    do {
+      final res = await _g(
+        () => _api.files.list(
+          spaces: _space,
+          q: 'trashed = false',
+          pageSize: 200,
+          pageToken: page,
+          $fields: 'nextPageToken,files(id,name,createdTime)',
+        ),
+      );
+      for (final f in res.files ?? const <d.File>[]) {
+        if (f.id != null && f.name != null && f.name!.startsWith(prefix)) {
+          out.add(DriveName(id: f.id!, name: f.name!, created: f.createdTime));
+        }
+      }
+      page = res.nextPageToken;
+    } while (page != null);
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  @override
   Future<String> write({
     String? fileId,
     required String name,
     required String content,
+  }) => writeBytes(
+    fileId: fileId,
+    name: name,
+    bytes: Uint8List.fromList(utf8.encode(content)),
+    contentType: 'application/json',
+  );
+
+  @override
+  Future<String> writeBytes({
+    String? fileId,
+    required String name,
+    required Uint8List bytes,
+    required String contentType,
   }) async {
-    final bytes = utf8.encode(content);
-    d.Media media() => d.Media(
-      Stream.value(bytes),
-      bytes.length,
-      contentType: 'application/json',
-    );
+    d.Media media() =>
+        d.Media(Stream.value(bytes), bytes.length, contentType: contentType);
     if (fileId == null) {
-      final created = await _guard(
+      final created = await _g(
         () => _api.files.create(
-          d.File(name: name, parents: [_space], mimeType: 'application/json'),
+          d.File(name: name, parents: [_space], mimeType: contentType),
           uploadMedia: media(),
           $fields: 'id',
         ),
@@ -163,7 +245,7 @@ class GoogleDriveRemote implements DriveRemote {
       return created.id!;
     }
     try {
-      final updated = await _guard(
+      final updated = await _g(
         () => _api.files.update(
           d.File(),
           fileId,
@@ -174,14 +256,14 @@ class GoogleDriveRemote implements DriveRemote {
       return updated.id!;
     } on _Gone {
       // the file was removed meanwhile: create it again
-      return write(name: name, content: content);
+      return writeBytes(name: name, bytes: bytes, contentType: contentType);
     }
   }
 
   @override
   Future<void> delete(String fileId) async {
     try {
-      await _guard(() => _api.files.delete(fileId));
+      await _g(() => _api.files.delete(fileId));
     } on _Gone {
       // already gone
     }
@@ -192,25 +274,50 @@ class _Gone implements Exception {}
 
 class _BadToken implements Exception {}
 
-/// Maps API/network failures to the engine's error vocabulary.
-Future<T> _guard<T>(Future<T> Function() call) async {
+/// Maps API/network failures to the engine's error vocabulary (see
+/// [classifyApiError]). [retryAfter] supplies the server's `Retry-After`.
+Future<T> _guard<T>(
+  Future<T> Function() call, {
+  Duration? Function()? retryAfter,
+}) async {
   try {
     return await call();
   } on d.DetailedApiRequestError catch (e) {
-    final s = e.status ?? 0;
-    final reason = e.errors.firstOrNull?.reason ?? '';
-    if (s == 404) throw _Gone();
-    if (s == 400 && (e.message ?? '').toLowerCase().contains('page')) {
-      throw _BadToken();
+    final status = e.status ?? 0;
+    final detail = e.errors.firstOrNull;
+    final kind = classifyApiError(
+      status: status,
+      reason: detail?.reason,
+      domain: detail?.domain,
+      message: e.message,
+      location: detail?.location,
+    );
+    final wait = retryAfter?.call();
+    final what = 'http $status ${detail?.reason ?? ''}'.trim();
+    switch (kind) {
+      case ApiFailure.gone:
+        // a gone change token is "start over"; a gone file is just gone
+        if (status == 410) throw _BadToken();
+        throw _Gone();
+      case ApiFailure.tokenInvalid:
+        throw _BadToken();
+      case ApiFailure.conflict:
+        throw DriveTransientError(what, wait);
+      case ApiFailure.auth:
+        throw DriveTransientError('auth', wait);
+      case ApiFailure.throttled:
+        throw DriveTransientError.throttled(what, retryAfter: wait);
+      case ApiFailure.dailyLimit:
+        throw DriveTransientError.throttled(
+          what,
+          retryAfter: wait,
+          dailyLimit: true,
+        );
+      case ApiFailure.server:
+        throw DriveTransientError(what, wait);
+      case ApiFailure.itemRejected:
+        throw ItemRejectedError(status, detail?.reason, e.message);
     }
-    if (s == 410) throw _BadToken();
-    if (s == 401) throw DriveTransientError('auth');
-    if (s == 429 ||
-        s >= 500 ||
-        (s == 403 && reason.toLowerCase().contains('ratelimit'))) {
-      throw DriveTransientError('http $s $reason');
-    }
-    rethrow;
   } on SocketException catch (e) {
     throw DriveTransientError(e.message);
   } on http.ClientException catch (e) {

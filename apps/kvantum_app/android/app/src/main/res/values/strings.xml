@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown by the home screen when the user picks the widget. -->
+    <string name="widget_description">A mai események, feladatok és a következő műszak</string>
+    <!-- What the widget picker shows before the widget is put there; the real
+         text is set from the app's snapshot (TodayWidgetProvider). -->
+    <string name="widget_preview_title">Ma · hétfő, nov. 16.</string>
+    <string name="widget_preview_special">Munkaszüneti nap: Újév</string>
+    <string name="widget_preview_line_0">08:00 Fogorvos</string>
+    <string name="widget_preview_line_1">18:00 Éjszakai műszak</string>
+    <string name="widget_preview_line_2">Feladat: Számla befizetése</string>
+    <string name="widget_preview_shift">Következő műszak: kedd, nov. 17. 18:00 Éjszakai műszak</string>
+</resources>

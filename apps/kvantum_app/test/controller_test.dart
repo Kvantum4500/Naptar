@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,13 +8,16 @@ import 'package:googleapis_auth/googleapis_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:kvantum_app/data/db.dart';
 import 'package:kvantum_app/data/event_repository.dart';
+import 'package:kvantum_app/drive/finance_mailbox.dart';
 import 'package:kvantum_app/google/google_auth_service.dart';
 import 'package:kvantum_app/providers.dart';
+import 'package:kvantum_app/sync/remote.dart' show TransientSyncError;
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_core/kvantum_core.dart';
 
 import 'support/fake_drive.dart';
 import 'support/fake_remote.dart';
+import 'support/turns.dart';
 
 class FakeAuth implements AuthGateway {
   FakeAuth({this.restored = false, this.failSignIn = false});
@@ -74,7 +80,11 @@ void main() {
     late FakeRemote remote;
     late FakeDrive drive;
 
-    ProviderContainer make(FakeAuth auth, {bool configured = true}) {
+    ProviderContainer make(
+      FakeAuth auth, {
+      bool configured = true,
+      DateTime? appNow,
+    }) {
       db = AppDatabase(NativeDatabase.memory());
       remote = FakeRemote();
       drive = FakeDrive();
@@ -85,11 +95,79 @@ void main() {
           authGatewayProvider.overrideWithValue(auth),
           remoteFactoryProvider.overrideWithValue((_) => remote),
           driveFactoryProvider.overrideWithValue((_) => drive),
+          // no real pause between two uploads: the tests wait for turns of the
+          // event loop, and a pause of 200 ms of the clock would decide whether
+          // they pass (it does on a slow machine and fails on a quick one)
+          syncPaceProvider.overrideWithValue(Duration.zero),
+          if (appNow != null) appClockProvider.overrideWithValue(() => appNow),
         ],
       );
       addTearDown(c.dispose);
       return c;
     }
+
+    test('the presence note this device leaves on the Drive says the time of '
+        'the app clock', () async {
+      final now = DateTime.utc(2030, 5, 6, 7, 8, 9);
+      final c = make(FakeAuth(), appNow: now);
+      await c.read(syncControllerProvider.notifier).signIn();
+      final note = drive.files.values.singleWhere(
+        (f) => f.name.startsWith(FinanceMailbox.peerPrefix),
+      );
+      expect(
+        (jsonDecode(note.content) as Map)['seen'],
+        now.millisecondsSinceEpoch,
+      );
+      await db.close();
+    });
+
+    test('the Drive folder of the account is there while signed in, and gone '
+        'after signing out (the backup copies are kept in it)', () async {
+      final c = make(FakeAuth());
+      final ctl = c.read(syncControllerProvider.notifier);
+      expect(ctl.driveRemote(), isNull);
+      await ctl.signIn();
+      expect(ctl.driveRemote(), same(drive));
+      await ctl.signOut();
+      expect(ctl.driveRemote(), isNull);
+      await db.close();
+    });
+
+    test('while the changes go up the state says how far they are; after the '
+        'run it says nothing', () async {
+      final c = make(FakeAuth());
+      for (final id in ['a', 'b', 'c']) {
+        await EventRepoHelper(db).save(ev(id));
+      }
+      final wire = Completer<void>();
+      remote.upsertGateAt[2] = wire; // the second upload is on the wire
+      final run = c.read(syncControllerProvider.notifier).signIn();
+      await turnUntil(() => remote.upsertCalls >= 2, what: 'the second upload');
+      final mid = c.read(syncControllerProvider);
+      expect(mid.syncing, isTrue);
+      expect(mid.upload, (done: 1, total: 3));
+      wire.complete();
+      await run;
+      final end = c.read(syncControllerProvider);
+      expect(end.syncing, isFalse);
+      expect(end.upload, isNull);
+      expect(end.pending, 0);
+      await db.close();
+    });
+
+    test('a run that ends in a failure leaves no progress behind', () async {
+      final c = make(FakeAuth());
+      for (final id in ['a', 'b']) {
+        await EventRepoHelper(db).save(ev(id));
+      }
+      remote.failUpsertAt[2] = TransientSyncError('offline');
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.syncing, isFalse);
+      expect(s.upload, isNull);
+      expect(s.error, isNotNull);
+      await db.close();
+    });
 
     test('not configured: nothing happens, no sign-in possible', () async {
       final c = make(FakeAuth(), configured: false);
@@ -112,7 +190,7 @@ void main() {
         expect(s.lastSync, isNotNull);
         expect(s.pending, 0);
         expect(remote.events.length, 1);
-        c.read(syncControllerProvider.notifier).signOut();
+        await c.read(syncControllerProvider.notifier).signOut();
         await db.close();
       },
     );
@@ -120,9 +198,12 @@ void main() {
     test('restored session signs in silently on start', () async {
       final c = make(FakeAuth(restored: true));
       c.read(syncControllerProvider); // triggers build -> restore
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await turnUntil(
+        () => c.read(syncControllerProvider).signedIn,
+        what: 'the silent sign-in',
+      );
       expect(c.read(syncControllerProvider).signedIn, isTrue);
-      c.read(syncControllerProvider.notifier).signOut();
+      await c.read(syncControllerProvider.notifier).signOut();
       await db.close();
     });
 
@@ -131,7 +212,13 @@ void main() {
       await c.read(syncControllerProvider.notifier).signIn();
       final s = c.read(syncControllerProvider);
       expect(s.signedIn, isFalse);
-      expect(s.error, contains('Belépés sikertelen'));
+      expect(s.error, contains('A bejelentkezés nem sikerült'));
+      expect(
+        s.error,
+        isNot(contains('cancelled')),
+        reason: 'the text of the exception is not shown',
+      );
+      expect(s.error, isNot(contains('Exception')));
       await db.close();
     });
 
@@ -152,7 +239,7 @@ void main() {
         expect(s.error, isNull);
         expect(s.pending, 0);
         expect(remote.events.length, 1);
-        ctl.signOut();
+        await ctl.signOut();
         await db.close();
       },
     );
@@ -168,8 +255,14 @@ void main() {
         final s = c.read(syncControllerProvider);
         expect(s.error, isNull);
         expect(s.pending, 0);
-        expect(drive.files.values.single.name, 'task-t1.json');
-        c.read(syncControllerProvider.notifier).signOut();
+        expect(
+          drive.files.values
+              .where((f) => !f.name.startsWith('fin-'))
+              .single
+              .name,
+          'task-t1.json',
+        );
+        await c.read(syncControllerProvider.notifier).signOut();
         await db.close();
       },
     );
@@ -195,8 +288,11 @@ void main() {
         s = c.read(syncControllerProvider);
         expect(s.error, isNull);
         expect(s.pending, 0);
-        expect(drive.files.length, 1);
-        ctl.signOut();
+        expect(
+          drive.files.values.where((f) => !f.name.startsWith('fin-')).length,
+          1,
+        );
+        await ctl.signOut();
         await db.close();
       },
     );
@@ -211,11 +307,146 @@ void main() {
       final ctl = c.read(syncControllerProvider.notifier);
       await ctl.signIn();
       final s = c.read(syncControllerProvider);
-      expect(drive.files.length, 1);
+      expect(
+        drive.files.values.where((f) => !f.name.startsWith('fin-')).length,
+        1,
+      );
       expect(s.error, contains('Naptár'));
-      ctl.signOut();
+      await ctl.signOut();
       await db.close();
     });
+
+    const expiredMsg =
+        'Failed to obtain access credentials. Error: invalid_grant Token has been expired or revoked. Status code: 400';
+
+    test(
+      'an expired Google login is reported once, signs out and keeps the queue',
+      () async {
+        final auth = FakeAuth();
+        final c = make(auth);
+        await EventRepoHelper(db).save(ev('a'));
+        remote.failWith = Exception(expiredMsg);
+        drive.failWith = Exception(expiredMsg);
+        final ctl = c.read(syncControllerProvider.notifier);
+        await ctl.signIn();
+        final s = c.read(syncControllerProvider);
+        expect(s.signedIn, isFalse);
+        expect(s.syncing, isFalse);
+        expect(auth.signedOut, isTrue);
+        expect(s.error, contains('lejárt'));
+        expect(s.error, isNot(contains('invalid_grant')));
+        // the unsent change is still queued locally
+        expect(await EventRepoHelper(db).pendingCount(), 1);
+
+        // after signing in again everything goes up
+        remote.failWith = null;
+        drive.failWith = null;
+        await ctl.signIn();
+        final after = c.read(syncControllerProvider);
+        expect(after.signedIn, isTrue);
+        expect(after.error, isNull);
+        expect(after.pending, 0);
+        await ctl.signOut();
+        await db.close();
+      },
+    );
+
+    test('the expiry is recognised on Drive alone, too', () async {
+      final auth = FakeAuth();
+      final c = make(auth);
+      drive.failWith = Exception(expiredMsg);
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.signedIn, isFalse);
+      expect(s.error, contains('lejárt'));
+      await db.close();
+    });
+
+    test('a plain network problem does not sign out', () async {
+      final c = make(FakeAuth());
+      remote.offline = true;
+      drive.offline = true;
+      await c.read(syncControllerProvider.notifier).signIn();
+      final s = c.read(syncControllerProvider);
+      expect(s.signedIn, isTrue);
+      expect(s.error, isNotNull);
+      expect(s.error, isNot(contains('lejárt')));
+      await c.read(syncControllerProvider.notifier).signOut();
+      await db.close();
+    });
+
+    test('what counts as an expired login', () {
+      expect(SyncController.isAuthExpired(Exception(expiredMsg)), isTrue);
+      expect(SyncController.isAuthExpired('Error: invalid_grant'), isTrue);
+      expect(
+        SyncController.isAuthExpired('Token has been expired or revoked'),
+        isTrue,
+      );
+      expect(SyncController.isAuthExpired(Exception('offline')), isFalse);
+      expect(SyncController.isAuthExpired(const FormatException('x')), isFalse);
+      // the auth library uses this wording for ANY failed token request,
+      // a Google 5xx / 429 included: that is not an expired login
+      expect(
+        SyncController.isAuthExpired(
+          Exception('Failed to obtain access credentials. Status code: 503'),
+        ),
+        isFalse,
+      );
+      expect(
+        SyncController.isAuthExpired(
+          Exception(
+            'Failed to obtain access credentials. Error: temporarily_unavailable Status code: 429',
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('a Google 5xx at token refresh does not sign the user out', () async {
+      final auth = FakeAuth();
+      final c = make(auth);
+      await EventRepoHelper(db).save(ev('a'));
+      remote.failWith = Exception(
+        'Failed to obtain access credentials. Status code: 503',
+      );
+      final ctl = c.read(syncControllerProvider.notifier);
+      await ctl.signIn();
+      final s = c.read(syncControllerProvider);
+      expect(auth.signedOut, isFalse);
+      expect(s.signedIn, isTrue);
+      expect(s.error, isNotNull);
+      expect(s.error, isNot(contains('lejárt')));
+      // and it recovers by itself once Google answers again
+      remote.failWith = null;
+      await ctl.syncNow();
+      expect(c.read(syncControllerProvider).error, isNull);
+      expect(remote.events.length, 1);
+    });
+
+    test(
+      'calls during a running sync fold into ONE follow-up run, not a queue',
+      () async {
+        final c = make(FakeAuth());
+        final ctl = c.read(syncControllerProvider.notifier);
+        await ctl.signIn();
+        remote.pullCalls = 0;
+        remote.gate = Completer<void>();
+        final first = ctl.syncNow(); // blocks at the gate: a slow connection
+        await Future<void>.delayed(Duration.zero);
+        expect(remote.pullCalls, 1);
+
+        // the minute timer, coming back to the app, saved edits …
+        await Future.wait([ctl.syncNow(), ctl.syncNow(), ctl.syncNow()]);
+        expect(remote.pullCalls, 1, reason: 'nobody started a second sync');
+
+        final gate = remote.gate!;
+        remote.gate = null; // the follow-up run must not wait
+        gate.complete();
+        await first;
+        expect(remote.pullCalls, 2, reason: 'exactly one follow-up run');
+        expect(c.read(syncControllerProvider).syncing, isFalse);
+      },
+    );
 
     test('sign-out clears state and credentials', () async {
       final auth = FakeAuth();
@@ -234,4 +465,6 @@ class EventRepoHelper {
   EventRepoHelper(this.db);
   final AppDatabase db;
   Future<void> save(CalEvent e) => EventRepository(db).saveLocal(e);
+  Future<int> pendingCount() async =>
+      (await EventRepository(db).pending()).length;
 }

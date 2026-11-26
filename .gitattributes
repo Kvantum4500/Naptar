@@ -1,0 +1,4 @@
+# The calendar samples under test/fixtures are byte-exact copies of what other
+# programs write (CRLF line ends, a byte order mark, lines folded at 75 octets).
+# Git must not "fix" them, e.g. on a Windows checkout with autocrlf.
+*.ics -text
