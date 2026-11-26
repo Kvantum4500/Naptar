@@ -176,6 +176,13 @@ void main() {
       expect(find.byKey(const Key('journal-empty')), findsOneWidget);
       expect(find.textContaining('Még nincs bejegyzésed'), findsOneWidget);
       expect(find.byKey(const Key('journal-add')), findsOneWidget);
+      // (and that the pictures go to the other devices, too: this text once
+      // said they stay where they were added)
+      expect(
+        find.textContaining('A szöveg és a képek a többi'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('csak azon maradnak'), findsNothing);
       await shutdown(tester, db);
     });
 

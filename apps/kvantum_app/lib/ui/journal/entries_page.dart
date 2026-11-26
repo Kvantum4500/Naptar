@@ -61,9 +61,9 @@ class _Empty extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Text(
             'Még nincs bejegyzésed. A „Bejegyzés” gombbal leírhatod, mi '
-            'történt veled, és képeket is tölthetsz hozzá. A szöveg a másik '
-            'eszközödön is megjelenik; a képek csak azon maradnak, ahol '
-            'feltöltötted őket.',
+            'történt veled, és képeket is tölthetsz hozzá. A szöveg és a '
+            'képek a többi eszközödön is megjelennek (a képek szinkronja a '
+            'Beállításokban kikapcsolható).',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
         ),
