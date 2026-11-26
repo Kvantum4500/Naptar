@@ -430,8 +430,8 @@ void main() {
       expect(await logged(), contains('photo.upload_rejected'));
     });
 
-    test('one that goes wrong for no reason we know of is tried again, and '
-        'does not stop the others', () async {
+    test('one that goes wrong for no reason we know of is tried again (after '
+        'a minute), and does not stop the others', () async {
       await put(opsA, filesA, 'e1', ['p1'], day: 11);
       await put(opsA, filesA, 'e2', ['p2'], day: 10);
       drive.failWriteOf = (n) =>
@@ -440,11 +440,138 @@ void main() {
       expect((r.uploaded, r.failed), (1, 1));
       expect(r.waiting, 1);
       drive.failWriteOf = null;
+      now = now.add(PhotoSyncEngine.firstMissingWait);
       final again = await photosA.sync();
       expect((again.uploaded, again.failed, again.waiting), (1, 0, 0));
       final text = await logged();
       expect(text, contains('photo.upload_failed'));
       expect(text, isNot(contains('belső részlet')));
+    });
+  });
+
+  group('a picture whose transfer went wrong', () {
+    Duration minutes(int m, {int less = 0}) => Duration(seconds: m * 60 - less);
+
+    test('is put off, a minute first and longer each time, so it is not '
+        'tried in every run', () async {
+      await put(opsA, filesA, 'e1', ['p1']);
+      drive.failWriteOf = (n) => StateError('belső részlet');
+      final start = now;
+      // (a try is Drive being asked for the name, and then the sending)
+      Future<int> triedAt(Duration after) async {
+        now = start.add(after);
+        final before = drive.findCalls;
+        final r = await photosA.sync();
+        final tried = drive.findCalls - before;
+        expect(r.uploaded, 0);
+        expect(r.failed, tried, reason: 'it went wrong whenever it was tried');
+        expect(r.waiting, 1, reason: 'still to be sent');
+        expect(r.more, isFalse, reason: 'nothing to hurry for');
+        return tried;
+      }
+
+      expect(await triedAt(Duration.zero), 1, reason: 'the first try');
+      // (it waits 1, 2, 4 ... 256 minutes: each failure doubles the wait)
+      var t = 0, wait = 1;
+      for (var i = 0; i < 9; i++) {
+        expect(
+          await triedAt(minutes(t + wait, less: 1)),
+          0,
+          reason: 'a second short of $wait minutes',
+        );
+        t += wait;
+        expect(await triedAt(minutes(t)), 1, reason: 'after $wait minutes');
+        wait *= 2;
+      }
+      // (and never longer than six hours)
+      for (var i = 0; i < 3; i++) {
+        expect(await triedAt(minutes(t + 360, less: 1)), 0);
+        t += 360;
+        expect(await triedAt(minutes(t)), 1, reason: 'after six hours');
+      }
+    });
+
+    test('is never put off for more than six hours, however often it '
+        'fails', () async {
+      await put(opsA, filesA, 'e1', ['p1']);
+      drive.failWriteOf = (n) => StateError('belső részlet');
+      for (var i = 0; i < 80; i++) {
+        now = now.add(const Duration(hours: 7));
+        expect((await photosA.sync()).failed, 1, reason: 'try ${i + 1}');
+      }
+      // (the doubling has not run over: it is six hours, and not none or ever)
+      now = now.add(const Duration(hours: 5, minutes: 59));
+      expect((await photosA.sync()).failed, 0, reason: 'put off still');
+      now = now.add(const Duration(minutes: 1));
+      expect((await photosA.sync()).failed, 1, reason: 'after six hours');
+    });
+
+    test('a fetch that went wrong is put off the same way', () async {
+      await put(opsA, filesA, 'e1', ['p1']);
+      await syncRecords();
+      await photosA.sync();
+      filesB.failWrite = const FileSystemException('belső részlet');
+      final start = now;
+      Future<(int, int)> tryAt(Duration after) async {
+        now = start.add(after);
+        final before = drive.blobReads;
+        final r = await photosB.sync();
+        expect(r.downloaded, 0);
+        expect(r.waiting, 1, reason: 'still to be fetched');
+        return (r.failed, drive.blobReads - before);
+      }
+
+      expect(await tryAt(Duration.zero), (1, 1));
+      expect(await tryAt(const Duration(seconds: 59)), (0, 0));
+      expect(await tryAt(const Duration(seconds: 60)), (1, 1));
+      // (the second wait is two minutes)
+      expect(await tryAt(const Duration(seconds: 179)), (0, 0));
+      filesB.failWrite = null;
+      now = start.add(const Duration(seconds: 180));
+      final r = await photosB.sync();
+      expect((r.downloaded, r.failed, r.waiting), (1, 0, 0));
+      expect(filesB.names, contains('p1.jpg'));
+    });
+
+    test('does not make the run ask for another while it is put off', () async {
+      build(perRun: 1);
+      await put(opsA, filesA, 'e1', ['old'], day: 10);
+      drive.failWriteOf = (n) => StateError('belső részlet');
+      expect((await photosA.sync()).failed, 1);
+      drive.failWriteOf = null;
+      // (a newer one comes: it is sent first, and the one put off, which is
+      // next in the line, is no reason for a run more)
+      await put(opsA, filesA, 'e2', ['new'], day: 12);
+      final r = await photosA.sync();
+      expect((r.uploaded, r.more, r.waiting), (1, false, 1));
+      now = now.add(PhotoSyncEngine.firstMissingWait);
+      final later = await photosA.sync();
+      expect((later.uploaded, later.waiting), (1, 0));
+    });
+
+    test('a picture that went through starts the count again', () async {
+      await put(opsA, filesA, 'e1', ['p1']);
+      await syncRecords();
+      final start = now;
+      drive.failWriteOf = (n) => StateError('belső részlet');
+      expect((await photosA.sync()).failed, 1);
+      now = start.add(minutes(1));
+      drive.failWriteOf = null;
+      expect((await photosA.sync()).uploaded, 1);
+      // (Drive loses the file; the tidying of the next day notices, and the
+      // device forgets what it believed)
+      final id = drive.files.entries
+          .firstWhere((e) => e.value.name == 'photo-p1.jpg')
+          .key;
+      drive.externalDelete(id);
+      now = start.add(const Duration(days: 1, minutes: 1));
+      await photosA.sync();
+      expect(await repoA.fileId('photo-p1.jpg'), isNull);
+      // (it goes wrong again: this is the first failure of a new count)
+      drive.failWriteOf = (n) => StateError('belső részlet');
+      expect((await photosA.sync()).failed, 1);
+      now = now.add(minutes(1));
+      expect((await photosA.sync()).failed, 1, reason: 'a minute, not two');
     });
   });
 
@@ -688,6 +815,26 @@ void main() {
       now = now.add(const Duration(days: 30));
       expect((await photosA.sync()).cleaned, 0);
       expect(drive.files.containsKey(id), isTrue);
+    });
+
+    test('keeps a picture that a record names which cannot be shown as an '
+        'entry, and removes it once that record is deleted', () async {
+      final id = await sentAndLater();
+      // (the time of the entry is damaged: it is not shown, but it is not
+      // deleted, and it still names the picture)
+      await repoA.edit(kindJournal, 'e1', {'at': 'nem idő'});
+      await recordsA.sync();
+      expect(journalEntries(await repoA.all(kindJournal)), isEmpty);
+      now = now.add(const Duration(days: 8));
+      drive.setCreated(id, now.subtract(const Duration(days: 8)));
+      final kept = await photosA.sync();
+      expect(kept.cleaned, 0);
+      expect(drive.files.containsKey(id), isTrue);
+      await opsA.delete('e1');
+      await recordsA.sync();
+      now = now.add(const Duration(days: 1));
+      expect((await photosA.sync()).cleaned, 1);
+      expect(drive.files.containsKey(id), isFalse);
     });
 
     test('is done once a day, and asks Drive for the list only then', () async {

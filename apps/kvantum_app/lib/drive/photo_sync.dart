@@ -63,8 +63,8 @@ class PhotoSyncEngine {
   static const tidyDayKey = 'photoTidyDay';
 
   /// The first wait after a picture was not in Drive yet (the other device has
-  /// not sent it, most often it is only a moment behind): it doubles each time,
-  /// up to [longestMissingWait].
+  /// not sent it, most often it is only a moment behind), or after its transfer
+  /// went wrong: it doubles each time, up to [longestMissingWait].
   static const firstMissingWait = Duration(minutes: 1);
   static const longestMissingWait = Duration(hours: 6);
 
@@ -74,9 +74,9 @@ class PhotoSyncEngine {
   /// refused by Drive. (Tried again after a restart.)
   final _given = <String>{};
 
-  /// Pictures that were not in Drive yet: when to look again, and how often it
-  /// was looked.
-  final _missing = <String, ({DateTime until, int tries})>{};
+  /// Pictures to try again later (they were not in Drive yet, or their transfer
+  /// went wrong): when, and how often it was tried.
+  final _later = <String, ({DateTime until, int tries})>{};
 
   /// Serialised: a call during a running sync waits, then runs once more.
   Future<PhotoSyncReport> sync() async {
@@ -102,12 +102,14 @@ class PhotoSyncEngine {
     var more = false, quotaFull = false, diskFull = false;
     final arrived = <String>[];
     try {
+      final journal = await records.all(kindJournal);
       final wanted = <PhotoRef>[
-        for (final e in journalEntries(await records.all(kindJournal)))
+        for (final e in journalEntries(journal))
           for (final p in e.photos)
             if (p.syncable) p,
       ];
       final here = {for (final f in await files.list()) f.name};
+      final at = now();
 
       // ------------------------------------------------------------ up
       final up = <PhotoRef>[];
@@ -118,13 +120,17 @@ class PhotoSyncEngine {
       }
       var sent = 0, handledUp = 0;
       for (final p in up) {
+        if (_early(p.fileName, at)) continue; // (it went wrong a moment ago)
         if (sent >= perRun) {
           more = true;
           break;
         }
         if (_stop() || quotaFull) break;
         try {
-          switch (await _upload(p)) {
+          final went = await _upload(p);
+          // (it went well: a failure later starts anew)
+          _later.remove(p.fileName);
+          switch (went) {
             case _Went.sent:
               uploaded++;
               sent++;
@@ -152,13 +158,13 @@ class PhotoSyncEngine {
           }
         } catch (e, st) {
           failed++;
+          _tryLater(p.fileName);
           log?.error('drive', 'photo.upload_failed', _Failed('upload'), st);
         }
       }
       waiting += up.length - handledUp;
 
       // ---------------------------------------------------------- down
-      final at = now();
       final down = <PhotoRef>[];
       for (final p in wanted) {
         if (here.contains(p.fileName) || _given.contains(p.fileName)) continue;
@@ -166,8 +172,7 @@ class PhotoSyncEngine {
       }
       var fetched = 0, handledDown = 0;
       for (final p in down) {
-        final wait = _missing[p.fileName];
-        if (wait != null && at.isBefore(wait.until)) continue;
+        if (_early(p.fileName, at)) continue;
         if (fetched >= perRun) {
           more = true;
           break;
@@ -193,6 +198,7 @@ class PhotoSyncEngine {
           log?.infoOnce('photo.disk_full', 'drive', 'photo.disk_full');
         } catch (e, st) {
           failed++;
+          _tryLater(p.fileName);
           log?.error('drive', 'photo.download_failed', _Failed('download'), st);
         }
       }
@@ -200,7 +206,7 @@ class PhotoSyncEngine {
       if (downloaded + uploaded > 0) await _markUsed();
 
       // ---------------------------------------------------------- tidy
-      if (!_stop()) cleaned = await _tidy(wanted);
+      if (!_stop()) cleaned = await _tidy(wanted, journal);
     } on DriveTransientError catch (e) {
       return PhotoSyncReport(
         uploaded: uploaded,
@@ -296,7 +302,7 @@ class PhotoSyncEngine {
       if (isDiskFull(e)) throw _DiskFull();
       rethrow;
     }
-    _missing.remove(p.fileName);
+    _later.remove(p.fileName);
     await records.setFileId(name, ids.first);
     await _markUsed();
     return _Got.arrived;
@@ -305,26 +311,45 @@ class PhotoSyncEngine {
   /// The picture is not in Drive (yet): the other device has not sent it. It
   /// is looked for again after a while, longer each time.
   _Got _notThereYet(PhotoRef p) {
-    final tries = (_missing[p.fileName]?.tries ?? 0) + 1;
-    final wait = Duration(
-      seconds: math.min(
-        firstMissingWait.inSeconds * math.pow(2, tries - 1).toInt(),
-        longestMissingWait.inSeconds,
-      ),
-    );
-    _missing[p.fileName] = (until: now().add(wait), tries: tries);
+    _tryLater(p.fileName);
     return _Got.notThere;
+  }
+
+  /// Whether the picture is to be left alone at [at]: it was put off, and the
+  /// time has not come.
+  bool _early(String fileName, DateTime at) {
+    final wait = _later[fileName];
+    return wait != null && at.isBefore(wait.until);
+  }
+
+  /// Puts the picture off: [firstMissingWait], doubled with each try, at most
+  /// [longestMissingWait]. A picture that keeps failing is thus tried less and
+  /// less often, and never in every run.
+  void _tryLater(String fileName) {
+    final tries = (_later[fileName]?.tries ?? 0) + 1;
+    // (the doubling is held down: a picture that never comes must not run it
+    // over)
+    final seconds = firstMissingWait.inSeconds << math.min(tries - 1, 12);
+    final wait = Duration(
+      seconds: math.min(seconds, longestMissingWait.inSeconds),
+    );
+    _later[fileName] = (until: now().add(wait), tries: tries);
   }
 
   // ------------------------------------------------------------- the tidy
 
   /// Once a day: what Drive holds of the pictures is looked through. A picture
   /// this device thinks it sent that is no longer there is forgotten (and sent
-  /// again), and a picture in Drive that no entry refers to, and that was made
+  /// again), and a picture in Drive that no record refers to, and that was made
   /// more than [remoteGrace] ago, is removed. Only a device that took part in
   /// the pictures does it, and only when its records are those of Drive.
   /// Returns how many pictures were removed.
-  Future<int> _tidy(List<PhotoRef> wanted) async {
+  ///
+  /// Removing a file is what cannot be taken back, so it is the careful part: a
+  /// picture is "referred to" by any record of the diary that is not deleted,
+  /// also one this version cannot show as an entry (a damaged one, a newer
+  /// one). Only what no such record names at all can go.
+  Future<int> _tidy(List<PhotoRef> wanted, Iterable<SyncRecord> journal) async {
     if (await records.meta(usedKey) == null) return 0;
     if (await records.meta(driveTokenKey) == null) return 0;
     final at = now();
@@ -337,20 +362,23 @@ class PhotoSyncEngine {
     };
 
     // what this device believes is in Drive, against what is
-    final live = <String>{};
     for (final p in wanted) {
-      final name = p.driveName!;
-      live.add(name);
-      final known = await records.fileId(name);
-      if (known != null && listed[name]?.id != known) {
+      final known = await records.fileId(p.driveName!);
+      if (known != null && listed[p.driveName]?.id != known) {
         await records.forgetFile(known); // (sent again by the next run)
       }
     }
 
     // what nobody refers to any more, and is old
+    final referred = <String>{
+      for (final r in journal)
+        if (!r.deleted)
+          for (final p in decodePhotos(r['photos']))
+            if (p.syncable) p.driveName!,
+    };
     final old = [
       for (final n in listed.values)
-        if (!live.contains(n.name) &&
+        if (!referred.contains(n.name) &&
             n.created != null &&
             at.difference(n.created!) >= remoteGrace)
           n,
