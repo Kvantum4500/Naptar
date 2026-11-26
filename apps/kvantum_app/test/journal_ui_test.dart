@@ -375,6 +375,22 @@ void main() {
         await shutdown(tester, db);
       });
 
+      testWidgets(
+        'of a kind that does not travel says in the viewer, too, that '
+        'it is on another device',
+        (tester) async {
+          await boot(tester, extra: signedIn());
+          await entryWith(tester, const PhotoRef(id: 'old', ext: 'heic'));
+          await tester.tap(find.byKey(const Key('entry-a')));
+          await settle(tester);
+          await tester.tap(find.byKey(const Key('entry-photo-old')));
+          await settle(tester);
+          expect(find.text(photoElsewhereText), findsWidgets);
+          expect(find.text(photoComingText), findsNothing);
+          await shutdown(tester, db);
+        },
+      );
+
       testWidgets('says the same, in words, in the viewer', (tester) async {
         await boot(tester, extra: signedIn());
         await entryWith(tester, photo('coming', here: false));

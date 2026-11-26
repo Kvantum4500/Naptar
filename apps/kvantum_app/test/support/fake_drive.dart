@@ -51,6 +51,10 @@ class FakeDrive implements DriveRemote {
   int blobWrites = 0;
   int blobReads = 0;
 
+  /// Makes a fetch of a file of bytes find nothing (the file went away between
+  /// the question for its name and the fetch).
+  bool goneOnRead = false;
+
   /// The media type each file of bytes was written with, by file name.
   final Map<String, String> contentTypes = {};
 
@@ -184,7 +188,7 @@ class FakeDrive implements DriveRemote {
     if (offline) throw DriveTransientError('offline');
     final broken = failReadOf?.call(f?.name ?? '');
     if (broken != null) throw broken;
-    if (f == null) return null;
+    if (f == null || goneOnRead) return null;
     final bytes = f.bytes ?? Uint8List.fromList(utf8.encode(f.content));
     if (bytes.length > maxBytes) throw DriveFileTooBig(bytes.length);
     return bytes;

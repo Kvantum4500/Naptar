@@ -831,6 +831,28 @@ void main() {
     });
 
     group('listed by name', () {
+      test('are read page after page, to the last', () async {
+        final f = Fake((r) {
+          final page = r.url.queryParameters['pageToken'];
+          return page == null
+              ? _json({
+                  'files': [
+                    {'id': 'a', 'name': 'photo-a.jpg'},
+                  ],
+                  'nextPageToken': 'p2',
+                })
+              : _json({
+                  'files': [
+                    {'id': 'b', 'name': 'photo-b.jpg'},
+                  ],
+                });
+        });
+        final names = await GoogleDriveRemote(f.client).listNames('photo-');
+        expect([for (final n in names) n.name], ['photo-a.jpg', 'photo-b.jpg']);
+        expect(f.reqs, hasLength(2));
+        expect(f.reqs.last.url.queryParameters['pageToken'], 'p2');
+      });
+
       test(
         'tell when each was made, and nothing for what does not say',
         () async {

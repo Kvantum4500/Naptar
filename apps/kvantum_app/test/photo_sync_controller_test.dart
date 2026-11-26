@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
@@ -23,6 +24,7 @@ import 'package:kvantum_app/providers.dart';
 import 'package:kvantum_app/sync/api_errors.dart';
 import 'package:kvantum_app/sync/channel_status.dart';
 import 'package:kvantum_app/sync/error_catalog.dart';
+import 'package:kvantum_app/sync/photo_sync_switch.dart';
 import 'package:kvantum_app/sync/sync_controller.dart';
 import 'package:kvantum_app/sync/sync_pacer.dart';
 import 'package:kvantum_core/kvantum_core.dart';
@@ -52,6 +54,19 @@ class _Timer implements Timer {
   bool get isActive => !cancelled;
   @override
   int get tick => 0;
+}
+
+/// The dice of a pacer that always rolls the lowest: a wait after a failure is
+/// then 80 % of the beat (48 s), never the beat itself, so a test can tell a
+/// beat that was kept from one that was backed off (with a real die it could,
+/// once in sixty, roll exactly the beat).
+class _LowestDie implements Random {
+  @override
+  bool nextBool() => false;
+  @override
+  double nextDouble() => 0;
+  @override
+  int nextInt(int max) => 0;
 }
 
 /// A picture folder that cannot even be listed.
@@ -112,6 +127,7 @@ void main() {
         driveFactoryProvider.overrideWithValue((_) => drive),
         photoFilesProvider.overrideWithValue(files),
         syncPaceProvider.overrideWithValue(Duration.zero),
+        syncPacerProvider.overrideWithValue(SyncPacer(random: _LowestDie())),
         syncClockProvider.overrideWithValue(() => now),
         syncSchedulerProvider.overrideWithValue((d, f) {
           final t = _Timer(d, f);
@@ -256,6 +272,11 @@ void main() {
       files.put('p1.jpg', Uint8List.fromList([1, 2, 3])); // (no JPEG)
       await ctl.signIn();
       expect(st().channels[channelPhotos]!.code, 'skipped');
+      expect(
+        st().channels[channelPhotos]!.failed,
+        1,
+        reason: 'one given up on',
+      );
       expect(st().photoNote, photoSkippedText(1));
       expect(st().error, isNull);
 
@@ -268,6 +289,7 @@ void main() {
       files.put('p2.jpg', jpeg());
       await ctl.syncNow(manual: true);
       expect(st().channels[channelPhotos]!.code, 'partial');
+      expect(st().channels[channelPhotos]!.failed, 1, reason: 'one went wrong');
       expect(st().photoNote, photoPartialText(1));
       expect(st().error, isNull);
       expect(st().photoNote, isNot(contains(_secret)));
@@ -404,6 +426,66 @@ void main() {
       final writes = drive.blobWrites;
       await ctl.syncNow(manual: true);
       expect(drive.blobWrites, writes);
+    });
+
+    test('a run that is on its way stops at the sign-out: no picture goes '
+        'after the one that was being sent', () async {
+      final ctl = make();
+      for (var i = 1; i <= 3; i++) {
+        await haveEntry('e$i', ['p$i'], day: 10 + i);
+      }
+      var first = true;
+      drive.failWriteOf = (n) {
+        if (n.startsWith('photo-') && first) {
+          first = false;
+          unawaited(ctl.signOut()); // (while the first picture is on its way)
+        }
+        return null;
+      };
+      await ctl.signIn();
+      expect(drive.blobWrites, 1);
+    });
+  });
+
+  group('the switch', () {
+    test(
+      'is on from the first moment, then follows what the device kept',
+      () async {
+        make();
+        await records().setMeta(photoSyncKey, 'off');
+        expect(
+          c!.read(photoSyncSwitchProvider),
+          isTrue,
+          reason: 'on from the start',
+        );
+        await pumpEventQueue();
+        expect(c!.read(photoSyncSwitchProvider), isFalse);
+      },
+    );
+  });
+
+  group('the beat of the sync', () {
+    test('a run that brought a picture is no quiet run: the beat stays a '
+        'minute', () async {
+      final other = RecordRepository(otherDb, deviceId: 'other');
+      await JournalOps(other).save(entry('e1', ['p1']));
+      await DriveSyncEngine(other, drive).sync();
+      final ctl = make();
+      await ctl.signIn(); // (the entry comes; its picture is not in Drive yet)
+      for (var i = 0; i < 3; i++) {
+        now = now.add(const Duration(seconds: 61));
+        await ctl.syncNow(); // (not asked by hand: that would restart the beat)
+      }
+      expect(
+        timers.last.delay,
+        const Duration(minutes: 3),
+        reason: 'nothing came, nothing went: the beat slowed down',
+      );
+      drive.externalWriteBytes('photo-p1.jpg', jpeg());
+      now = now.add(const Duration(hours: 7));
+      await ctl.syncNow();
+      expect(files.names, contains('p1.jpg'));
+      expect(timers.last.delay, SyncPacer.base);
     });
   });
 }

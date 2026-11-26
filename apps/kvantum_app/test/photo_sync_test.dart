@@ -19,6 +19,14 @@ import 'package:kvantum_core/kvantum_core.dart';
 import 'support/fake_drive.dart';
 import 'support/harness.dart';
 
+/// A folder that lists a picture and has lost it by the time it is read.
+class _VanishingFiles extends MemoryPhotoFiles {
+  _VanishingFiles({super.clock});
+
+  @override
+  Future<Uint8List?> read(String name) async => null;
+}
+
 /// The pictures of the diary between two devices through Drive (9th round):
 /// what goes up and what comes down, how much of it in one run, what is waited
 /// for, what is given up on, what a full Drive or a full device does, and the
@@ -180,7 +188,24 @@ void main() {
       expect(drive.blobWrites, 0);
       expect(r.waiting, 0);
       expect(await repoA.fileId('photo-p1.jpg'), id);
+      expect(
+        await repoA.meta(PhotoSyncEngine.usedKey),
+        isNotNull,
+        reason: 'it took part: it found its picture sent already',
+      );
     });
+
+    test(
+      'that is gone from here before it is read is nobody\'s trouble',
+      () async {
+        final vanishing = _VanishingFiles(clock: () => now)
+          ..put('p1.jpg', jpeg(20));
+        await opsA.save(entry('e1', [ref('p1')]));
+        final r = await engine(repoA, vanishing).sync();
+        expect((r.uploaded, r.failed, r.waiting, r.skipped), (0, 0, 0, 0));
+        expect(drive.blobWrites, 0);
+      },
+    );
 
     test('of an entry that was deleted does not travel, nor does a file '
         'that no entry has', () async {
@@ -348,6 +373,19 @@ void main() {
       }
     });
 
+    test('that is gone from Drive between the question and the fetch is '
+        'waited for, too', () async {
+      await put(opsA, filesA, 'e1', ['p1']);
+      await syncRecords();
+      await photosA.sync();
+      drive.goneOnRead = true;
+      final r = await photosB.sync();
+      expect((r.downloaded, r.waiting, r.failed), (0, 1, 0));
+      final asked = drive.findCalls;
+      await photosB.sync();
+      expect(drive.findCalls, asked, reason: 'put off, not asked at once');
+    });
+
     test('is fetched once the other device has sent it', () async {
       await put(opsA, filesA, 'e1', ['p1']);
       await syncRecords();
@@ -405,6 +443,11 @@ void main() {
       expect((r.downloaded, r.skipped), (0, 1));
       expect(await filesB.read('p1.jpg'), isNull);
       expect(await logged(), contains('photo.bad_download'));
+      // (given up on: it is not fetched and looked at again in every run)
+      final reads = drive.blobReads;
+      final again = await photosB.sync();
+      expect((again.skipped, again.waiting), (0, 0));
+      expect(drive.blobReads, reads);
     });
 
     test('a file here that is not a JPEG is not sent', () async {
@@ -414,6 +457,25 @@ void main() {
       expect((r.uploaded, r.skipped, r.waiting), (0, 1, 0));
       expect(drive.blobWrites, 0);
       expect(await logged(), contains('photo.not_a_jpeg'));
+      // (given up on: it is not looked at again in this run of the program)
+      final again = await photosA.sync();
+      expect((again.skipped, again.waiting), (0, 0));
+    });
+
+    test('what does not begin as a JPEG is none, byte by byte', () async {
+      final bad = <List<int>>[
+        [0x00, 0xD8, 0xFF, 1, 2], // (the first byte)
+        [0xFF, 0x00, 0xFF, 1, 2], // (the second)
+        [0xFF, 0xD8, 0x00, 1, 2], // (the third)
+        [0xFF, 0xD8], // (too short to tell)
+      ];
+      for (var i = 0; i < bad.length; i++) {
+        filesA.put('b$i.jpg', Uint8List.fromList(bad[i]));
+        await opsA.save(entry('e$i', [ref('b$i')], day: 10 + i));
+      }
+      final r = await photosA.sync();
+      expect((r.uploaded, r.skipped), (0, 4));
+      expect(drive.blobWrites, 0);
     });
 
     test('a picture that Drive refuses is given up on, and the others '
@@ -636,10 +698,12 @@ void main() {
         '/p',
         const OSError('No space left on device', 28),
       );
+      final reads = drive.blobReads;
       final r = await photosB.sync();
       expect(r.diskFull, isTrue);
       expect(r.downloaded, 0);
       expect(r.waiting, 3);
+      expect(drive.blobReads - reads, 1, reason: 'no second try without room');
       expect(filesB.names, isEmpty);
       // room again: all three come
       filesB.failWrite = null;
@@ -709,6 +773,7 @@ void main() {
       expect(r.downloaded, 1);
       expect(r.arrived, ['p3.jpg']);
       expect(filesB.names, ['p3.jpg']);
+      expect(await repoB.meta(PhotoSyncEngine.usedKey), isNotNull);
     });
   });
 
@@ -726,12 +791,48 @@ void main() {
       expect(next.uploaded, 2);
     });
 
+    test('stops between two fetches when it is told to', () async {
+      for (var i = 1; i <= 4; i++) {
+        await put(opsA, filesA, 'e$i', ['p$i'], day: 10 + i);
+      }
+      await syncRecords();
+      await photosA.sync();
+      stopAfter = 2;
+      asked = 0;
+      final r = await photosB.sync();
+      expect(r.downloaded, 2);
+      expect(r.more, isFalse);
+      stopAfter = -1;
+      expect((await photosB.sync()).downloaded, 2);
+    });
+
     test('calls that come together are served one after the other', () async {
       await put(opsA, filesA, 'e1', ['p1']);
       final results = await Future.wait([photosA.sync(), photosA.sync()]);
       expect(results.map((r) => r.uploaded).toList()..sort(), [0, 1]);
       expect(drive.blobWrites, 1);
     });
+
+    test(
+      'a call that comes while a picture is on its way waits for it',
+      () async {
+        await put(opsA, filesA, 'e1', ['p1'], day: 11);
+        await put(opsA, filesA, 'e2', ['p2'], day: 10);
+        late Future<PhotoSyncReport> second;
+        drive.duringWrite = () async {
+          second = photosA.sync();
+          await pumpEventQueue();
+          expect(drive.blobWrites, 0, reason: 'the second call waits');
+        };
+        final first = await photosA.sync();
+        final later = await second;
+        expect((first.uploaded, later.uploaded), (2, 0));
+        expect(
+          drive.files.values.where((f) => f.name == 'photo-p1.jpg'),
+          hasLength(1),
+        );
+      },
+    );
 
     test('puts nothing of a file, a folder or a name into the log', () async {
       build(maxBytes: 50);
@@ -1028,6 +1129,33 @@ void main() {
         hasLength(3),
       );
     });
+
+    test(
+      'is not begun when told to stop, and stops between two removals',
+      () async {
+        await sentAndLater();
+        for (var i = 0; i < 3; i++) {
+          drive.externalWriteBytes(
+            'photo-stray$i.jpg',
+            jpeg(20),
+            created: now.subtract(const Duration(days: 30)),
+          );
+        }
+        now = now.add(const Duration(days: 1));
+        final listed = drive.listCalls;
+        stopAfter = 0;
+        asked = 0;
+        expect((await photosA.sync()).cleaned, 0);
+        expect(drive.listCalls, listed, reason: 'not even looked at');
+        // (told to stop at the third question: the first removal goes, the
+        // second does not)
+        stopAfter = 2;
+        asked = 0;
+        expect((await photosA.sync()).cleaned, 1);
+        stopAfter = -1;
+        expect((await photosA.sync()).cleaned, 2, reason: 'the rest, later');
+      },
+    );
 
     test('only touches what is named like a picture of the diary', () async {
       await sentAndLater();

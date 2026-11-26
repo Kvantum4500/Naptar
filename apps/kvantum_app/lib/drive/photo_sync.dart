@@ -203,7 +203,8 @@ class PhotoSyncEngine {
         }
       }
       waiting += down.length - handledDown;
-      if (downloaded + uploaded > 0) await _markUsed();
+      // (a fetch marks the device itself, the moment the picture is here)
+      if (uploaded > 0) await _markUsed();
 
       // ---------------------------------------------------------- tidy
       if (!_stop()) cleaned = await _tidy(wanted, journal);

@@ -468,6 +468,8 @@ void main() {
         'photo_a.jpg',
         'xphoto-a.jpg',
         'photo-a.jpg\n',
+        'photo-a1xjpg', // (the dot before "jpg" is a dot, not any character)
+        'photo-a_jpg',
       ]) {
         expect(photoDriveNamePattern.hasMatch(bad), isFalse, reason: bad);
       }

@@ -1772,6 +1772,82 @@ void main() {
         await shutdown(tester, db);
       });
 
+      /// Whether a button of a form has no handler (is held).
+      bool held(WidgetTester tester, String key) {
+        final w = tester.widget(find.byKey(Key(key)));
+        final onPressed = switch (w) {
+          final FilledButton b => b.onPressed,
+          final TextButton b => b.onPressed,
+          _ => throw StateError('not a button: $key'),
+        };
+        return onPressed == null;
+      }
+
+      Future<void> backDoesNotClose(WidgetTester tester, String key) async {
+        await tester
+            .state<NavigatorState>(find.byType(Navigator).first)
+            .maybePop();
+        await tester.pump();
+        expect(find.byKey(Key(key)), findsOneWidget, reason: 'back: $key');
+      }
+
+      testWidgets('of a food that is being edited is held as a whole while '
+          'its write goes on, the delete button too', (tester) async {
+        await bootFailing(tester, foods: [food('a')]);
+        final gate = Completer<void>();
+        ops(tester).gate = gate;
+        await tapKey(tester, 'food-a');
+        await tester.tap(find.byKey(const Key('food-save')));
+        await tester.pump();
+        for (final key in ['food-save', 'food-cancel', 'food-delete']) {
+          expect(held(tester, key), isTrue, reason: key);
+        }
+        await backDoesNotClose(tester, 'food-save');
+        gate.complete();
+        await settle(tester);
+        expect(find.byKey(const Key('food-save')), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('of a drink is held as a whole while its write goes on, the '
+          'delete button too', (tester) async {
+        await bootFailing(tester, drinks: [drink('w1')]);
+        final gate = Completer<void>();
+        ops(tester).gate = gate;
+        await tapKey(tester, 'drink-w1');
+        await tester.tap(find.byKey(const Key('fluid-save')));
+        await tester.pump();
+        for (final key in ['fluid-save', 'fluid-cancel', 'fluid-delete']) {
+          expect(held(tester, key), isTrue, reason: key);
+        }
+        await backDoesNotClose(tester, 'fluid-save');
+        gate.complete();
+        await settle(tester);
+        expect(find.byKey(const Key('fluid-save')), findsNothing);
+        await shutdown(tester, db);
+      });
+
+      testWidgets('of the goals is held as a whole while its write goes on', (
+        tester,
+      ) async {
+        await bootFailing(tester);
+        final gate = Completer<void>();
+        settings(tester).gate = gate;
+        await tapKey(tester, 'intake-goals');
+        await enter(tester, 'goal-kcal', '2200');
+        await tester.tap(find.byKey(const Key('goals-save')));
+        await tester.pump();
+        for (final key in ['goals-save', 'goals-cancel']) {
+          expect(held(tester, key), isTrue, reason: key);
+        }
+        await backDoesNotClose(tester, 'goals-save');
+        gate.complete();
+        await settle(tester);
+        expect(find.byKey(const Key('goals-save')), findsNothing);
+        expect(scope(tester).read(intakeGoalsProvider).value!.kcal, 2200);
+        await shutdown(tester, db);
+      });
+
       testWidgets('with a failed write fits at the largest text size, light '
           'and dark', (tester) async {
         for (final mode in [ThemeMode.light, ThemeMode.dark]) {
@@ -1852,8 +1928,13 @@ class _FailingSettings extends SyncedSettings {
 
   Object? error;
 
+  /// When set, saving the goals waits for it first.
+  Completer<void>? gate;
+
   @override
-  Future<void> saveIntakeGoals(IntakeGoals goals) {
+  Future<void> saveIntakeGoals(IntakeGoals goals) async {
+    final g = gate;
+    if (g != null) await g.future;
     final e = error;
     if (e != null) throw e;
     return super.saveIntakeGoals(goals);

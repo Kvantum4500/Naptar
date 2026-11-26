@@ -305,6 +305,15 @@ void main() {
         photoNoteText(uploaded: 0, downloaded: 0, waiting: 7),
         'Képek: még 7 vár.',
       );
+      // (one is said as well as many)
+      expect(
+        photoNoteText(uploaded: 0, downloaded: 1, waiting: 0),
+        'Képek: 1 letöltve.',
+      );
+      expect(
+        photoNoteText(uploaded: 0, downloaded: 0, waiting: 1),
+        'Képek: még 1 vár.',
+      );
       expect(photoNoteText(uploaded: 0, downloaded: 0, waiting: 0), isNull);
     });
 
