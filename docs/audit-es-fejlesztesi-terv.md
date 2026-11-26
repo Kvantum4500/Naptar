@@ -803,7 +803,7 @@ Tesztek: mag 1902 (volt 1663), app 3289 (volt 2845); az elemzők és a formázá
 
 ### A 8. kör ismert korlátainak javítása (a képek szinkronja, HEIC, `.tmp`, étkezés-hiba) – kész, a build után kipróbálandó
 
-Tesztek: mag 1907 (volt 1902), app 3450 (volt 3289); az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0). Szándékos elrontás: **229** (az első menetben 199 elbukott, 29 tesztrést jelzett; mind kapott tesztet, most mind elbukik). Az önátnézés két szűkítést talált a képmotoron (a Drive-ról csak olyan kép törlődhet, amelyre semmilyen élő rekord nem hivatkozik; a hibázó átvitel egyre ritkábban próbálkozik), és egy hibát a telt Drive felismerésében (lásd a döntési naplót).
+Tesztek: mag 1907 (volt 1902), app 3450 (volt 3289); az elemzők és a formázás tiszták (Flutter 3.47.9 és 3.50.0). Szándékos elrontás: **229** (az első menetben 199 elbukott, 29 tesztrést jelzett; mind kapott tesztet, most mind elbukik). Kiadás: **Build 105** (`581174d`; a csomagok ellenőrzése a `CHANGELOG.md`-ben). Az önátnézés két szűkítést talált a képmotoron (a Drive-ról csak olyan kép törlődhet, amelyre semmilyen élő rekord nem hivatkozik; a hibázó átvitel egyre ritkábban próbálkozik), és egy hibát a telt Drive felismerésében (lásd a döntési naplót).
 
 | Tétel | Állapot | Megjegyzés |
 |---|---|---|
